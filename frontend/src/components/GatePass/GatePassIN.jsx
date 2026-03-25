@@ -31,9 +31,8 @@ const createBrandModalState = () => ({
 export default function GatePassIN() {
   const [brandOptions, setBrandOptions] = useState([]);
   const [productCatalog, setProductCatalog] = useState([]);
-  const [purchaseInvoices, setPurchaseInvoices] = useState([]);
-  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
   const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
     truckNo: "",
     supplier: "",
     driverName: "",
@@ -43,15 +42,6 @@ export default function GatePassIN() {
   const [items, setItems] = useState([
     { itemType: "Paddy", brand: "", quantity: "", unit: "kg" },
   ]);
-
-  const toggleInvoiceId = (id) => {
-    const sid = String(id || "");
-    if (!sid) return;
-    setSelectedInvoiceIds((prev) =>
-      prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]
-    );
-    clearFieldError("invoiceId");
-  };
 
   const [errors, setErrors] = useState({});
   const [rows, setRows] = useState([]);
@@ -109,17 +99,12 @@ export default function GatePassIN() {
       const qty = Number(it?.quantity || 0);
       return (name === "paddy" || name === "unprocessed paddy") && qty > 0;
     });
-
-    const invoice = selectedInvoiceIds.length
-      ? purchaseInvoices.find((t) => String(t._id) === String(selectedInvoiceIds[0]))
-      : null;
-    const hasInvoiceProduction = (invoice?.items || []).some((it) => !it?.isManagerial);
-
-    return hasManualProduction || hasInvoiceProduction;
+    return hasManualProduction;
   };
 
   const validateField = (name, value) => {
     let msg = "";
+    if (name === "date") msg = value ? "" : "Date is required.";
     if (name === "truckNo") msg = validateTruckNo(value);
     if (name === "supplier") {
       if (!needsBrand()) msg = "";
@@ -146,6 +131,7 @@ export default function GatePassIN() {
   };
 
   const validateForm = () => {
+    const e0 = form.date ? "" : "Date is required.";
     const e1 = validateTruckNo(form.truckNo);
     const manualPaddy = (items || []).filter((it) => {
       const name = String(it?.itemType || "").trim().toLowerCase();
@@ -169,15 +155,12 @@ export default function GatePassIN() {
     const e5 = form.freightCharges ? "" : "Freight charges are required.";
 
     const newErr = {};
+    if (e0) newErr.date = e0;
     if (e1) newErr.truckNo = e1;
     if (e2) newErr.supplier = e2;
     if (e3) newErr.driverName = e3;
     if (e4) newErr.driverContact = e4;
     if (e5) newErr.freightCharges = e5;
-
-    if (selectedInvoiceIds.length && !purchaseInvoices.find((t) => String(t._id) === String(selectedInvoiceIds[0]))) {
-      newErr.invoiceId = "Select a valid invoice.";
-    }
     setErrors(newErr);
     if (Object.keys(newErr).length > 0) {
       const firstKey = Object.keys(newErr)[0];
@@ -230,20 +213,6 @@ export default function GatePassIN() {
     loadSettings();
   }, []);
 
-  const fetchInvoices = async () => {
-    try {
-      const res = await api.get("/transactions", {
-        params: { type: "PURCHASE", limit: 5000, skip: 0 },
-      });
-      setPurchaseInvoices(res.data?.data || []);
-    } catch {}
-  };
-
-  // Load purchase invoices
-  useEffect(() => {
-    fetchInvoices();
-  }, []);
-
   // Load company name list for paddy ownership
   useEffect(() => {
     const loadBrands = async () => {
@@ -287,10 +256,6 @@ export default function GatePassIN() {
     fetchRows();
     // eslint-disable-next-line
   }, []);
-
-  const filteredInvoices = (purchaseInvoices || []).filter(
-    (inv) => !inv?.gatePassUsed || selectedInvoiceIds.includes(String(inv?._id))
-  );
   const productNameOptions = Array.from(
     new Set((productCatalog || []).map((p) => String(p.name || "").trim()).filter(Boolean))
   ).sort();
@@ -590,12 +555,6 @@ export default function GatePassIN() {
     }
   };
 
-  const handleInvoiceChange = (id) => {
-    // handled by <select multiple>
-    // Important: supplier is used as company name for paddy ownership.
-    // Linking an invoice should NOT overwrite the selected brand.
-  };
-
   const handleItemChange = (idx, field, value) => {
     const updated = [...items];
     if (field === "quantity") {
@@ -621,35 +580,6 @@ export default function GatePassIN() {
       return "pcs";
     };
 
-    const invoice = selectedInvoiceIds.length
-      ? purchaseInvoices.find((t) => String(t._id) === String(selectedInvoiceIds[0]))
-      : null;
-    if (selectedInvoiceIds.length && !invoice) {
-      toast.error("Select a valid purchase invoice.");
-      return;
-    }
-
-    const labelForInvoiceItem = (it) =>
-      it.itemName || it.productTypeName || "SMJ Own";
-    const itemsFromInvoice = invoice
-      ? (invoice.items || []).map((it) => {
-          const qty =
-            it.netWeightKg != null && it.netWeightKg !== ""
-              ? Number(it.netWeightKg || 0)
-              : Number(it.quantity || 0);
-          const unit =
-            it.netWeightKg != null && it.netWeightKg !== ""
-              ? "kg"
-              : it.unit || "pcs";
-          return {
-            itemType: labelForInvoiceItem(it),
-            stockType: it.isManagerial ? "Managerial" : "Production",
-            customItemName: "",
-            quantity: qty,
-            unit: normalizeUnit(unit),
-          };
-        })
-      : [];
     const manualItems = items
       .filter((it) => it.itemType && Number(it.quantity) > 0)
       .map((it) => {
@@ -673,12 +603,10 @@ export default function GatePassIN() {
 
     const payload = {
       ...form,
+      date: form.date,
       supplier: String(form.supplier || "").trim() || firstPaddyBrand || "",
       type: "IN",
-      invoiceIds: selectedInvoiceIds.map((id) => purchaseInvoices.find((t) => String(t._id) === String(id))?._id).filter(Boolean),
-      invoiceId: invoice ? invoice._id : undefined,
-      invoiceNo: invoice ? invoice.invoiceNo : undefined,
-      items: [...itemsFromInvoice, ...manualItems],
+      items: manualItems,
       freightCharges: form.freightCharges
         ? Number(form.freightCharges)
         : undefined,
@@ -694,18 +622,17 @@ export default function GatePassIN() {
 
       // Reset form
       setForm({
+        date: new Date().toISOString().slice(0, 10),
         truckNo: "",
         supplier: "",
         driverName: "",
         driverContact: "",
         freightCharges: "",
       });
-      setSelectedInvoiceIds([]);
       setItems([{ itemType: "Paddy", brand: "", quantity: "", unit: "kg" }]);
       setEditingId(null);
       setErrors({});
       fetchRows();
-      fetchInvoices();
     } catch (err) {
       toast.error(err.message || "Unable to save.");
       document.getElementById("gatepass-in-form")?.scrollIntoView({
@@ -717,16 +644,13 @@ export default function GatePassIN() {
 
   const handleEdit = (row) => {
     setForm({
+      date: row.date ? String(row.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
       truckNo: row.truckNo || "",
       supplier: row.supplier || "",
       driverName: row.driverName || "",
       driverContact: row.driverContact || "",
       freightCharges: row.freightCharges ? String(row.freightCharges) : "",
     });
-    const ids = Array.isArray(row.invoiceIds) && row.invoiceIds.length
-      ? row.invoiceIds
-      : (row.invoiceId ? [row.invoiceId] : []);
-    setSelectedInvoiceIds(ids.map((x) => String(x)));
     const rowItems = (row.items || []).map((it) => ({
       itemType: it.itemType || it.customItemName || "SMJ Own",
       brand: String(it.brand || "").trim() || (String(it.itemType || "").toLowerCase() === "paddy" ? (row.supplier || "") : ""),
@@ -830,90 +754,7 @@ export default function GatePassIN() {
         .join("");
     }
 
-    // Invoice details (optional): show linked invoice numbers and their items on the slip.
-    let invoiceHtml = "";
-    try {
-      const ids = Array.isArray(row.invoiceIds) && row.invoiceIds.length
-        ? row.invoiceIds
-        : (row.invoiceId ? [row.invoiceId] : []);
-      const invoiceDocs = await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const r = await api.get(`/transactions/${id}`);
-            return r.data?.data || null;
-          } catch {
-            return null;
-          }
-        })
-      );
-      const invoices = invoiceDocs.filter(Boolean);
-      if (invoices.length > 0) {
-        const invBlocks = invoices
-          .map((inv) => {
-            const invNo = inv.invoiceNo || "-";
-            const invItems = Array.isArray(inv.items) ? inv.items : [];
-            const rows = invItems
-              .map((it) => {
-                const label = it.itemName || it.productTypeName || "Item";
-                const qty =
-                  it.netWeightKg != null && it.netWeightKg !== ""
-                    ? `${Math.round(Number(it.netWeightKg || 0))} kg`
-                    : `${Math.round(Number(it.quantity || 0))} ${it.unit || ""}`;
-                return `<tr>
-                  <td style="border:1px solid #ddd;padding:6px;">${label}</td>
-                  <td style="border:1px solid #ddd;padding:6px;text-align:right;">${qty}</td>
-                </tr>`;
-              })
-              .join("");
-
-            return `
-              <div style="margin-top:10px;">
-                <div style="font-weight:700;color:#065f46;margin-bottom:6px;">Invoice: ${invNo}</div>
-                <table style="width:100%;border-collapse:collapse;">
-                  <thead>
-                    <tr>
-                      <th style="border:1px solid #ddd;padding:6px;text-align:left;background:#f3f4f6;">Product</th>
-                      <th style="border:1px solid #ddd;padding:6px;text-align:right;background:#f3f4f6;">Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>${rows || `<tr><td colspan="2" style="border:1px solid #ddd;padding:6px;color:#6b7280;">No items</td></tr>`}</tbody>
-                </table>
-              </div>
-            `;
-          })
-          .join("");
-
-        invoiceHtml = `
-          <div style="margin-top:12px;border-top:1px solid #e5e7eb;padding-top:10px;">
-            <div style="font-weight:800;color:#111827;margin-bottom:6px;">Invoice Details</div>
-            ${invBlocks}
-          </div>
-        `;
-      } else {
-        const nos = Array.isArray(row.invoiceNos) && row.invoiceNos.length
-          ? row.invoiceNos
-          : (row.invoiceNo ? [row.invoiceNo] : []);
-        if (nos.length > 0) {
-          invoiceHtml = `
-            <div style="margin-top:12px;border-top:1px solid #e5e7eb;padding-top:10px;">
-              <div style="font-weight:800;color:#111827;margin-bottom:6px;">Invoice No(s)</div>
-              <div style="color:#374151;">${nos.filter(Boolean).join(", ")}</div>
-            </div>
-          `;
-        }
-      }
-    } catch {
-      // ignore invoice errors on print
-    }
-
-    const hasInvoice =
-      (Array.isArray(row.invoiceIds) && row.invoiceIds.length > 0) ||
-      (Array.isArray(row.invoiceNos) && row.invoiceNos.length > 0) ||
-      !!(row.invoiceId || row.invoiceNo);
-    const hasPaddy = (row.items || []).some(
-      (it) => String(it?.itemType || "").toLowerCase() === "paddy"
-    );
-
+    // Inward gate pass is manual (no invoices).
     const itemsTableHtml = `
       <table>
         <thead><tr><th>Item Description</th><th style="text-align:right;">Quantity</th></tr></thead>
@@ -961,12 +802,9 @@ export default function GatePassIN() {
           row.gatePassNo || "-"
         }</span></div>
         <div><span class="label">Date:</span><span class="value">${
-          row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "-"
-        }</span></div>
-        <div><span class="label">Invoice No(s):</span><span class="value">${
-          (Array.isArray(row.invoiceNos) && row.invoiceNos.length
-            ? row.invoiceNos.filter(Boolean).join(", ")
-            : (row.invoiceNo || "-"))
+          row.date
+            ? new Date(row.date).toLocaleDateString()
+            : (row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "-")
         }</span></div>
         <div><span class="label">Truck No:</span><span class="value">${
           row.truckNo || "-"
@@ -979,9 +817,7 @@ export default function GatePassIN() {
         }</span></div>
       </div>
 
-      ${hasInvoice && !hasPaddy ? "" : itemsTableHtml}
-
-      ${invoiceHtml}
+      ${itemsTableHtml}
 
       <div class="footer">
         <div>Authorized Signature: _________________</div>
@@ -997,9 +833,14 @@ export default function GatePassIN() {
 
   const tableColumns = [
     {
-      key: "createdAt",
+      key: "date",
       label: "Date",
-      render: (val) => (val ? new Date(val).toLocaleDateString() : "-"),
+      render: (_val, row) =>
+        row?.date
+          ? new Date(row.date).toLocaleDateString()
+          : row?.createdAt
+            ? new Date(row.createdAt).toLocaleDateString()
+            : "-",
     },
     { key: "gatePassNo", label: "GP No" },
     { key: "supplier", label: "Company Name" },
@@ -1014,7 +855,6 @@ export default function GatePassIN() {
         return list.length ? Array.from(new Set(list)).join(", ") : "-";
       },
     },
-    { key: "invoiceNo", label: "Invoice No" },
     { key: "driverName", label: "Driver" },
     {
       key: "actions",
@@ -1135,34 +975,21 @@ export default function GatePassIN() {
         </h2>
 
         <div className="grid md:grid-cols-3 gap-4">
-          {/* Purchase Invoice */}
-          <div id="field-invoiceId">
+          {/* Date */}
+          <div id="field-date">
             <label className="block text-sm font-medium mb-1">
-              Purchase Invoice (optional)
+              Date <span className="text-red-500">*</span>
             </label>
-            <div className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${errors.invoiceId ? "border-red-500 bg-red-50" : "border-gray-300"}`}>
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {filteredInvoices.map((inv) => {
-                  const id = String(inv._id);
-                  const checked = selectedInvoiceIds.includes(id);
-                  return (
-                    <label key={id} className="flex items-center gap-2 cursor-pointer select-none">
-                      <input type="checkbox" checked={checked} onChange={() => toggleInvoiceId(id)} />
-                      <span className="text-xs text-gray-700">
-                        {inv.invoiceNo}
-                        {inv.gatePassUsed && !checked ? " (USED)" : ""}
-                      </span>
-                    </label>
-                  );
-                })}
-                {filteredInvoices.length === 0 && (
-                  <div className="text-xs text-gray-500">No available invoices.</div>
-                )}
-              </div>
-            </div>
-            {errors.invoiceId && (
-              <p className="text-xs text-red-500 mt-1">{errors.invoiceId}</p>
-            )}
+            <input
+              type="date"
+              name="date"
+              value={form.date}
+              onChange={handleChange}
+              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                errors.date ? "border-red-500" : "border-gray-300"
+              }`}
+            />
+            {errors.date && <p className="text-xs text-red-500 mt-1">{errors.date}</p>}
           </div>
 
           {/* Truck No */}
@@ -1465,43 +1292,6 @@ export default function GatePassIN() {
           </div>
         </div>
 
-        {/* Invoice Items Preview */}
-        <div className="border-t pt-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">
-            Invoice Items (read only)
-          </h3>
-          <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-            {selectedInvoiceIds.length ? (
-  <ul className="list-disc pl-5 space-y-1">
-    {selectedInvoiceIds
-      .map((id) => purchaseInvoices.find((t) => String(t._id) === String(id)))
-      .filter(Boolean)
-      .flatMap((inv) => inv.items || [])
-      .map(
-      (it, i) => {
-        const label = it.itemName || it.productTypeName || "SMJ Own";
-        const qty =
-          it.netWeightKg != null && it.netWeightKg !== ""
-            ? String(Math.round(Number(it.netWeightKg || 0)))
-            : Number(it.quantity || 0).toFixed(0);
-        const unit =
-          it.netWeightKg != null && it.netWeightKg !== ""
-            ? "kg"
-            : it.unit || "pcs";
-        return (
-          <li key={`inv-${i}`}>
-            {label} — {qty} {unit}
-          </li>
-        );
-      }
-    )}
-  </ul>
-) : (
-  <span>Select invoice(s) to see items.</span>
-)}
-          </div>
-        </div>
-
         {/* Submit Buttons */}
         <div className="flex items-center justify-end gap-3">
           <button
@@ -1517,13 +1307,13 @@ export default function GatePassIN() {
               onClick={() => {
                 setEditingId(null);
                 setForm({
+                  date: new Date().toISOString().slice(0, 10),
                   truckNo: "",
                   supplier: "",
                   driverName: "",
                   driverContact: "",
                   freightCharges: "",
                 });
-                setSelectedInvoiceId("");
                 setItems([
                   { itemType: "Paddy", brand: "", quantity: "", unit: "kg" },
                 ]);

@@ -4,7 +4,8 @@ import toast from "react-hot-toast";
 import {
   Package,
   Factory,
-  Truck,
+  Building2,
+  Boxes,
   TrendingUp,
   Scale,
   Landmark,
@@ -14,25 +15,32 @@ import {
   FileText,
   UserRound,
   UsersRound,
-  Tags,
+  Tag,
+  Activity,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api from "../services/api";
-import ProductManager from "../components/MasterData/ProductManager";
 
 const REPORT_TABS = [
-  { key: "stock", label: "Stock Report", icon: <Package size={16} /> },
-  { key: "production", label: "Production Report", icon: <Factory size={16} /> },
-  { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
-  { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
-  { key: "balance", label: "Balance Sheet", icon: <Landmark size={16} /> },
-  { key: "receivables", label: "Outstanding Receivables", icon: <HandCoins size={16} /> },
-  { key: "payables", label: "Outstanding Payables", icon: <HandCoins size={16} /> },
   { key: "daybook", label: "Day Book", icon: <BookOpen size={16} /> },
   { key: "ledger", label: "Ledger", icon: <BookCopy size={16} /> },
-  { key: "customers", label: "Customer Report", icon: <UserRound size={16} /> },
-  { key: "wholesellers", label: "Wholeseller Report", icon: <UsersRound size={16} /> },
-  { key: "brands", label: "Company Name Report", icon: <Tags size={16} /> },
+  { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
+  { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
+  { key: "balance", label: "Balance Sheet", icon: <Landmark size={16} /> },
+  { key: "receivables", label: "Accounts Receivable", icon: <HandCoins size={16} /> },
+  { key: "payables", label: "Accounts Payable", icon: <HandCoins size={16} /> },
+
+  { key: "stock", label: "Current Stock", icon: <Package size={16} /> },
+  { key: "stock-movement", label: "Stock Movement", icon: <Activity size={16} /> },
+  { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
+  { key: "by-product", label: "By-Product Report", icon: <Boxes size={16} /> },
+  { key: "production", label: "Production Detail", icon: <Factory size={16} /> },
+
+  { key: "companies", label: "Company List", icon: <Building2 size={16} /> },
+  { key: "products", label: "Product List", icon: <Tag size={16} /> },
+
+  { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
+  { key: "wholesellers", label: "Wholeseller List", icon: <UsersRound size={16} /> },
 ];
 
 const RANGE_OPTIONS = [
@@ -117,6 +125,16 @@ export default function Reports() {
 
   const [filterTemplates, setFilterTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateDialog, setTemplateDialog] = useState({ open: false, name: "" });
+
+  // Stock / Production filters
+  const [invCompanies, setInvCompanies] = useState([]); // Company (party) list
+  const [invProducts, setInvProducts] = useState([]); // ProductType list
+  const [invCompanyIds, setInvCompanyIds] = useState([]);
+  const [invProductTypeIds, setInvProductTypeIds] = useState([]);
+
+  // Drill-down modal
+  const [drill, setDrill] = useState({ open: false, title: "", loading: false, rows: [], columns: [] });
   // Kept for backward compatibility; customers/wholesellers now load from dedicated tables.
   const [partyBuckets, setPartyBuckets] = useState({ customers: [], wholesalers: [] });
 
@@ -150,6 +168,12 @@ export default function Reports() {
       if (accPartyIds.length) p.partyIds = accPartyIds.join(",");
       if (accProductIds.length) p.productIds = accProductIds.join(",");
     }
+
+    const isInventoryReport = ["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab);
+    if (isInventoryReport) {
+      if (invCompanyIds.length) p.companyIds = invCompanyIds.join(",");
+      if (invProductTypeIds.length) p.productTypeIds = invProductTypeIds.join(",");
+    }
     return { params: p };
   }, [
     range,
@@ -162,13 +186,45 @@ export default function Reports() {
     accAccountIds,
     accPartyIds,
     accProductIds,
+    invCompanyIds,
+    invProductTypeIds,
   ]);
 
   const loadReport = async () => {
     try {
       setLoading(true);
-      if (activeTab === "customers" || activeTab === "brands") {
+      if (activeTab === "customers" || activeTab === "wholesellers") {
         setRows([]);
+        return;
+      }
+      if (activeTab === "companies") {
+        const res = await api.get("/reports/master/companies");
+        setRows(
+          (res.data?.data || []).map((c) => ({
+            id: c._id,
+            name: c.name || "-",
+            phone: c.phone || "-",
+            email: c.email || "-",
+            address: c.address || "-",
+            updatedAt: c.updatedAt || c.createdAt,
+          }))
+        );
+        return;
+      }
+      if (activeTab === "products") {
+        const res = await api.get("/reports/master/products");
+        setRows(
+          (res.data?.data || []).map((p) => ({
+            id: p._id,
+            name: p.name || "-",
+            category: p.productCategory || "-",
+            unit: p.baseUnit || "-",
+            companyName: p.brand || "-",
+            pricePerKg: num(p.pricePerKg),
+            defaultSaleRate: num(p.defaultSaleRate),
+            updatedAt: p.updatedAt || p.createdAt,
+          }))
+        );
         return;
       }
       if (activeTab === "stock") {
@@ -179,8 +235,21 @@ export default function Reports() {
           item: r.productTypeName || "-",
           party: r.companyName || "-",
           balance: `${num(r.balanceKg)} kg`,
+          valuePKR: num(r.valuePKR),
+          companyId: r.companyId || "",
+          productTypeId: r.productTypeId || "",
         }));
         setRows([...production]);
+        return;
+      }
+      if (activeTab === "stock-movement") {
+        const res = await api.get("/reports/stock-movement", params);
+        setRows(
+          (res.data?.data || []).map((r) => ({
+            id: r._id,
+            ...r,
+          }))
+        );
         return;
       }
       if (activeTab === "production") {
@@ -197,6 +266,26 @@ export default function Reports() {
           }))
         );
         setRows(mapped);
+        return;
+      }
+      if (activeTab === "production-summary") {
+        const res = await api.get("/reports/production-summary", params);
+        setRows(
+          (res.data?.data || []).map((r) => ({
+            id: r._id,
+            ...r,
+          }))
+        );
+        return;
+      }
+      if (activeTab === "by-product") {
+        const res = await api.get("/reports/by-product", params);
+        setRows(
+          (res.data?.data || []).map((r, idx) => ({
+            id: `${idx}-${r.productTypeName}`,
+            ...r,
+          }))
+        );
         return;
       }
       if (activeTab === "trial") {
@@ -217,18 +306,21 @@ export default function Reports() {
           section: "Income",
           line: r.account,
           amount: num(r.amount),
+          accountId: r.accountId,
         }));
         const cogs = (p.cogs || []).map((r) => ({
           id: `cogs-${r.accountId}`,
           section: "COGS",
           line: r.account,
           amount: -num(r.amount),
+          accountId: r.accountId,
         }));
         const exp = (p.expenses || []).map((r) => ({
           id: `exp-${r.accountId}`,
           section: "Expenses",
           line: r.account,
           amount: -num(r.amount),
+          accountId: r.accountId,
         }));
         const totals = p.totals || {};
         const summary = [
@@ -249,18 +341,21 @@ export default function Reports() {
           section: "Assets",
           line: r.account,
           amount: num(r.balance),
+          accountId: r.accountId,
         }));
         const liabilities = (b.liabilities || []).map((r) => ({
           id: `l-${r.accountId}`,
           section: "Liabilities",
           line: r.account,
           amount: num(r.balance),
+          accountId: r.accountId,
         }));
         const equity = (b.equity || []).map((r) => ({
           id: `e-${r.accountId}`,
           section: "Equity",
           line: r.account,
           amount: num(r.balance),
+          accountId: r.accountId,
         }));
         const totals = b.totals || {};
         const summary = [
@@ -322,16 +417,20 @@ export default function Reports() {
   useEffect(() => {
     (async () => {
       try {
-        const [compRes, accRes, partyRes, prodRes] = await Promise.all([
+        const [compRes, accRes, partyRes, prodRes, invCompRes, invProdRes] = await Promise.all([
           api.get("/accounting/entities"),
           api.get("/accounting/accounts"),
           api.get("/accounting/parties"),
           api.get("/accounting/products"),
+          api.get("/companies"),
+          api.get("/product-types"),
         ]);
         setAccCompanies(compRes.data?.data || []);
         setAccAccounts(accRes.data?.data || []);
         setAccParties(partyRes.data?.data || []);
         setAccProducts(prodRes.data?.data || []);
+        setInvCompanies(invCompRes.data?.data || []);
+        setInvProducts(invProdRes.data?.data || []);
       } catch {
         // ignore; reports can still load without these filters
       }
@@ -339,31 +438,24 @@ export default function Reports() {
   }, []);
 
   useEffect(() => {
-    const isAccountingReport = [
-      "trial",
-      "pl",
-      "balance",
-      "receivables",
-      "payables",
-      "daybook",
-      "ledger",
-    ].includes(activeTab);
-    if (!isAccountingReport) {
+    const templateSupported = REPORT_TABS.some((t) => t.key === activeTab) && !["customers", "wholesellers"].includes(activeTab);
+    if (!templateSupported) {
       setFilterTemplates([]);
       setSelectedTemplateId("");
       return;
     }
     (async () => {
       try {
-        const res = await api.get("/accounting/templates", {
-          params: { reportKey: activeTab, companyId: accCompanyId || "" },
+        const invCompanyForTemplate = invCompanyIds.length === 1 ? invCompanyIds[0] : "";
+        const res = await api.get("/reports/templates", {
+          params: { reportKey: activeTab, companyId: accCompanyId || invCompanyForTemplate || "" },
         });
         setFilterTemplates(res.data?.data || []);
       } catch {
         setFilterTemplates([]);
       }
     })();
-  }, [activeTab, accCompanyId]);
+  }, [activeTab, accCompanyId, invCompanyIds]);
 
 
 
@@ -409,6 +501,103 @@ export default function Reports() {
     loadPartyBuckets();
   }, [activeTab]);
 
+  function closeDrill() {
+    setDrill({ open: false, title: "", loading: false, rows: [], columns: [] });
+  }
+
+  async function openLedgerDrill({ accountId, title: t }) {
+    if (!accountId) return;
+    try {
+      setDrill({
+        open: true,
+        title: t || "Ledger Details",
+        loading: true,
+        rows: [],
+        columns: [
+          { key: "date", label: "Date", render: (v) => fmtDate(v) },
+          { key: "voucherNo", label: "Voucher No" },
+          { key: "description", label: "Description" },
+          { key: "debit", label: "Debit", render: (v) => fmt(v) },
+          { key: "credit", label: "Credit", render: (v) => fmt(v) },
+          { key: "balance", label: "Running Balance", render: (v) => fmt(v) },
+        ],
+      });
+      const res = await api.get("/accounting/ledger", {
+        params: { ...(params?.params || {}), accountId },
+      });
+      setDrill((p) => ({
+        ...p,
+        loading: false,
+        rows: (res.data?.data || []).map((r, idx) => ({ id: r.journalLineId || `${idx}-${r.voucherNo}`, ...r })),
+      }));
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load ledger details.");
+      closeDrill();
+    }
+  }
+
+  async function openVoucherDrill(journalEntryId) {
+    if (!journalEntryId) return;
+    try {
+      setDrill({
+        open: true,
+        title: "Voucher Details",
+        loading: true,
+        rows: [],
+        columns: [
+          { key: "accountName", label: "Account" },
+          { key: "debit", label: "Debit", render: (v) => fmt(v) },
+          { key: "credit", label: "Credit", render: (v) => fmt(v) },
+          { key: "partyName", label: "Party" },
+          { key: "itemName", label: "Product" },
+          { key: "remarks", label: "Remarks" },
+        ],
+      });
+      const res = await api.get(`/accounting/vouchers/${journalEntryId}`);
+      const v = res.data?.data;
+      const titleLine = v?.voucherNo ? `${v.voucherNo} | ${fmtDate(v.date)} | ${v.companyName || ""}` : "Voucher Details";
+      setDrill((p) => ({
+        ...p,
+        title: titleLine,
+        loading: false,
+        rows: (v?.lines || []).map((l, idx) => ({ id: l._id || `${idx}-${l.accountName}`, ...l })),
+      }));
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load voucher.");
+      closeDrill();
+    }
+  }
+
+  async function openStockMovementDrill({ companyId, productTypeId, title: t }) {
+    try {
+      setDrill({
+        open: true,
+        title: t || "Stock Movement",
+        loading: true,
+        rows: [],
+        columns: [
+          { key: "date", label: "Date", render: (v) => fmtDate(v) },
+          { key: "stockInKg", label: "In (kg)" },
+          { key: "stockOutKg", label: "Out (kg)" },
+          { key: "balanceKg", label: "Balance (kg)" },
+          { key: "reference", label: "Reference" },
+          { key: "remarks", label: "Remarks" },
+        ],
+      });
+      const res = await api.get("/reports/stock-movement", {
+        params: { ...(params?.params || {}), companyId: companyId || "", productTypeId: productTypeId || "" },
+      });
+      setDrill((p) => ({
+        ...p,
+        loading: false,
+        rows: (res.data?.data || []).map((r) => ({ id: r._id, ...r })),
+      }));
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load stock movement.");
+      closeDrill();
+    }
+  }
+
   const columns = useMemo(() => {
     if (activeTab === "customers" || activeTab === "wholesellers") {
       return [
@@ -419,12 +608,67 @@ export default function Reports() {
         { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
       ];
     }
+    if (activeTab === "companies") {
+      return [
+        { key: "name", label: "Company Name" },
+        { key: "phone", label: "Phone" },
+        { key: "email", label: "Email" },
+        { key: "address", label: "Address" },
+        { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
+      ];
+    }
+    if (activeTab === "products") {
+      return [
+        { key: "name", label: "Product" },
+        { key: "category", label: "Category" },
+        { key: "unit", label: "Unit" },
+        { key: "companyName", label: "Company Name" },
+        { key: "pricePerKg", label: "Price/Kg", render: (v) => fmt(v) },
+        { key: "defaultSaleRate", label: "Default Rate", render: (v) => fmt(v) },
+        { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
+      ];
+    }
     if (activeTab === "stock") {
       return [
-        { key: "stockType", label: "Stock Type" },
-        { key: "item", label: "Item / Product" },
-        { key: "party", label: "Company Name / Category" },
+        { key: "item", label: "Product" },
+        { key: "party", label: "Company Name" },
         { key: "balance", label: "Balance" },
+        { key: "valuePKR", label: "Value (PKR)", render: (v) => fmt(v) },
+        {
+          key: "drill",
+          label: "Details",
+          skipExport: true,
+          render: (_v, row) =>
+            row?.companyId && row?.productTypeId ? (
+              <button
+                type="button"
+                onClick={() =>
+                  openStockMovementDrill({
+                    companyId: row.companyId,
+                    productTypeId: row.productTypeId,
+                    title: `${row.party || ""} - ${row.item || ""} (Movement)`,
+                  })
+                }
+                className="text-emerald-700 hover:underline text-xs"
+              >
+                View
+              </button>
+            ) : (
+              "-"
+            ),
+        },
+      ];
+    }
+    if (activeTab === "stock-movement") {
+      return [
+        { key: "date", label: "Date", render: (v) => fmtDate(v) },
+        { key: "companyName", label: "Company Name" },
+        { key: "productTypeName", label: "Product" },
+        { key: "stockInKg", label: "Stock In (kg)" },
+        { key: "stockOutKg", label: "Stock Out (kg)" },
+        { key: "balanceKg", label: "Balance (kg)" },
+        { key: "reference", label: "Reference" },
+        { key: "remarks", label: "Remarks" },
       ];
     }
     if (activeTab === "production") {
@@ -435,6 +679,26 @@ export default function Reports() {
         { key: "product", label: "Product" },
         { key: "outputKg", label: "Output (kg)" },
         { key: "status", label: "Status" },
+      ];
+    }
+    if (activeTab === "production-summary") {
+      return [
+        { key: "date", label: "Date", render: (v) => fmtDate(v) },
+        { key: "batchNo", label: "Batch #" },
+        { key: "companyName", label: "Company Name" },
+        { key: "paddyInputKg", label: "Paddy In (kg)" },
+        { key: "riceOutputKg", label: "Rice (kg)" },
+        { key: "brokenOutputKg", label: "Broken (kg)" },
+        { key: "huskOutputKg", label: "Husk (kg)" },
+        { key: "branOutputKg", label: "Bran (kg)" },
+        { key: "totalOutputKg", label: "Total Out (kg)" },
+        { key: "status", label: "Status" },
+      ];
+    }
+    if (activeTab === "by-product") {
+      return [
+        { key: "productTypeName", label: "Product" },
+        { key: "outputKg", label: "Total Output (kg)" },
       ];
     }
     if (activeTab === "trial") {
@@ -450,6 +714,23 @@ export default function Reports() {
         { key: "section", label: "Section" },
         { key: "line", label: "Particular" },
         { key: "amount", label: "Amount (PKR)", render: (v) => fmt(v) },
+        {
+          key: "drill",
+          label: "Drill",
+          skipExport: true,
+          render: (_v, row) =>
+            row?.accountId ? (
+              <button
+                type="button"
+                onClick={() => openLedgerDrill({ accountId: row.accountId, title: `${row.line} (Ledger)` })}
+                className="text-emerald-700 hover:underline text-xs"
+              >
+                Ledger
+              </button>
+            ) : (
+              "-"
+            ),
+        },
       ];
     }
     if (activeTab === "balance") {
@@ -457,6 +738,23 @@ export default function Reports() {
         { key: "section", label: "Section" },
         { key: "line", label: "Particular" },
         { key: "amount", label: "Amount (PKR)", render: (v) => fmt(v) },
+        {
+          key: "drill",
+          label: "Drill",
+          skipExport: true,
+          render: (_v, row) =>
+            row?.accountId ? (
+              <button
+                type="button"
+                onClick={() => openLedgerDrill({ accountId: row.accountId, title: `${row.line} (Ledger)` })}
+                className="text-emerald-700 hover:underline text-xs"
+              >
+                Ledger
+              </button>
+            ) : (
+              "-"
+            ),
+        },
       ];
     }
     if (activeTab === "receivables" || activeTab === "payables") {
@@ -478,6 +776,23 @@ export default function Reports() {
         { key: "credit", label: "Credit (PKR)", render: (v) => fmt(v) },
         { key: "amount", label: "Amount (PKR)", render: (v) => fmt(v) },
         { key: "status", label: "Status" },
+        {
+          key: "open",
+          label: "Open",
+          skipExport: true,
+          render: (_v, row) =>
+            row?.journalEntryId ? (
+              <button
+                type="button"
+                onClick={() => openVoucherDrill(row.journalEntryId)}
+                className="text-emerald-700 hover:underline text-xs"
+              >
+                View
+              </button>
+            ) : (
+              "-"
+            ),
+        },
       ];
     }
     return [
@@ -487,41 +802,81 @@ export default function Reports() {
       { key: "debit", label: "Debit (PKR)", render: (v) => fmt(v) },
       { key: "credit", label: "Credit (PKR)", render: (v) => fmt(v) },
       { key: "balance", label: "Balance (PKR)", render: (v) => fmt(v) },
+      {
+        key: "open",
+        label: "Open",
+        skipExport: true,
+        render: (_v, row) =>
+          row?.journalEntryId ? (
+            <button
+              type="button"
+              onClick={() => openVoucherDrill(row.journalEntryId)}
+              className="text-emerald-700 hover:underline text-xs"
+            >
+              Voucher
+            </button>
+          ) : (
+            "-"
+          ),
+      },
     ];
-  }, [activeTab]);
+  }, [activeTab, openLedgerDrill, openVoucherDrill, openStockMovementDrill]);
 
   const title = REPORT_TABS.find((t) => t.key === activeTab)?.label || "Report";
+
+  const reportRowClass = (row) => {
+    if (!row) return "";
+    if (activeTab === "ledger" && Number(row.balance || 0) < 0) return "text-red-700";
+    if (activeTab === "stock-movement" && Number(row.balanceKg || 0) < 0) return "text-red-700";
+    if ((activeTab === "receivables" || activeTab === "payables") && Number(row.balance || 0) < 0) return "text-red-700";
+    return "";
+  };
 
   const applyTemplate = (templateId) => {
     const t = filterTemplates.find((x) => String(x._id) === String(templateId));
     if (!t) return;
     const f = t.filters || {};
-    if (f.companyId != null) setAccCompanyId(String(f.companyId || ""));
-    if (Array.isArray(f.voucherTypes)) setAccVoucherTypes(f.voucherTypes);
-    if (Array.isArray(f.accountIds)) setAccAccountIds(f.accountIds);
-    if (Array.isArray(f.partyIds)) setAccPartyIds(f.partyIds);
-    if (Array.isArray(f.productIds)) setAccProductIds(f.productIds);
+    // Generic fields shared by most reports
     if (f.range) setRange(f.range);
     if (f.particularDate) setParticularDate(f.particularDate);
     if (f.startDate) setStartDate(f.startDate);
     if (f.endDate) setEndDate(f.endDate);
+
+    // Accounting filters
+    if (f.accCompanyId != null) setAccCompanyId(String(f.accCompanyId || ""));
+    if (Array.isArray(f.voucherTypes)) setAccVoucherTypes(f.voucherTypes);
+    if (Array.isArray(f.accountIds)) setAccAccountIds(f.accountIds);
+    if (Array.isArray(f.partyIds)) setAccPartyIds(f.partyIds);
+    if (Array.isArray(f.productIds)) setAccProductIds(f.productIds);
+
+    // Inventory filters
+    if (Array.isArray(f.invCompanyIds)) setInvCompanyIds(f.invCompanyIds);
+    else if (f.invCompanyId != null) setInvCompanyIds(f.invCompanyId ? [String(f.invCompanyId)] : []);
+
+    if (Array.isArray(f.invProductTypeIds)) setInvProductTypeIds(f.invProductTypeIds);
+    else if (f.invProductTypeId != null) setInvProductTypeIds(f.invProductTypeId ? [String(f.invProductTypeId)] : []);
   };
 
-  const saveTemplate = async () => {
-    const name = window.prompt("Template name:");
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return;
+  const openSaveTemplate = () => setTemplateDialog({ open: true, name: "" });
+
+  const saveTemplate = async (templateName) => {
+    const trimmed = String(templateName || "").trim();
+    if (!trimmed) return false;
     try {
-      await api.post("/accounting/templates", {
+      const invCompanyForTemplate = invCompanyIds.length === 1 ? invCompanyIds[0] : "";
+      await api.post("/reports/templates", {
         name: trimmed,
         reportKey: activeTab,
-        companyId: accCompanyId || "",
+        companyId: accCompanyId || invCompanyForTemplate || "",
         filters: {
-          companyId: accCompanyId || "",
+          // common
           voucherTypes: accVoucherTypes,
           accountIds: accAccountIds,
           partyIds: accPartyIds,
           productIds: accProductIds,
+          accCompanyId,
+          invCompanyIds,
+          invProductTypeIds,
           range,
           particularDate,
           startDate,
@@ -529,12 +884,15 @@ export default function Reports() {
         },
       });
       toast.success("Template saved.");
-      const res = await api.get("/accounting/templates", {
-        params: { reportKey: activeTab, companyId: accCompanyId || "" },
+      const invCompanyForReload = invCompanyIds.length === 1 ? invCompanyIds[0] : "";
+      const res = await api.get("/reports/templates", {
+        params: { reportKey: activeTab, companyId: accCompanyId || invCompanyForReload || "" },
       });
       setFilterTemplates(res.data?.data || []);
+      return true;
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to save template.");
+      return false;
     }
   };
 
@@ -655,7 +1013,7 @@ export default function Reports() {
                 </select>
                 <button
                   type="button"
-                  onClick={saveTemplate}
+                  onClick={openSaveTemplate}
                   className="px-3 py-2 rounded border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
                 >
                   Save Template
@@ -728,13 +1086,75 @@ export default function Reports() {
             </label>
           </>
         )}
+
+        {["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab) && (
+          <>
+            <label className="text-sm">
+              <span className="block text-gray-600 mb-1">Company</span>
+              <select
+                multiple
+                value={invCompanyIds}
+                onChange={(e) => setInvCompanyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px] h-[42px]"
+              >
+                {(invCompanies || []).map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm">
+              <span className="block text-gray-600 mb-1">Product</span>
+              <select
+                multiple
+                value={invProductTypeIds}
+                onChange={(e) => setInvProductTypeIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px] h-[42px]"
+              >
+                {(invProducts || []).map((p) => (
+                  <option key={p._id} value={p._id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm">
+              <span className="block text-gray-600 mb-1">Templates</span>
+              <div className="flex gap-2">
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedTemplateId(v);
+                    applyTemplate(v);
+                  }}
+                  className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px]"
+                >
+                  <option value="">Select template</option>
+                  {(filterTemplates || []).map((t) => (
+                    <option key={t._id} value={t._id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={openSaveTemplate}
+                  className="px-3 py-2 rounded border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
+                >
+                  Save Template
+                </button>
+              </div>
+            </label>
+          </>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm p-4">
-        {activeTab === "brands" ? (
-          <ProductManager tableOnly editInModal />
-        ) : (
-          loading ? (
+        {loading ? (
           <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
         ) : (
           <DataTable
@@ -744,10 +1164,89 @@ export default function Reports() {
             idKey="id"
             searchPlaceholder={`Search ${title.toLowerCase()}...`}
             emptyMessage={`No ${title.toLowerCase()} found.`}
+            rowClassName={reportRowClass}
           />
-        )
         )}
       </div>
+
+      {templateDialog.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Save Filter Template</div>
+              <button
+                type="button"
+                onClick={() => setTemplateDialog({ open: false, name: "" })}
+                className="p-2 rounded hover:bg-gray-50 text-gray-600"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs text-gray-600">Template name</label>
+              <input
+                autoFocus
+                value={templateDialog.name}
+                onChange={(e) => setTemplateDialog((p) => ({ ...p, name: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="e.g. Monthly Report"
+              />
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTemplateDialog({ open: false, name: "" })}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await saveTemplate(templateDialog.name);
+                    if (ok) setTemplateDialog({ open: false, name: "" });
+                  }}
+                  className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {drill.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl mx-4 p-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-gray-900 truncate">{drill.title}</div>
+              <button
+                type="button"
+                onClick={closeDrill}
+                className="p-2 rounded hover:bg-gray-50 text-gray-600"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-3 flex-1 overflow-auto">
+              {drill.loading ? (
+                <div className="text-sm text-gray-500">Loading...</div>
+              ) : (
+                <DataTable
+                  title={drill.title}
+                  columns={drill.columns}
+                  data={drill.rows}
+                  idKey="id"
+                  searchPlaceholder="Search..."
+                  emptyMessage="No records found."
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

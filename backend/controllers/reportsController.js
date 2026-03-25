@@ -6,10 +6,31 @@ const AccountingFilterTemplate = require("../models/accountingFilterTemplateMode
 const { getDateRangeFromQuery } = require("../utils/dateRange");
 
 const parseRange = (req) => getDateRangeFromQuery(req.query);
+const parseListParam = (value) => {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((v) => String(v).split(","))
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return String(value)
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+};
 
-exports.getStockReport = async (_req, res) => {
+exports.getStockReport = async (req, res) => {
   try {
-    const productionLedgers = await StockLedger.find({}).lean();
+    const { end } = parseRange(req);
+    const companyIds = parseListParam(req.query.companyId || req.query.companyIds);
+    const productTypeIds = parseListParam(req.query.productTypeId || req.query.productTypeIds);
+
+    const filter = { date: { $lte: end } };
+    if (companyIds.length) filter.companyId = { $in: companyIds };
+    if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
+
+    const productionLedgers = await StockLedger.find(filter).lean();
     const productTypes = await ProductType.find({}).lean().select("_id name pricePerKg defaultSaleRate");
     const ptMap = new Map(productTypes.map((p) => [String(p._id), p]));
     const productionMap = new Map();
@@ -61,12 +82,12 @@ exports.getProductionReport = async (req, res) => {
 exports.getStockMovementReport = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
-    const productTypeId = String(req.query.productTypeId || "").trim();
+    const companyIds = parseListParam(req.query.companyId || req.query.companyIds);
+    const productTypeIds = parseListParam(req.query.productTypeId || req.query.productTypeIds);
 
     const filter = { date: { $gte: start, $lte: end } };
-    if (companyId) filter.companyId = companyId;
-    if (productTypeId) filter.productTypeId = productTypeId;
+    if (companyIds.length) filter.companyId = { $in: companyIds };
+    if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
 
     const rows = await StockLedger.find(filter).sort({ date: 1, createdAt: 1 }).lean();
 
@@ -107,10 +128,10 @@ function normName(s) {
 exports.getProductionSummaryReport = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
+    const companyIds = parseListParam(req.query.companyId || req.query.companyIds);
 
     const filter = { date: { $gte: start, $lte: end } };
-    if (companyId) filter.sourceCompanyId = companyId;
+    if (companyIds.length) filter.sourceCompanyId = { $in: companyIds };
 
     const batches = await ProductionBatch.find(filter).sort({ date: -1 }).lean();
 
@@ -146,10 +167,10 @@ exports.getProductionSummaryReport = async (req, res) => {
 exports.getByProductReport = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim(); // source company filter
+    const companyIds = parseListParam(req.query.companyId || req.query.companyIds); // source company filter
 
     const filter = { date: { $gte: start, $lte: end } };
-    if (companyId) filter.sourceCompanyId = companyId;
+    if (companyIds.length) filter.sourceCompanyId = { $in: companyIds };
 
     const batches = await ProductionBatch.find(filter).lean();
     const bucket = new Map(); // key = productTypeName

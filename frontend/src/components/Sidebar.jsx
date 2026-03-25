@@ -43,9 +43,6 @@ const MENU = [
     name: "Stock Management",
     icon: <Box size={18} />,
     path: "/stock",
-    children: [
-      { name: "Production Stock", path: "/stock" },
-    ],
   },
   {
     name: "Accounting & Finance",
@@ -62,17 +59,22 @@ const MENU = [
     icon: <ChartNoAxesCombined size={18} />,
     path: "/reports",
     children: [
-      { name: "Stock Report", path: "/reports?tab=stock" },
-      { name: "Production Report", path: "/reports?tab=production" },
-      { name: "P&L", path: "/reports?tab=pl" },
-      { name: "Trial Balance", path: "/reports?tab=trial" },
-      { name: "Balance Sheet", path: "/reports?tab=balance" },
-      { name: "Receivables", path: "/reports?tab=receivables" },
-      { name: "Payables", path: "/reports?tab=payables" },
+      { name: "Current Stock", path: "/reports?tab=stock" },
+      { name: "Stock Movement", path: "/reports?tab=stock-movement" },
+      { name: "Production Summary", path: "/reports?tab=production-summary" },
+      { name: "By-Product", path: "/reports?tab=by-product" },
+      { name: "Production Detail", path: "/reports?tab=production" },
       { name: "Day Book", path: "/reports?tab=daybook" },
       { name: "Ledger", path: "/reports?tab=ledger" },
-      { name: "Customer Report", path: "/reports?tab=customers" },
-      { name: "Company Name Report", path: "/reports?tab=brands" },
+      { name: "Trial Balance", path: "/reports?tab=trial" },
+      { name: "Profit & Loss", path: "/reports?tab=pl" },
+      { name: "Balance Sheet", path: "/reports?tab=balance" },
+      { name: "Accounts Receivable", path: "/reports?tab=receivables" },
+      { name: "Accounts Payable", path: "/reports?tab=payables" },
+      { name: "Company List", path: "/reports?tab=companies" },
+      { name: "Product List", path: "/reports?tab=products" },
+      { name: "Customer List", path: "/reports?tab=customers" },
+      { name: "Wholeseller List", path: "/reports?tab=wholesellers" },
     ],
   },
   {
@@ -98,7 +100,7 @@ export default function Sidebar({
   useEffect(() => {
     const current = location.pathname + location.search;
     const parent = MENU.find(
-      (m) => m.children && m.children.some((c) => c.path === current),
+      (m) => Array.isArray(m.children) && m.children.length > 1 && m.children.some((c) => c.path === current),
     );
     if (parent) setOpenMenu(parent.name);
   }, [location.pathname, location.search]);
@@ -154,14 +156,15 @@ export default function Sidebar({
             <nav className="px-2 py-4 space-y-1 overflow-y-auto no-scrollbar flex-1 min-h-0 scroll-smooth">
               {MENU.map((m) => {
                 const currentRoute = location.pathname + location.search;
-                const active =
-                  location.pathname === m.path || currentRoute === m.path;
+                const childCount = Array.isArray(m.children) ? m.children.length : 0;
+                const hasDropdown = childCount > 1;
+                const hasSingleChild = childCount === 1;
                 const isExpanded = openMenu === m.name;
-                const hasChildren =
-                  Array.isArray(m.children) && m.children.length > 0;
+                const childActive = Array.isArray(m.children) && m.children.some((c) => c.path === currentRoute);
+                const active = location.pathname === m.path || currentRoute === m.path || childActive;
                 return (
                   <div key={m.name} className="space-y-1">
-                    {hasChildren ? (
+                    {hasDropdown ? (
                       <button
                         type="button"
                         title={!isOpen ? m.name : ""}
@@ -195,6 +198,25 @@ export default function Sidebar({
                           </>
                         )}
                       </button>
+                    ) : hasSingleChild ? (
+                      <Link
+                        to={m.children[0].path}
+                        title={!isOpen ? m.name : ""}
+                        onClick={() => {
+                          if (window.innerWidth < 768 && isOpen) toggleSidebar();
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition
+                          ${
+                            active
+                              ? "bg-emerald-600 text-white"
+                              : "hover:bg-emerald-700 text-emerald-100"
+                          }
+                          ${isOpen ? "" : "justify-center"}
+                        `}
+                      >
+                        {m.icon}
+                        {isOpen && <span className="text-sm">{m.name}</span>}
+                      </Link>
                     ) : (
                       <Link
                         to={m.path}
@@ -217,7 +239,7 @@ export default function Sidebar({
                       </Link>
                     )}
 
-                    {hasChildren && isOpen && (
+                    {hasDropdown && isOpen && (
                       <div
                         className={`ml-8 mt-1 overflow-hidden border-l border-emerald-400/40 pl-2 transition-all duration-300 ease-out ${
                           isExpanded

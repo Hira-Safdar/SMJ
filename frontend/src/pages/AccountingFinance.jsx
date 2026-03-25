@@ -57,6 +57,9 @@ export default function AccountingFinance() {
   const [filterPartyId, setFilterPartyId] = useState("");
   const [vouchers, setVouchers] = useState([]);
 
+  const [createDialog, setCreateDialog] = useState({ open: false, kind: "company", name: "" });
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, id: "", voucherNo: "" });
+
   useEffect(() => {
     const tab = searchParams.get("tab");
     if (tab && TABS.some((t) => t.key === tab)) setActiveTab(tab);
@@ -319,63 +322,49 @@ export default function AccountingFinance() {
     }
   };
 
-  const deleteVoucher = async (id) => {
+  const openCreateDialog = (kind) => setCreateDialog({ open: true, kind, name: "" });
+
+  const submitCreate = async () => {
+    const trimmed = String(createDialog.name || "").trim();
+    if (!trimmed) {
+      toast.error("Name is required.");
+      return;
+    }
     try {
-      if (!window.confirm("Delete this voucher permanently?")) return;
       setLoading(true);
-      await api.delete(`/accounting/vouchers/${id}`);
+      if (createDialog.kind === "company") {
+        await api.post("/accounting/entities", { name: trimmed });
+        toast.success("Company added.");
+      } else if (createDialog.kind === "party") {
+        await api.post("/accounting/parties", { name: trimmed, partyType: "OTHER" });
+        toast.success("Party added.");
+      } else {
+        await api.post("/accounting/products", { name: trimmed });
+        toast.success("Product added.");
+      }
+      setCreateDialog({ open: false, kind: "company", name: "" });
+      await loadDropdowns();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Unable to save.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const askDeleteVoucher = (id, voucherNo) => {
+    setDeleteDialog({ open: true, id, voucherNo: voucherNo || "" });
+  };
+
+  const confirmDeleteVoucher = async () => {
+    if (!deleteDialog.id) return;
+    try {
+      setLoading(true);
+      await api.delete(`/accounting/vouchers/${deleteDialog.id}`);
       toast.success("Voucher deleted.");
+      setDeleteDialog({ open: false, id: "", voucherNo: "" });
       await loadVouchers();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete voucher.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const addCompany = async () => {
-    const name = window.prompt("New company name:");
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return;
-    try {
-      setLoading(true);
-      await api.post("/accounting/entities", { name: trimmed });
-      toast.success("Company added.");
-      await loadDropdowns();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Unable to add company.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const addParty = async () => {
-    const name = window.prompt("New party name:");
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return;
-    try {
-      setLoading(true);
-      await api.post("/accounting/parties", { name: trimmed, partyType: "OTHER" });
-      toast.success("Party added.");
-      await loadDropdowns();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Unable to add party.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const addProduct = async () => {
-    const name = window.prompt("New product name:");
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return;
-    try {
-      setLoading(true);
-      await api.post("/accounting/products", { name: trimmed });
-      toast.success("Product added.");
-      await loadDropdowns();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Unable to add product.");
     } finally {
       setLoading(false);
     }
@@ -487,7 +476,7 @@ export default function AccountingFinance() {
                 <label className="block text-xs text-gray-600 mb-1">Company</label>
                 <button
                   type="button"
-                  onClick={addCompany}
+                  onClick={() => openCreateDialog("company")}
                   className="text-xs text-emerald-700 hover:underline inline-flex items-center gap-1"
                 >
                   <Plus size={12} /> Add
@@ -541,7 +530,7 @@ export default function AccountingFinance() {
                     Product{" "}
                     <button
                       type="button"
-                      onClick={addProduct}
+                      onClick={() => openCreateDialog("product")}
                       className="ml-1 text-[11px] text-emerald-700 hover:underline inline-flex items-center gap-1"
                       title="Add product"
                     >
@@ -552,7 +541,7 @@ export default function AccountingFinance() {
                     Party{" "}
                     <button
                       type="button"
-                      onClick={addParty}
+                      onClick={() => openCreateDialog("party")}
                       className="ml-1 text-[11px] text-emerald-700 hover:underline inline-flex items-center gap-1"
                       title="Add party"
                     >
@@ -890,7 +879,7 @@ export default function AccountingFinance() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteVoucher(v._id)}
+                    onClick={() => askDeleteVoucher(v._id, v.voucherNo)}
                     className="p-2 rounded hover:bg-red-50 text-red-700"
                     title="Delete"
                   >
@@ -899,6 +888,96 @@ export default function AccountingFinance() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {createDialog.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-gray-900">
+                {createDialog.kind === "company"
+                  ? "Add Company"
+                  : createDialog.kind === "party"
+                    ? "Add Party"
+                    : "Add Product"}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateDialog({ open: false, kind: "company", name: "" })}
+                className="p-2 rounded hover:bg-gray-50 text-gray-600"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs text-gray-600">Name</label>
+              <input
+                autoFocus
+                value={createDialog.name}
+                onChange={(e) => setCreateDialog((p) => ({ ...p, name: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="Type name..."
+              />
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCreateDialog({ open: false, kind: "company", name: "" })}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitCreate}
+                  disabled={loading}
+                  className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteDialog.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-gray-900">Delete Voucher</div>
+              <button
+                type="button"
+                onClick={() => setDeleteDialog({ open: false, id: "", voucherNo: "" })}
+                className="p-2 rounded hover:bg-gray-50 text-gray-600"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-3 text-sm text-gray-700">
+              Delete voucher{" "}
+              <span className="font-semibold">{deleteDialog.voucherNo || "this voucher"}</span> permanently?
+            </div>
+            <div className="flex gap-2 justify-end pt-4">
+              <button
+                type="button"
+                onClick={() => setDeleteDialog({ open: false, id: "", voucherNo: "" })}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteVoucher}
+                disabled={loading}
+                className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
-import { Search, ChevronLeft, ChevronRight, Download, Printer, Filter, X, FileText, Trash2 } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Download, Printer, Filter, X, FileText, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -45,6 +45,7 @@ export default function DataTable({
   const [filters, setFilters] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
+  const [sort, setSort] = useState({ key: "", dir: "asc" }); // dir: asc|desc
   const [deleteAllDialog, setDeleteAllDialog] = useState({
     open: false,
     pin: "",
@@ -68,8 +69,32 @@ export default function DataTable({
         result = result.filter((row) => String(row[col.key]) === filters[col.key]);
       }
     });
+
+    if (sort.key) {
+      const dir = sort.dir === "desc" ? -1 : 1;
+      const key = sort.key;
+      result.sort((a, b) => {
+        const va = a?.[key];
+        const vb = b?.[key];
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+
+        const na = typeof va === "number" ? va : Number(String(va).replace(/,/g, ""));
+        const nb = typeof vb === "number" ? vb : Number(String(vb).replace(/,/g, ""));
+        const bothNum = !Number.isNaN(na) && !Number.isNaN(nb);
+        if (bothNum) return (na - nb) * dir;
+
+        const da = va instanceof Date ? va.getTime() : Date.parse(String(va));
+        const db = vb instanceof Date ? vb.getTime() : Date.parse(String(vb));
+        const bothDate = !Number.isNaN(da) && !Number.isNaN(db);
+        if (bothDate) return (da - db) * dir;
+
+        return String(va).localeCompare(String(vb)) * dir;
+      });
+    }
     return result;
-  }, [data, search, columns, filters]);
+  }, [data, search, columns, filters, sort]);
 
   useEffect(() => {
     setActiveRowIndex(filteredData.length ? 0 : -1);
@@ -408,8 +433,31 @@ export default function DataTable({
           <thead className="bg-emerald-50 text-emerald-800">
             <tr>
               {columns.map((col) => (
-                <th key={col.key} className="p-2 text-left font-medium whitespace-nowrap">
-                  {col.label}
+                <th
+                  key={col.key}
+                  className={`p-2 text-left font-medium whitespace-nowrap ${col.sortable === false ? "" : "cursor-pointer select-none"}`}
+                  onClick={() => {
+                    if (col.sortable === false) return;
+                    setSort((prev) => {
+                      if (prev.key !== col.key) return { key: col.key, dir: "asc" };
+                      return { key: col.key, dir: prev.dir === "asc" ? "desc" : "asc" };
+                    });
+                    setPage(1);
+                  }}
+                  title={col.sortable === false ? undefined : "Sort"}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {col.sortable === false ? null : sort.key === col.key ? (
+                      sort.dir === "asc" ? (
+                        <ArrowUp size={14} />
+                      ) : (
+                        <ArrowDown size={14} />
+                      )
+                    ) : (
+                      <ArrowUpDown size={14} className="opacity-40" />
+                    )}
+                  </span>
                 </th>
               ))}
             </tr>

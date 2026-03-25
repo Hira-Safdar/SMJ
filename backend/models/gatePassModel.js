@@ -53,32 +53,13 @@ const GatePassSchema = new mongoose.Schema(
       required: [true, "Gate pass type is required."],
     },
 
+    // User-selected date for the gate pass (separate from createdAt).
+    date: { type: Date, required: true, default: Date.now },
+
     gatePassNo: {
       type: String,
       unique: true,
       sparse: true,
-    },
-
-    invoiceId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Transaction",
-      default: null,
-    },
-    invoiceNo: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
-    // Multi-invoice support (preferred going forward)
-    invoiceIds: {
-      type: [mongoose.Schema.Types.ObjectId],
-      ref: "Transaction",
-      default: [],
-    },
-    invoiceNos: {
-      type: [String],
-      default: [],
     },
 
     truckNo: {

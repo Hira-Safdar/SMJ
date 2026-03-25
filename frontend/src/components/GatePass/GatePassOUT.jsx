@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from "react";
-import { Edit2, Trash2, Printer, X } from "lucide-react";
+import { Edit2, Trash2, Printer, X, Plus } from "lucide-react";
 import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
 
 export default function GatePassOUT() {
-  const [salesInvoices, setSalesInvoices] = useState([]);
-  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
   const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
     truckNo: "",
+    customer: "",
     driverName: "",
     driverContact: "",
     freightCharges: "",
   });
+
+  const [items, setItems] = useState([
+    { itemType: "", customItemName: "", quantity: "", unit: "kg", rate: "", amount: "" },
+  ]);
+  const [productTypes, setProductTypes] = useState([]);
 
   const [errors, setErrors] = useState({});
   const [rows, setRows] = useState([]);
@@ -64,7 +69,9 @@ export default function GatePassOUT() {
 
   const validateField = (name, value) => {
     let msg = "";
+    if (name === "date") msg = value ? "" : "Date is required.";
     if (name === "truckNo") msg = validateTruckNo(value);
+    if (name === "customer") msg = value ? (nameRegex.test(value) ? "" : "Customer name: letters and spaces only.") : "";
     if (name === "driverName") msg = validateDriverName(value);
     if (name === "driverContact") msg = validateDriverContact(value);
     if (name === "freightCharges") msg = value ? "" : "Freight charges are required.";
@@ -73,16 +80,22 @@ export default function GatePassOUT() {
   };
 
   const validateForm = () => {
+    const e0 = form.date ? "" : "Date is required.";
     const e1 = validateTruckNo(form.truckNo);
     const e3 = validateDriverName(form.driverName);
     const e4 = validateDriverContact(form.driverContact);
     const e5 = form.freightCharges ? "" : "Freight charges are required.";
+    const e6 = form.customer ? (nameRegex.test(form.customer) ? "" : "Customer name: letters and spaces only.") : "";
+    const hasItem = (items || []).some((it) => String(it?.itemType || "").trim() !== "" && Number(it?.quantity || 0) > 0);
 
     const newErr = {};
+    if (e0) newErr.date = e0;
     if (e1) newErr.truckNo = e1;
     if (e3) newErr.driverName = e3;
     if (e4) newErr.driverContact = e4;
     if (e5) newErr.freightCharges = e5;
+    if (e6) newErr.customer = e6;
+    if (!hasItem) newErr.items = "Add at least one item with quantity.";
 
     setErrors(newErr);
     if (Object.keys(newErr).length > 0) {
@@ -128,18 +141,13 @@ export default function GatePassOUT() {
     loadSettings();
   }, []);
 
-  const fetchInvoices = async () => {
-    try {
-      const res = await api.get("/transactions", {
-        params: { type: "SALE", limit: 5000, skip: 0 },
-      });
-      setSalesInvoices(res.data?.data || []);
-    } catch {}
-  };
-
-  // Load sales invoices
   useEffect(() => {
-    fetchInvoices();
+    (async () => {
+      try {
+        const res = await api.get("/product-types");
+        setProductTypes(res.data?.data || []);
+      } catch {}
+    })();
   }, []);
 
   // Fetch rows
@@ -167,10 +175,6 @@ export default function GatePassOUT() {
     // eslint-disable-next-line
   }, []);
 
-  const filteredInvoices = (salesInvoices || []).filter(
-    (inv) => !inv?.gatePassUsed || selectedInvoiceIds.includes(String(inv?._id))
-  );
-
   // Handlers
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -188,11 +192,24 @@ export default function GatePassOUT() {
     if (name === "freightCharges") {
       v = value.replace(/[^\d.]/g, "");
     }
+    if (name === "customer") {
+      v = value.replace(/[^A-Za-z\s]/g, "");
+      v = v.replace(/\s+/g, " ");
+    }
     setForm((prev) => ({ ...prev, [name]: v }));
     validateField(name, v);
   };
 
-  // invoice selection handled by <select multiple>
+  const updateItem = (idx, patch) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+    clearFieldError("items");
+  };
+  const addRow = () =>
+    setItems((prev) => [
+      ...prev,
+      { itemType: "", customItemName: "", quantity: "", unit: "kg", rate: "", amount: "" },
+    ]);
+  const removeRow = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -201,37 +218,22 @@ export default function GatePassOUT() {
       return;
     }
 
-    const selectedInvoices = (selectedInvoiceIds || [])
-      .map((id) => salesInvoices.find((t) => String(t._id) === String(id)))
-      .filter(Boolean);
-    if (!selectedInvoices.length) {
-      toast.error("Select at least one invoice.");
-      return;
-    }
-    const companyNames = Array.from(
-      new Set(selectedInvoices.map((i) => String(i.companyName || "").trim()).filter(Boolean))
-    );
-
     const payload = {
       ...form,
       type: "OUT",
-      invoiceIds: selectedInvoices.map((i) => i._id),
-      invoiceId: selectedInvoices[0]?._id,
-      invoiceNo: selectedInvoices[0]?.invoiceNo,
-      invoiceNos: selectedInvoices.map((i) => i.invoiceNo).filter(Boolean),
-      // For multi-invoice, customer may differ; keep header generic and rely on per-invoice details in print.
-      customer: companyNames.length === 1 ? companyNames[0] : "Multiple",
-      items: selectedInvoices
-        .flatMap((inv) => inv?.items || [])
+      date: form.date,
+      customer: form.customer,
+      items: (items || [])
+        .filter((it) => String(it.itemType || "").trim() && Number(it.quantity || 0) > 0)
         .map((it) => ({
-        itemType: String(it.productTypeName || it.itemName || "Item").trim(),
-        stockType: "Production",
-        customItemName: "",
-        quantity: Number(it.netWeightKg ?? it.quantity ?? 0) || 0,
-        unit: "kg",
-        rate: Number(it.rate || 0) || 0,
-        amount: Number(it.amount || 0) || 0,
-      })),
+          itemType: String(it.itemType || "").trim(),
+          stockType: "Production",
+          customItemName: it.itemType === "Other" ? String(it.customItemName || "").trim() : "",
+          quantity: Number(it.quantity || 0) || 0,
+          unit: it.unit || "kg",
+          rate: Number(it.rate || 0) || 0,
+          amount: Number(it.amount || 0) || 0,
+        })),
       freightCharges: form.freightCharges
         ? Number(form.freightCharges)
         : undefined,
@@ -259,16 +261,17 @@ export default function GatePassOUT() {
 
       // Reset form
       setForm({
+        date: new Date().toISOString().slice(0, 10),
         truckNo: "",
+        customer: "",
         driverName: "",
         driverContact: "",
         freightCharges: "",
       });
-      setSelectedInvoiceIds([]);
+      setItems([{ itemType: "", customItemName: "", quantity: "", unit: "kg", rate: "", amount: "" }]);
       setEditingId(null);
       setErrors({});
       fetchRows();
-      fetchInvoices();
     } catch (err) {
       const msg =
         err?.response?.data?.message ||
@@ -288,16 +291,27 @@ export default function GatePassOUT() {
       return;
     }
     setForm({
+      date: row.date ? new Date(row.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       truckNo: row.truckNo || "",
+      customer: row.customer || "",
       driverName: row.driverName || "",
       driverContact: row.driverContact || "",
       freightCharges: row.freightCharges ? String(row.freightCharges) : "",
     });
 
-    const ids = Array.isArray(row.invoiceIds) && row.invoiceIds.length
-      ? row.invoiceIds
-      : (row.invoiceId ? [row.invoiceId] : []);
-    setSelectedInvoiceIds(ids.map((x) => String(x)));
+    const rowItems = Array.isArray(row.items) && row.items.length ? row.items : [];
+    setItems(
+      rowItems.length
+        ? rowItems.map((it) => ({
+            itemType: it.itemType || "",
+            customItemName: it.customItemName || "",
+            quantity: it.quantity != null ? String(it.quantity) : "",
+            unit: it.unit || "kg",
+            rate: it.rate != null ? String(it.rate) : "",
+            amount: it.amount != null ? String(it.amount) : "",
+          }))
+        : [{ itemType: "", customItemName: "", quantity: "", unit: "kg", rate: "", amount: "" }]
+    );
 
     setEditingId(row._id);
     setErrors({});
@@ -358,21 +372,7 @@ export default function GatePassOUT() {
       ? `<img src="${logo}" style="height:50px;margin-right:12px;" alt="logo" />`
       : `<div style="width:50px;height:50px;background:#d1fae5;color:#047857;display:inline-flex;align-items:center;justify-content:center;font-weight:700;margin-right:12px;border-radius:8px;font-size:20px;">GP</div>`;
 
-    const ids = Array.isArray(row.invoiceIds) && row.invoiceIds.length
-      ? row.invoiceIds
-      : (row.invoiceId ? [row.invoiceId] : []);
-    const invoices = (ids || [])
-      .map((id) => salesInvoices.find((t) => String(t._id) === String(id)))
-      .filter(Boolean);
-
-    const invNos = invoices.map((i) => i.invoiceNo).filter(Boolean);
-    const distinctCustomers = Array.from(
-      new Set(invoices.map((i) => String(i.companyName || "").trim()).filter(Boolean)),
-    );
-    const customerName =
-      distinctCustomers.length > 1
-        ? "Multiple"
-        : String(row.customer || distinctCustomers[0] || "").trim();
+    const customerName = String(row.customer || "").trim();
 
     let itemsHtml = "";
     if (row.items && row.items.length > 0) {
@@ -398,44 +398,7 @@ export default function GatePassOUT() {
         .join("");
     }
 
-    const invoiceDetailsHtml = invoices.length
-      ? invoices
-          .map((inv) => {
-            const invItems = Array.isArray(inv.items) ? inv.items : [];
-            const invItemsHtml = invItems
-              .map((it) => {
-                const name = String(it.productTypeName || it.itemName || "Item").trim();
-                const qty = Math.round(Number(it.netWeightKg || it.quantity || 0));
-                return `<tr>
-                  <td style="border:1px solid #ddd;padding:6px;">${name}</td>
-                  <td style="border:1px solid #ddd;padding:6px;text-align:right;">${qty} kg</td>
-                </tr>`;
-              })
-              .join("");
-
-            return `
-              <div style="margin-top:14px;">
-                <div style="font-size:12px;font-weight:700;color:#065f46;margin-bottom:6px;">
-                  Invoice ${inv.invoiceNo || "-"}
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
-                  <div><span class="label">Customer:</span> <span class="value">${String(inv.companyName || "").trim() || "-"}</span></div>
-                  <div><span class="label">Date:</span> <span class="value">${inv.date ? new Date(inv.date).toLocaleDateString() : "-"}</span></div>
-                </div>
-                <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-                  <thead>
-                    <tr>
-                      <th style="background:#f0fdf4;color:#065f46;padding:6px;border:1px solid #ddd;text-align:left;">Item</th>
-                      <th style="background:#f0fdf4;color:#065f46;padding:6px;border:1px solid #ddd;text-align:right;">Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>${invItemsHtml || `<tr><td colspan="2" style="border:1px solid #ddd;padding:6px;color:#6b7280;">No items</td></tr>`}</tbody>
-                </table>
-              </div>
-            `;
-          })
-          .join("")
-      : `<div style="margin-top:14px;font-size:11px;color:#6b7280;">No invoice details available.</div>`;
+    // invoice details removed (invoice no longer used)
 
     const html = `
       <html><head><title>Gate Pass ${row.gatePassNo || ""}</title>
@@ -469,7 +432,7 @@ export default function GatePassOUT() {
           row.gatePassNo || "-"
         }</span></div>
         <div><span class="label">Date:</span><span class="value">${
-          row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "-"
+          row.date ? new Date(row.date).toLocaleDateString() : "-"
         }</span></div>
         <div><span class="label">Truck No:</span><span class="value">${
           row.truckNo || "-"
@@ -501,11 +464,6 @@ export default function GatePassOUT() {
         </tfoot>
       </table>
 
-      <div style="margin-top:10px;">
-        <div style="font-size:12px;font-weight:700;color:#065f46;">Invoice Details</div>
-        ${invoiceDetailsHtml}
-      </div>
-
       <div class="footer">
         <div>Authorized Signature: _________________</div>
         <div style="margin-top:4px;">Printed on ${new Date().toLocaleString()}</div>
@@ -520,12 +478,11 @@ export default function GatePassOUT() {
 
   const tableColumns = [
     {
-      key: "createdAt",
+      key: "date",
       label: "Date",
       render: (val) => (val ? new Date(val).toLocaleDateString() : "-"),
     },
     { key: "gatePassNo", label: "GP No" },
-    { key: "invoiceNo", label: "Invoice No" },
     { key: "truckNo", label: "Truck" },
     {
       key: "items",
