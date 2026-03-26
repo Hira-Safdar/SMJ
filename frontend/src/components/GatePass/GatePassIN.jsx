@@ -40,7 +40,18 @@ export default function GatePassIN() {
     freightCharges: "",
   });
   const [items, setItems] = useState([
-    { itemType: "Paddy", brand: "", quantity: "", unit: "kg" },
+    {
+      brand: "",
+      brandMode: "list",
+      brandInput: "",
+      productName: "",
+      productMode: "list",
+      productInput: "",
+      bagCount: "",
+      bagWeightKg: "65",
+      emptyBagWeightKg: "",
+      netWeightKg: "",
+    },
   ]);
 
   const [errors, setErrors] = useState({});
@@ -93,13 +104,8 @@ export default function GatePassIN() {
   };
 
   const needsBrand = () => {
-    // Company name is required only when receiving Production/Paddy stock.
-    const hasManualProduction = (items || []).some((it) => {
-      const name = String(it?.itemType || "").trim().toLowerCase();
-      const qty = Number(it?.quantity || 0);
-      return (name === "paddy" || name === "unprocessed paddy") && qty > 0;
-    });
-    return hasManualProduction;
+    const hasItems = (items || []).some((it) => Number(it?.netWeightKg || 0) > 0);
+    return hasItems;
   };
 
   const validateField = (name, value) => {
@@ -107,25 +113,11 @@ export default function GatePassIN() {
     if (name === "date") msg = value ? "" : "Date is required.";
     if (name === "truckNo") msg = validateTruckNo(value);
     if (name === "supplier") {
-      if (!needsBrand()) msg = "";
-      else {
-        const manualPaddy = (items || []).filter((it) => {
-          const name = String(it?.itemType || "").trim().toLowerCase();
-          const qty = Number(it?.quantity || 0);
-          return (name === "paddy" || name === "unprocessed paddy") && qty > 0;
-        });
-        const perRowOk =
-          manualPaddy.length > 0 &&
-          manualPaddy.every((it) => String(it?.brand || "").trim() !== "");
-        msg = value || perRowOk ? "" : "Company Name is required.";
-      }
+      msg = value ? (nameRegex.test(value) ? "" : "Company Name: letters and spaces only.") : "";
     }
-    if (name === "driverName")
-      msg = value ? validateDriverName(value) : "Driver name is required.";
-    if (name === "driverContact")
-      msg = value ? validateDriverContact(value) : "Driver contact is required.";
-    if (name === "freightCharges")
-      msg = value ? "" : "Freight charges are required.";
+    if (name === "driverName") msg = value ? validateDriverName(value) : "";
+    if (name === "driverContact") msg = value ? validateDriverContact(value) : "";
+    if (name === "freightCharges") msg = value ? "" : "";
     if (msg) setFieldError(name, msg);
     else clearFieldError(name);
   };
@@ -133,26 +125,22 @@ export default function GatePassIN() {
   const validateForm = () => {
     const e0 = form.date ? "" : "Date is required.";
     const e1 = validateTruckNo(form.truckNo);
-    const manualPaddy = (items || []).filter((it) => {
-      const name = String(it?.itemType || "").trim().toLowerCase();
-      const qty = Number(it?.quantity || 0);
-      return (name === "paddy" || name === "unprocessed paddy") && qty > 0;
+    const hasItem = (items || []).some((it) => {
+      const name = String(
+        it?.productMode === "input"
+          ? it?.productInput || ""
+          : it?.productName || it?.customName || ""
+      ).trim();
+      return String(it?.brand || "").trim() && name && Number(it?.netWeightKg || 0) > 0;
     });
-    const perRowOk =
-      manualPaddy.length > 0 &&
-      manualPaddy.every((it) => String(it?.brand || "").trim() !== "");
     const e2 = needsBrand()
-      ? form.supplier || perRowOk
+      ? form.supplier || hasItem
         ? ""
         : "Company Name is required."
       : "";
-    const e3 = form.driverName
-      ? validateDriverName(form.driverName)
-      : "Driver name is required.";
-    const e4 = form.driverContact
-      ? validateDriverContact(form.driverContact)
-      : "Driver contact is required.";
-    const e5 = form.freightCharges ? "" : "Freight charges are required.";
+    const e3 = form.driverName ? validateDriverName(form.driverName) : "";
+    const e4 = form.driverContact ? validateDriverContact(form.driverContact) : "";
+    const e5 = form.freightCharges ? "" : "";
 
     const newErr = {};
     if (e0) newErr.date = e0;
@@ -161,6 +149,7 @@ export default function GatePassIN() {
     if (e3) newErr.driverName = e3;
     if (e4) newErr.driverContact = e4;
     if (e5) newErr.freightCharges = e5;
+    if (!hasItem) newErr.items = "Add at least one item with net weight.";
     setErrors(newErr);
     if (Object.keys(newErr).length > 0) {
       const firstKey = Object.keys(newErr)[0];
@@ -259,6 +248,53 @@ export default function GatePassIN() {
   const productNameOptions = Array.from(
     new Set((productCatalog || []).map((p) => String(p.name || "").trim()).filter(Boolean))
   ).sort();
+
+  const getProductOptionsForBrand = () => {
+    const list = (productCatalog || [])
+      .map((p) => String(p.name || "").trim())
+      .filter(Boolean);
+    return Array.from(new Set(list)).sort();
+  };
+
+  const ensureBrandOption = async (name) => {
+    const clean = toTitleCase(String(name || "").trim());
+    if (!clean) return "";
+    const exists = (brandOptions || []).some((b) => normalizeText(b) === normalizeText(clean));
+    if (exists) return clean;
+    const nextOptions = Array.from(new Set([...(brandOptions || []), clean])).sort();
+    setBrandOptions(nextOptions);
+    try {
+      await api.put("/settings", { brandOptions: nextOptions });
+    } catch {}
+    return clean;
+  };
+
+  const ensureProductOption = async (brand, name) => {
+    const cleanBrand = toTitleCase(String(brand || "").trim());
+    const cleanName = toTitleCase(String(name || "").trim());
+    if (!cleanBrand || !cleanName) return { brand: cleanBrand, name: cleanName };
+    const exists = (productCatalog || []).some(
+      (p) => normalizeText(p.brand) === normalizeText(cleanBrand) && normalizeText(p.name) === normalizeText(cleanName)
+    );
+    if (exists) return { brand: cleanBrand, name: cleanName };
+    const bagKg = Number(settings?.defaultBagWeightKg || 65);
+    const payload = {
+      name: cleanName,
+      brand: cleanBrand,
+      baseUnit: "KG",
+      allowableSaleUnits: ["Bag", "Ton", "KG"],
+      conversionFactors: { KG: 1, Bag: bagKg, Ton: 1000 },
+      pricePerKg: 0,
+      pricePerBag: 0,
+      pricePerTon: 0,
+    };
+    try {
+      await api.post("/product-types", payload);
+      const pRes = await api.get("/product-types");
+      setProductCatalog(pRes.data?.data || []);
+    } catch {}
+    return { brand: cleanBrand, name: cleanName };
+  };
 
   const normalizeText = (v) => String(v || "").trim().toLowerCase();
 
@@ -557,11 +593,50 @@ export default function GatePassIN() {
 
   const handleItemChange = (idx, field, value) => {
     const updated = [...items];
-    if (field === "quantity") {
-      updated[idx][field] = value.replace(/[^\d.]/g, "");
-    } else {
-      updated[idx][field] = value;
+    const cleanInt = (v, max = 8) => String(v || "").replace(/\D/g, "").slice(0, max);
+    const cleanDec2 = (v) => {
+      const raw = String(v || "").replace(/[^0-9.]/g, "");
+      if (!raw) return "";
+      if (!raw.includes(".") && raw.length > 1) {
+        const intPart = raw.slice(0, 1);
+        const dec = raw.slice(1, 3);
+        return `${intPart}.${dec}`;
+      }
+      const [a, b = ""] = raw.split(".");
+      const intPart = (a || "0").slice(0, 3);
+      const dec = b.slice(0, 2);
+      if (raw.includes(".") && dec === "") return `${intPart}.`;
+      return dec ? `${intPart}.${dec}` : intPart;
+    };
+    const formatDec2 = (v) => {
+      const raw = String(v || "").replace(/[^0-9.]/g, "");
+      if (!raw) return "";
+      const [a, b = ""] = raw.split(".");
+      const intPart = (a || "0").slice(0, 3);
+      const dec = (b || "").padEnd(2, "0").slice(0, 2);
+      return `${intPart}.${dec}`;
+    };
+    const row = { ...(updated[idx] || {}) };
+
+    if (field === "bagCount") {
+      row[field] = cleanInt(value, 6);
+    } else if (field === "bagWeightKg") {
+      row[field] = cleanInt(value, 6);
+    } else if (field === "emptyBagWeightKg") {
+      row[field] = cleanDec2(value);
+    } else if (field === "emptyBagWeightKgBlur") {
+      row.emptyBagWeightKg = formatDec2(value);
+    } else if (field === "productName" || field === "brand") {
+      row[field] = value;
     }
+
+    const bags = Number(row.bagCount || 0);
+    const bagW = Number(row.bagWeightKg || 0);
+    const emptyW = Number(row.emptyBagWeightKg || 0);
+    const net = Math.max(bags * (bagW - emptyW), 0);
+    row.netWeightKg = net ? String(Math.round(net)) : "";
+
+    updated[idx] = row;
     setItems(updated);
   };
 
@@ -581,30 +656,37 @@ export default function GatePassIN() {
     };
 
     const manualItems = items
-      .filter((it) => it.itemType && Number(it.quantity) > 0)
-      .map((it) => {
-        const isPaddy = String(it.itemType || "").toLowerCase() === "paddy";
-        return {
-          itemType: it.itemType,
-          stockType: isPaddy ? "Production" : "Managerial",
-          brand: isPaddy ? String(it.brand || "").trim() : "",
-          customItemName: "",
-          quantity: Number(it.quantity),
-          unit: normalizeUnit(it.unit),
-        };
-      });
+      .filter((it) => {
+        const name = String(
+          it?.productMode === "input"
+            ? it?.productInput || ""
+            : it?.productName || it?.customName || ""
+        ).trim();
+        return String(it?.brand || "").trim() && name && Number(it?.netWeightKg || 0) > 0;
+      })
+      .map((it) => ({
+        itemType: String(
+          it?.productMode === "input"
+            ? it?.productInput || ""
+            : it?.productName || it?.customName || ""
+        ).trim(),
+        stockType: "Production",
+        brand: String(it.brand || "").trim(),
+        customItemName: "",
+        quantity: Number(it.netWeightKg || 0),
+        unit: normalizeUnit("kg"),
+        bagCount: Number(it.bagCount || 0),
+        bagWeightKg: Number(it.bagWeightKg || 0),
+        emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
+        netWeightKg: Number(it.netWeightKg || 0),
+      }));
 
-    const firstPaddyBrand =
-      manualItems.find(
-        (it) =>
-          String(it?.itemType || "").toLowerCase() === "paddy" &&
-          String(it?.brand || "").trim() !== ""
-      )?.brand || "";
+    const firstBrand = manualItems.find((it) => String(it?.brand || "").trim() !== "")?.brand || "";
 
     const payload = {
       ...form,
       date: form.date,
-      supplier: String(form.supplier || "").trim() || firstPaddyBrand || "",
+      supplier: String(form.supplier || "").trim() || firstBrand || "",
       type: "IN",
       items: manualItems,
       freightCharges: form.freightCharges
@@ -629,10 +711,24 @@ export default function GatePassIN() {
         driverContact: "",
         freightCharges: "",
       });
-      setItems([{ itemType: "Paddy", brand: "", quantity: "", unit: "kg" }]);
+      setItems([
+                    {
+                      brand: "",
+                      brandMode: "list",
+                      brandInput: "",
+                      productName: "",
+                      productMode: "list",
+                      productInput: "",
+                      bagCount: "",
+                      bagWeightKg: "65",
+                      emptyBagWeightKg: "",
+                      netWeightKg: "",
+                    },
+      ]);
       setEditingId(null);
       setErrors({});
       fetchRows();
+      window.dispatchEvent(new Event("stock:refresh"));
     } catch (err) {
       toast.error(err.message || "Unable to save.");
       document.getElementById("gatepass-in-form")?.scrollIntoView({
@@ -651,14 +747,34 @@ export default function GatePassIN() {
       driverContact: row.driverContact || "",
       freightCharges: row.freightCharges ? String(row.freightCharges) : "",
     });
-    const rowItems = (row.items || []).map((it) => ({
-      itemType: it.itemType || it.customItemName || "SMJ Own",
-      brand: String(it.brand || "").trim() || (String(it.itemType || "").toLowerCase() === "paddy" ? (row.supplier || "") : ""),
-      quantity: it.quantity ? String(it.quantity) : "",
-      unit: it.unit || "kg",
-    }));
+    const rowItems = (row.items || []).map((it) => {
+      const qty = Number(it?.quantity || it?.netWeightKg || 0);
+      return {
+        brand: String(it.brand || "").trim() || String(row.supplier || "").trim(),
+        brandMode: "list",
+        brandInput: "",
+        productName: String(it.itemType || it.customItemName || "").trim(),
+        productMode: "list",
+        productInput: "",
+        bagCount: it.bagCount != null ? String(it.bagCount) : "",
+        bagWeightKg: it.bagWeightKg != null ? String(it.bagWeightKg) : "65",
+        emptyBagWeightKg: it.emptyBagWeightKg != null ? String(it.emptyBagWeightKg) : "",
+        netWeightKg: qty ? String(Math.round(qty)) : "",
+      };
+    });
     setItems(
-      rowItems.length > 0 ? rowItems : [{ itemType: "Paddy", brand: "", quantity: "", unit: "kg" }]
+      rowItems.length > 0
+        ? rowItems
+        : [
+            {
+              brand: "",
+              productName: "",
+              bagCount: "",
+              bagWeightKg: "65",
+              emptyBagWeightKg: "",
+              netWeightKg: "",
+            },
+          ]
     );
 
     setEditingId(row._id);
@@ -733,22 +849,24 @@ export default function GatePassIN() {
     if (row.items && row.items.length > 0) {
       itemsHtml = row.items
         .map((item) => {
-          const isPaddy = String(item?.itemType || "").toLowerCase() === "paddy";
-          const paddyBrand = isPaddy
-            ? String(item?.brand || row.supplier || "").trim()
-            : "";
+          const companyName = String(item?.brand || row.supplier || "").trim();
           const displayName =
             item.itemType === "Other" && item.customItemName
               ? `${item.itemType} (${item.customItemName})`
               : item.itemType || "-";
-          const nameWithBrand = isPaddy
-            ? `Unprocessed Paddy${paddyBrand ? ` (${paddyBrand})` : ""}`
-            : displayName;
+          const bags = item.bagCount || 0;
+          const bagW = item.bagWeightKg || 0;
+          const emptyW = item.emptyBagWeightKg || 0;
+          const net = item.netWeightKg || item.quantity || 0;
           return `<tr>
-          <td style="border:1px solid #ddd;padding:6px;">${nameWithBrand}</td>
-          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${
-            item.quantity || 0
-          } ${item.unit || ""}</td>
+          <td style="border:1px solid #ddd;padding:6px;">${companyName || "-"}</td>
+          <td style="border:1px solid #ddd;padding:6px;">${displayName}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bags}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bagW}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${emptyW}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${Math.round(
+            Number(net || 0)
+          )}</td>
         </tr>`;
         })
         .join("");
@@ -757,13 +875,13 @@ export default function GatePassIN() {
     // Inward gate pass is manual (no invoices).
     const itemsTableHtml = `
       <table>
-        <thead><tr><th>Item Description</th><th style="text-align:right;">Quantity</th></tr></thead>
+        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Bags</th><th style="text-align:right;">Bag Wt</th><th style="text-align:right;">Empty Wt</th><th style="text-align:right;">Net (kg)</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
         <tfoot>
           <tr style="background:#f0fdf4;font-weight:700;">
-            <td style="border:1px solid #ddd;padding:6px;">Total</td>
+            <td style="border:1px solid #ddd;padding:6px;" colspan="5">Total</td>
             <td style="border:1px solid #ddd;padding:6px;text-align:right;">${
-              (row.items || []).reduce((sum, it) => sum + Number(it.quantity || 0), 0)
+              (row.items || []).reduce((sum, it) => sum + Number(it.netWeightKg || it.quantity || 0), 0)
             }</td>
           </tr>
         </tfoot>
@@ -843,25 +961,38 @@ export default function GatePassIN() {
             : "-",
     },
     { key: "gatePassNo", label: "GP No" },
-    { key: "supplier", label: "Company Name" },
+    {
+      key: "companyNames",
+      label: "Company",
+      render: (_val, row) => {
+        const list = (row.items || [])
+          .map((it) => String(it.brand || row.supplier || "").trim())
+          .filter(Boolean);
+        return list.length ? Array.from(new Set(list)).join(", ") : "-";
+      },
+    },
     { key: "truckNo", label: "Truck" },
     {
       key: "items",
       label: "Items",
       render: (val, row) => {
         const list = (row.items || [])
-          .map((it) => it.itemType || it.customItemName || "SMJ Own")
+          .map((it) => {
+            const name = it.itemType || it.customItemName || "Item";
+            const qty = Math.round(Number(it.netWeightKg || it.quantity || 0));
+            return `${name}${qty ? ` (${qty} kg)` : ""}`;
+          })
           .filter(Boolean);
         return list.length ? Array.from(new Set(list)).join(", ") : "-";
       },
     },
-    { key: "driverName", label: "Driver" },
     {
       key: "actions",
       label: "Actions",
+      align: "center",
       skipExport: true,
       render: (_, row) => (
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-center gap-2">
           <button
             onClick={() => handleEdit(row)}
             className="p-1 rounded hover:bg-emerald-50"
@@ -887,6 +1018,38 @@ export default function GatePassIN() {
       ),
     },
   ];
+
+  const exportColumns = [
+    { key: "date", label: "Date", render: (val) => (val ? new Date(val).toLocaleDateString() : "-") },
+    { key: "gatePassNo", label: "GP No" },
+    { key: "truckNo", label: "Truck" },
+    { key: "companyName", label: "Company" },
+    { key: "productName", label: "Product" },
+    { key: "bagCount", label: "Bags" },
+    { key: "bagWeightKg", label: "Bag Weight (kg)" },
+    { key: "emptyBagWeightKg", label: "Empty Bag (kg)" },
+    { key: "netWeightKg", label: "Net Weight (kg)" },
+    { key: "driverName", label: "Driver" },
+    { key: "driverContact", label: "Contact" },
+  ];
+
+  const exportData = (rows) =>
+    (rows || []).flatMap((row) => {
+      const itemsList = Array.isArray(row.items) && row.items.length ? row.items : [{}];
+      return itemsList.map((it) => ({
+        date: row.date,
+        gatePassNo: row.gatePassNo,
+        truckNo: row.truckNo,
+        companyName: String(it.brand || row.supplier || "").trim(),
+        productName: it.itemType || it.customItemName || "",
+        bagCount: it.bagCount || "",
+        bagWeightKg: it.bagWeightKg || "",
+        emptyBagWeightKg: it.emptyBagWeightKg || "",
+        netWeightKg: Math.round(Number(it.netWeightKg || it.quantity || 0)),
+        driverName: row.driverName || "",
+        driverContact: row.driverContact || "",
+      }));
+    });
 
   return (
     <div className="space-y-4">
@@ -1014,7 +1177,7 @@ export default function GatePassIN() {
           {/* Driver Name */}
           <div id="field-driverName">
             <label className="block text-sm font-medium mb-1">
-              Driver Name <span className="text-red-500">*</span>
+              Driver Name
             </label>
             <input
               name="driverName"
@@ -1033,7 +1196,7 @@ export default function GatePassIN() {
           {/* Driver Contact */}
           <div id="field-driverContact">
             <label className="block text-sm font-medium mb-1">
-              Driver Contact <span className="text-red-500">*</span>
+              Driver Contact
             </label>
             <input
               name="driverContact"
@@ -1055,7 +1218,7 @@ export default function GatePassIN() {
           {/* Freight Charges */}
           <div id="field-freightCharges">
             <label className="block text-sm font-medium mb-1">
-              Freight Charges <span className="text-red-500">*</span>
+              Freight Charges
             </label>
             <input
               name="freightCharges"
@@ -1072,23 +1235,36 @@ export default function GatePassIN() {
           </div>
         </div>
 
-        {/* Items (optional) - Paddy only */}
-        <div className="border-t pt-4" id="field-paddy">
+        {/* Items */}
+        <div className="border-t pt-4" id="field-items">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            Paddy (optional)
+            Products
           </h3>
+          {errors.items && (
+            <p className="text-xs text-red-500 mb-2">{errors.items}</p>
+          )}
           <div className="p-3 bg-gray-50 rounded-lg space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-xs text-gray-600">
-                Add one or more paddy lines (each row can have a different company
-                name).
+                Add one or more product lines (company-based products, including paddy).
               </div>
               <button
                 type="button"
                 onClick={() =>
                   setItems((prev) => [
                     ...(prev || []),
-                    { itemType: "Paddy", brand: "", quantity: "", unit: "kg" },
+                    {
+                      brand: "",
+                      brandMode: "list",
+                      brandInput: "",
+                      productName: "",
+                      productMode: "list",
+                      productInput: "",
+                      bagCount: "",
+                      bagWeightKg: "65",
+                      emptyBagWeightKg: "",
+                      netWeightKg: "",
+                    },
                   ])
                 }
                 className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
@@ -1098,95 +1274,204 @@ export default function GatePassIN() {
               </button>
             </div>
 
-            <div className="grid md:grid-cols-4 gap-3 items-start">
-            <div id="field-supplier">
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs text-gray-500">
-                  Company Name
-                </label>
-              </div>
-              <select
-                value={items[0]?.brand ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === OTHER_OPTION) {
-                    setBrandModal({ ...createBrandModalState(), open: true });
-                    return;
-                  }
-                  const used = (items || [])
-                    .slice(1)
-                    .map((x) => String(x?.brand || "").trim())
-                    .filter(Boolean);
-                  if (v && used.includes(v)) {
-                    toast.error(
-                      "Each paddy row must have a different company name."
-                    );
-                    return;
-                  }
-                  handleItemChange(0, "brand", v);
-                  // Keep top-level supplier in sync for backward compatibility (printing/listing).
-                  setForm((prev) => ({ ...prev, supplier: v }));
-                  clearFieldError("supplier");
-                }}
-                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                  errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                }`}
-              >
-                <option value="">Select company name</option>
-                {brandOptions.map((b, idx) => (
-                  <option
-                    key={`${b}-${idx}`}
-                    value={b}
-                    disabled={(items || [])
-                      .slice(1)
-                      .some((x) => String(x?.brand || "").trim() === b)}
+            <div className="grid md:grid-cols-3 gap-3 items-start">
+              <div id="field-supplier">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-gray-500">
+                    Company Name
+                  </label>
+                </div>
+                {items[0]?.brandMode !== "input" ? (
+                  <select
+                    value={items[0]?.brand ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === OTHER_OPTION) {
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = { ...updated[0], brandMode: "input", brandInput: "" };
+                          return updated;
+                        });
+                        return;
+                      }
+                      setItems((prev) => {
+                        const updated = [...prev];
+                        updated[0] = { ...updated[0], brand: v, productName: "" };
+                        return updated;
+                      });
+                      setForm((prev) => ({ ...prev, supplier: v }));
+                      clearFieldError("supplier");
+                    }}
+                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                      errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
+                    }`}
                   >
-                    {b}
-                  </option>
-                ))}
-                <option value={OTHER_OPTION}>Other (Add New)</option>
-              </select>
-              {errors.supplier && (
-                <p className="text-xs text-red-500 mt-1">{errors.supplier}</p>
-              )}
+                    <option value="">Select company name</option>
+                    {brandOptions.map((b, idx) => (
+                      <option key={`${b}-${idx}`} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                    <option value={OTHER_OPTION}>Add New</option>
+                  </select>
+                ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    value={items[0]?.brandInput ?? ""}
+                      onChange={(e) =>
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = {
+                            ...updated[0],
+                            brandInput: sanitizeBrandText(e.target.value, 100),
+                          };
+                          return updated;
+                        })
+                      }
+                      placeholder="Enter company name"
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                        errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const name = await ensureBrandOption(items[0]?.brandInput || "");
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = {
+                            ...updated[0],
+                            brand: name,
+                            brandInput: "",
+                            brandMode: "list",
+                          };
+                          return updated;
+                        });
+                        if (name) {
+                          setForm((prev) => ({ ...prev, supplier: name }));
+                        }
+                      }}
+                      className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                    >
+                      List
+                    </button>
+                  </div>
+                )}
+                {errors.supplier && (
+                  <p className="text-xs text-red-500 mt-1">{errors.supplier}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Product Name</label>
+                {items[0]?.productMode !== "input" ? (
+                  <select
+                    value={items[0]?.productName ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === OTHER_OPTION) {
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = { ...updated[0], productMode: "input", productInput: "" };
+                          return updated;
+                        });
+                        return;
+                      }
+                      handleItemChange(0, "productName", v);
+                    }}
+                    disabled={!String(items[0]?.brand || "").trim()}
+                    className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                  >
+                    <option value="">
+                      {items[0]?.brand ? "Select product" : "Select company first"}
+                    </option>
+                    {getProductOptionsForBrand(items[0]?.brand).map((name, idx) => (
+                      <option key={`${name}-${idx}`} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={OTHER_OPTION}>Add New</option>
+                  </select>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={items[0]?.productInput ?? ""}
+                      onChange={(e) =>
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = {
+                            ...updated[0],
+                            productInput: sanitizeBrandText(e.target.value, 80),
+                          };
+                          return updated;
+                        })
+                      }
+                      placeholder="Enter product name"
+                      className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const brand = String(items[0]?.brand || "").trim();
+                        const input = items[0]?.productInput || "";
+                        const result = await ensureProductOption(brand, input);
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[0] = {
+                            ...updated[0],
+                            productName: result.name,
+                            productInput: "",
+                            productMode: "list",
+                          };
+                          return updated;
+                        });
+                      }}
+                      className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                    >
+                      List
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
+                <input
+                  value={items[0]?.bagCount ?? ""}
+                  onChange={(e) => handleItemChange(0, "bagCount", e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Item</label>
-              <input
-                value="Paddy"
-                readOnly
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100 cursor-not-allowed"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Quantity (no decimals)</label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={items[0]?.quantity ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "");
-                  handleItemChange(0, "quantity", v);
-                }}
-                placeholder="0"
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Unit</label>
-              <select
-                value={PADDY_UNITS.includes(items[0]?.unit) ? (items[0]?.unit ?? "kg") : "kg"}
-                onChange={(e) => handleItemChange(0, "unit", e.target.value)}
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-              >
-                {PADDY_UNITS.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Bag Weight (kg)</label>
+                <input
+                  value={items[0]?.bagWeightKg ?? ""}
+                  onChange={(e) => handleItemChange(0, "bagWeightKg", e.target.value)}
+                  placeholder="65"
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Empty Bag (kg)</label>
+                    <input
+                      value={items[0]?.emptyBagWeightKg ?? ""}
+                      onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}
+                      onBlur={(e) =>
+                        handleItemChange(0, "emptyBagWeightKgBlur", e.target.value)
+                      }
+                      placeholder="0.00"
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
+                <input
+                  value={items[0]?.netWeightKg ?? ""}
+                  readOnly
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100"
+                />
+              </div>
             </div>
 
             {(items || []).length > 1 && (
@@ -1194,95 +1479,211 @@ export default function GatePassIN() {
                 {(items || []).slice(1).map((it, idx) => {
                   const realIdx = idx + 1;
                   return (
-                    <div key={`paddy-${realIdx}`} className="grid md:grid-cols-4 gap-3 items-end">
-                      <div className="md:col-span-1">
+                    <div key={`item-${realIdx}`} className="space-y-3">
+                      <div className="grid md:grid-cols-3 gap-3 items-end">
+                        <div>
                         <label className="block text-xs text-gray-500 mb-1">
                           Company Name
                         </label>
-                        <select
-                          value={it?.brand ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v === OTHER_OPTION) {
-                              setBrandModal({ ...createBrandModalState(), open: true });
-                              return;
-                            }
-                            const used = (items || [])
-                              .map((x, i) => (i === realIdx ? "" : String(x?.brand || "").trim()))
-                              .filter(Boolean);
-                            if (v && used.includes(v)) {
-                              toast.error(
-                                "Each paddy row must have a different company name."
-                              );
-                              return;
-                            }
-                            handleItemChange(realIdx, "brand", v);
-                          }}
-                          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                            errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                          }`}
-                        >
-                          <option value="">Select company name</option>
-                          {brandOptions.map((b, idx2) => (
-                            <option
-                              key={`${b}-${idx2}`}
-                              value={b}
-                              disabled={(items || [])
-                                .map((x, i) => (i === realIdx ? "" : String(x?.brand || "").trim()))
-                                .filter(Boolean)
-                                .includes(b)}
+                        {it?.brandMode !== "input" ? (
+                          <select
+                            value={it?.brand ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === OTHER_OPTION) {
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    brandMode: "input",
+                                    brandInput: "",
+                                  };
+                                  return updated;
+                                });
+                                return;
+                              }
+                              setItems((prev) => {
+                                const updated = [...prev];
+                                updated[realIdx] = { ...updated[realIdx], brand: v, productName: "" };
+                                return updated;
+                              });
+                            }}
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                              errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
+                            }`}
+                          >
+                            <option value="">Select company name</option>
+                            {brandOptions.map((b, idx2) => (
+                              <option key={`${b}-${idx2}`} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                            <option value={OTHER_OPTION}>Add New</option>
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              value={it?.brandInput ?? ""}
+                              onChange={(e) =>
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    brandInput: sanitizeBrandText(e.target.value, 100),
+                                  };
+                                  return updated;
+                                })
+                              }
+                              placeholder="Enter company name"
+                              className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                                errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
+                              }`}
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const name = await ensureBrandOption(it?.brandInput || "");
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    brand: name,
+                                    brandInput: "",
+                                    brandMode: "list",
+                                  };
+                                  return updated;
+                                });
+                              }}
+                              className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
                             >
-                              {b}
+                              List
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Product Name</label>
+                        {it?.productMode !== "input" ? (
+                          <select
+                            value={it?.productName ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === OTHER_OPTION) {
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    productMode: "input",
+                                    productInput: "",
+                                  };
+                                  return updated;
+                                });
+                                return;
+                              }
+                              handleItemChange(realIdx, "productName", v);
+                            }}
+                            disabled={!String(it?.brand || "").trim()}
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                          >
+                            <option value="">
+                              {it?.brand ? "Select product" : "Select company first"}
                             </option>
-                          ))}
-                          <option value={OTHER_OPTION}>Other (Add New)</option>
-                        </select>
+                            {getProductOptionsForBrand(it?.brand).map((name, idx2) => (
+                              <option key={`${name}-${idx2}`} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                            <option value={OTHER_OPTION}>Add New</option>
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              value={it?.productInput ?? ""}
+                              onChange={(e) =>
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    productInput: sanitizeBrandText(e.target.value, 80),
+                                  };
+                                  return updated;
+                                })
+                              }
+                              placeholder="Enter product name"
+                              className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const brand = String(it?.brand || "").trim();
+                                const input = it?.productInput || "";
+                                const result = await ensureProductOption(brand, input);
+                                setItems((prev) => {
+                                  const updated = [...prev];
+                                  updated[realIdx] = {
+                                    ...updated[realIdx],
+                                    productName: result.name,
+                                    productInput: "",
+                                    productMode: "list",
+                                  };
+                                  return updated;
+                                });
+                              }}
+                              className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                            >
+                              List
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Item</label>
+                        <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
                         <input
-                          value="Paddy"
-                          readOnly
-                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100 cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Quantity</label>
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={it?.quantity ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value.replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "");
-                            handleItemChange(realIdx, "quantity", v);
-                          }}
+                          value={it?.bagCount ?? ""}
+                          onChange={(e) => handleItemChange(realIdx, "bagCount", e.target.value)}
                           className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                         />
                       </div>
-                      <div className="flex gap-2 items-end">
-                        <div className="flex-1">
-                          <label className="block text-xs text-gray-500 mb-1">Unit</label>
-                          <select
-                            value={PADDY_UNITS.includes(it?.unit) ? (it?.unit ?? "kg") : "kg"}
-                            onChange={(e) => handleItemChange(realIdx, "unit", e.target.value)}
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                          >
-                            {PADDY_UNITS.map((u) => (
-                              <option key={u} value={u}>
-                                {u}
-                              </option>
-                            ))}
-                          </select>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-3 items-end">
+                        <div>
+                        <label className="block text-xs text-gray-500 mb-1">Bag Weight (kg)</label>
+                        <input
+                          value={it?.bagWeightKg ?? ""}
+                          onChange={(e) => handleItemChange(realIdx, "bagWeightKg", e.target.value)}
+                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                        />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setItems((prev) => prev.filter((_x, i) => i !== realIdx))}
-                          className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
-                          title="Remove line"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div>
+                        <label className="block text-xs text-gray-500 mb-1">Empty Bag (kg)</label>
+                        <input
+                          value={it?.emptyBagWeightKg ?? ""}
+                          onChange={(e) => handleItemChange(realIdx, "emptyBagWeightKg", e.target.value)}
+                          onBlur={(e) =>
+                            handleItemChange(realIdx, "emptyBagWeightKgBlur", e.target.value)
+                          }
+                          placeholder="0.00"
+                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                        />
+                        </div>
+                        <div className="flex gap-2 items-end">
+                          <div className="flex-1">
+                          <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
+                          <input
+                            value={it?.netWeightKg ?? ""}
+                            readOnly
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100"
+                          />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setItems((prev) => prev.filter((_x, i) => i !== realIdx))}
+                            className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
+                            title="Remove line"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1315,7 +1716,14 @@ export default function GatePassIN() {
                   freightCharges: "",
                 });
                 setItems([
-                  { itemType: "Paddy", brand: "", quantity: "", unit: "kg" },
+                  {
+                    brand: "",
+                    productName: "",
+                    bagCount: "",
+                    bagWeightKg: "65",
+                    emptyBagWeightKg: "",
+                    netWeightKg: "",
+                  },
                 ]);
                 setErrors({});
               }}
@@ -1334,6 +1742,8 @@ export default function GatePassIN() {
         idKey="_id"
         searchPlaceholder="Search gate passes..."
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
+        exportColumns={exportColumns}
+        exportData={exportData}
         deleteAll={{
           description: "This will permanently delete ALL Gate Pass IN records from the database.",
           onConfirm: async (adminPin) => {

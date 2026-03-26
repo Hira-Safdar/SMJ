@@ -1,6 +1,7 @@
 const AIChat = require("../models/AIChat");
 const Transaction = require("../models/transactionModel");
 const ProductionBatch = require("../models/productionBatchModel");
+const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const Company = require("../models/companyModel");
 const axios = require("axios");
@@ -35,19 +36,19 @@ async function buildBusinessSnapshot() {
     $or: [{ date: { $gte: since } }, { createdAt: { $gte: since } }],
   });
 
-  const [sales7, sales30, purchases7, purchases30, stockAgg, paddyAgg, inProcessCount] =
+  const [sales7, sales30, purchases7, purchases30, stockAgg, paddyAgg, inProcessCount, completedCount, batchDoneCount, outputAgg, gateIn7, gateOut7, gateIn30, gateOut30] =
     await Promise.all([
       Transaction.find({ type: "SALE", ...inRange(since7) })
-        .select("totalAmount partialPaid paymentStatus date createdAt")
+        .select("totalAmount partialPaid paymentStatus saleKind date createdAt")
         .lean(),
       Transaction.find({ type: "SALE", ...inRange(since30) })
-        .select("totalAmount partialPaid paymentStatus date createdAt")
+        .select("totalAmount partialPaid paymentStatus saleKind date createdAt")
         .lean(),
       Transaction.find({ type: "PURCHASE", ...inRange(since7) })
-        .select("totalAmount partialPaid paymentStatus date createdAt")
+        .select("totalAmount partialPaid paymentStatus purchaseKind date createdAt")
         .lean(),
       Transaction.find({ type: "PURCHASE", ...inRange(since30) })
-        .select("totalAmount partialPaid paymentStatus date createdAt")
+        .select("totalAmount partialPaid paymentStatus purchaseKind date createdAt")
         .lean(),
       // IMPORTANT: brands are unique, and the same productType can appear under different brands.
       // Group by brand/trademark (companyName) + productTypeId to avoid mixing different brands together.
@@ -97,6 +98,62 @@ async function buildBusinessSnapshot() {
         },
       ]),
       ProductionBatch.countDocuments({ status: "IN_PROCESS" }),
+      ProductionBatch.countDocuments({ status: "COMPLETED", batchDone: false }),
+      ProductionBatch.countDocuments({ batchDone: true }),
+      ProductionBatch.aggregate([
+        { $unwind: "$outputs" },
+        {
+          $group: {
+            _id: "$outputs.status",
+            count: { $sum: 1 },
+            totalKg: { $sum: "$outputs.netWeightKg" },
+          },
+        },
+      ]),
+      GatePass.aggregate([
+        { $match: { type: "IN", date: { $gte: since7 } } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalQty: { $sum: "$totalQuantity" },
+            totalAmount: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+      GatePass.aggregate([
+        { $match: { type: "OUT", date: { $gte: since7 } } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalQty: { $sum: "$totalQuantity" },
+            totalAmount: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+      GatePass.aggregate([
+        { $match: { type: "IN", date: { $gte: since30 } } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalQty: { $sum: "$totalQuantity" },
+            totalAmount: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+      GatePass.aggregate([
+        { $match: { type: "OUT", date: { $gte: since30 } } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalQty: { $sum: "$totalQuantity" },
+            totalAmount: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
     ]);
 
   const effectiveTimeMs = (tx) => {
@@ -128,6 +185,30 @@ async function buildBusinessSnapshot() {
 
   const received30 = sales30Filtered.reduce((sum, tx) => sum + paidAmount(tx), 0);
   const receivable30 = sales30Filtered.reduce((sum, tx) => sum + remainingAmount(tx), 0);
+
+  const splitByKind = (rows, key) =>
+    rows.reduce((acc, tx) => {
+      const kind = String(tx?.[key] || "UNKNOWN").toUpperCase();
+      acc[kind] = (acc[kind] || 0) + toNum(tx.totalAmount);
+      return acc;
+    }, {});
+
+  const sales30ByKind = splitByKind(sales30Filtered, "saleKind");
+  const sales7ByKind = splitByKind(sales7Filtered, "saleKind");
+  const purchases30ByKind = splitByKind(purchases30Filtered, "purchaseKind");
+  const purchases7ByKind = splitByKind(purchases7Filtered, "purchaseKind");
+
+  const aggRow = (arr) => (Array.isArray(arr) && arr[0] ? arr[0] : { count: 0, totalQty: 0, totalAmount: 0 });
+  const in7 = aggRow(gateIn7);
+  const out7 = aggRow(gateOut7);
+  const in30 = aggRow(gateIn30);
+  const out30 = aggRow(gateOut30);
+
+  const outputsByStatus = (Array.isArray(outputAgg) ? outputAgg : []).reduce((acc, row) => {
+    const key = String(row?._id || "UNKNOWN");
+    acc[key] = { count: toNum(row.count), totalKg: toNum(row.totalKg) };
+    return acc;
+  }, {});
 
   const stockRows = stockAgg
     .filter((row) => row && row.productTypeId)
@@ -180,10 +261,14 @@ async function buildBusinessSnapshot() {
       last30Days: sales30Total,
       collectedLast30Days: received30,
       receivableLast30Days: receivable30,
+      last7DaysByKind: sales7ByKind,
+      last30DaysByKind: sales30ByKind,
     },
     purchases: {
       last7Days: purchases7Total,
       last30Days: purchases30Total,
+      last7DaysByKind: purchases7ByKind,
+      last30DaysByKind: purchases30ByKind,
     },
     stock: {
       productionTotalKg: totalPositiveKg,
@@ -195,6 +280,15 @@ async function buildBusinessSnapshot() {
     },
     production: {
       inProcessBatches: inProcessCount,
+      completedBatches: completedCount,
+      batchDoneBatches: batchDoneCount,
+      outputsByStatus,
+    },
+    gatepass: {
+      inwardLast7Days: { count: toNum(in7.count), totalQty: toNum(in7.totalQty), totalAmount: toNum(in7.totalAmount) },
+      outwardLast7Days: { count: toNum(out7.count), totalQty: toNum(out7.totalQty), totalAmount: toNum(out7.totalAmount) },
+      inwardLast30Days: { count: toNum(in30.count), totalQty: toNum(in30.totalQty), totalAmount: toNum(in30.totalAmount) },
+      outwardLast30Days: { count: toNum(out30.count), totalQty: toNum(out30.totalQty), totalAmount: toNum(out30.totalAmount) },
     },
   };
 }
@@ -517,7 +611,7 @@ async function answerFromDatabase(intent) {
   return null;
 }
 
-async function generateAIResponse({ message, context, history, snapshot }) {
+async function generateAIResponse({ message, context, history, snapshot, forceProvider }) {
   const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
   const hfModel = process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL;
   const hfBaseUrl = String(process.env.HF_BASE_URL || "https://router.huggingface.co").replace(
@@ -525,6 +619,11 @@ async function generateAIResponse({ message, context, history, snapshot }) {
     "",
   );
   const debug = String(process.env.AI_DEBUG || "").trim() === "1";
+  const forceHF = String(forceProvider || "").trim().toLowerCase() === "huggingface";
+  if (debug && hfToken) {
+    const tail = String(hfToken).slice(-6);
+    console.log(`[AI] HF token loaded (last6=${tail}) model=${hfModel || "n/a"}`);
+  }
   if (hfToken && hfModel) {
     try {
       const chatHistory = Array.isArray(history)
@@ -566,27 +665,28 @@ async function generateAIResponse({ message, context, history, snapshot }) {
       // Try chat completions first (works for many instruction/chat-tuned models).
       if (!isFlanT5) {
         try {
-          const chatRes = await axios.post(
-            `${hfBaseUrl}/v1/chat/completions`,
-            {
-              model: hfModel,
-              messages: [
-                {
-                  role: "system",
-                  content: [
-                    "You are the SMJ Rice Mill AI assistant.",
-                    "Use the provided snapshot and keep answers concise and practical.",
-                    "Never invent numbers not present in snapshot.",
-                    `Context: ${context || "general"}`,
-                    `Snapshot JSON: ${JSON.stringify(snapshot)}`,
-                  ].join("\n"),
-                },
-                ...chatHistory,
-                { role: "user", content: String(message || "") },
-              ],
-              temperature: 0.3,
-              max_tokens: 256,
-            },
+            const chatRes = await axios.post(
+              `${hfBaseUrl}/v1/chat/completions`,
+              {
+                model: hfModel,
+                messages: [
+                  {
+                    role: "system",
+                    content: [
+                      "You are the SMJ Rice Mill AI assistant.",
+                      "Answer naturally and helpfully.",
+                      "If a question needs current system data, use the snapshot; if data is missing, say so.",
+                      "Never invent financial numbers.",
+                      `Context: ${context || "general"}`,
+                      `Snapshot JSON: ${JSON.stringify(snapshot)}`,
+                    ].join("\n"),
+                  },
+                  ...chatHistory,
+                  { role: "user", content: String(message || "") },
+                ],
+                temperature: 0.3,
+                max_tokens: 256,
+              },
             axiosCfg,
           );
           const text = chatRes?.data?.choices?.[0]?.message?.content;
@@ -594,17 +694,17 @@ async function generateAIResponse({ message, context, history, snapshot }) {
             return { text: String(text).trim(), provider: "huggingface", model: hfModel };
           }
         } catch (err) {
-          if (debug) {
-            const status = err?.response?.status;
-            const statusText = err?.response?.statusText;
-            const snippet = JSON.stringify(err?.response?.data || {}).slice(0, 300);
-            return {
-              text: buildLocalAIReply(message, snapshot),
-              provider: "local",
-              model: hfModel,
-              error: `HF chat ${status || "ERR"} ${statusText || ""}${snippet ? ` - ${snippet}` : ""}`.trim(),
-            };
-          }
+            if (debug || forceHF) {
+              const status = err?.response?.status;
+              const statusText = err?.response?.statusText;
+              const snippet = JSON.stringify(err?.response?.data || {}).slice(0, 300);
+              return {
+                text: buildLocalAIReply(message, snapshot),
+                provider: forceHF ? "huggingface" : "local",
+                model: hfModel,
+                error: `HF chat ${status || "ERR"} ${statusText || ""}${snippet ? ` - ${snippet}` : ""}`.trim(),
+              };
+            }
         }
       }
 
@@ -626,13 +726,13 @@ async function generateAIResponse({ message, context, history, snapshot }) {
             return { text: String(data.generated_text).trim(), provider: "huggingface", model: hfModel };
           }
         } catch (err) {
-          if (debug) {
+          if (debug || forceHF) {
             const status = err?.response?.status;
             const statusText = err?.response?.statusText;
             const snippet = JSON.stringify(err?.response?.data || {}).slice(0, 300);
             return {
               text: buildLocalAIReply(message, snapshot),
-              provider: "local",
+              provider: forceHF ? "huggingface" : "local",
               model: hfModel,
               error: `HF inference ${status || "ERR"} ${statusText || ""}${snippet ? ` - ${snippet}` : ""}`.trim(),
             };
@@ -657,13 +757,13 @@ async function generateAIResponse({ message, context, history, snapshot }) {
           return { text: String(text).trim(), provider: "huggingface", model: hfModel };
         }
       } catch (err) {
-        if (debug) {
+        if (debug || forceHF) {
           const status = err?.response?.status;
           const statusText = err?.response?.statusText;
           const snippet = JSON.stringify(err?.response?.data || {}).slice(0, 300);
           return {
             text: buildLocalAIReply(message, snapshot),
-            provider: "local",
+            provider: forceHF ? "huggingface" : "local",
             model: hfModel,
             error: `HF completion ${status || "ERR"} ${statusText || ""}${snippet ? ` - ${snippet}` : ""}`.trim(),
           };
@@ -671,10 +771,10 @@ async function generateAIResponse({ message, context, history, snapshot }) {
       }
     } catch (err) {
       console.error("HF AI fallback to local:", err.message);
-      if (debug) {
+      if (debug || forceHF) {
         return {
           text: buildLocalAIReply(message, snapshot),
-          provider: "local",
+          provider: forceHF ? "huggingface" : "local",
           model: hfModel,
           error: `HF request failed - ${err.message}`,
         };
@@ -684,6 +784,14 @@ async function generateAIResponse({ message, context, history, snapshot }) {
 
   // If HF is configured but failed (and debug isn't enabled), we still return model so UI can show "configured but not used".
   if (hfToken && hfModel) {
+    if (forceHF) {
+      return {
+        text: buildLocalAIReply(message, snapshot),
+        provider: "huggingface",
+        model: hfModel,
+        error: "HF request failed (no response).",
+      };
+    }
     return { text: buildLocalAIReply(message, snapshot), provider: "local", model: hfModel, error: null };
   }
   return { text: buildLocalAIReply(message, snapshot), provider: "local", model: null, error: null };
@@ -746,10 +854,18 @@ exports.sendMessage = async (req, res) => {
 
     const snapshot = await buildBusinessSnapshot();
     const intent = detectIntent(cleanMessage);
+    const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase();
 
     // Deterministic real-time answers for common questions to avoid model hallucination.
-    const direct = answerFromSnapshot(intent, snapshot);
-    const dbDirect = direct == null ? await answerFromDatabase(intent) : null;
+    const direct =
+      forceProvider === "huggingface" ? null : answerFromSnapshot(intent, snapshot);
+    const dbDirect =
+      forceProvider === "huggingface"
+        ? null
+        : direct == null
+          ? await answerFromDatabase(intent)
+          : null;
+
     const ai =
       direct != null
         ? { text: direct, provider: "local", model: process.env.HF_MODEL || null, error: null }
@@ -760,6 +876,7 @@ exports.sendMessage = async (req, res) => {
               context: (chat && chat.context) || "general",
               history: (chat && chat.messages) || [],
               snapshot,
+              forceProvider,
             });
 
     const aiResponse = {

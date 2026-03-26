@@ -1,7 +1,7 @@
 ﻿// src/pages/Dashboard.jsx
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
-import { Truck, Box, Coins, AlertTriangle } from "lucide-react";
+import { Truck, Box, Coins, AlertTriangle, Info } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -30,6 +30,11 @@ export default function Dashboard() {
     pendingPayments: 0,
   });
   const [activities, setActivities] = useState([]);
+  const [pendingBreakdown, setPendingBreakdown] = useState({
+    gatePassOut: 0,
+    total: 0,
+  });
+  const [showPendingInfo, setShowPendingInfo] = useState(false);
   const [stockSummary, setStockSummary] = useState({
     productionKg: 0,
   });
@@ -50,6 +55,10 @@ export default function Dashboard() {
           bagsInward: data.bagsInward || 0,
           bagsOutward: data.bagsOutward || 0,
           pendingPayments: data.pendingPayments || 0,
+        });
+        setPendingBreakdown({
+          gatePassOut: data.pendingPaymentsBreakdown?.gatePassOut || 0,
+          total: data.pendingPaymentsBreakdown?.total || data.pendingPayments || 0,
         });
         setActivities(data.recentActivities || []);
         setStockSummary({
@@ -90,6 +99,7 @@ export default function Dashboard() {
       value: stats.pendingPayments,
       icon: <AlertTriangle size={20} />,
       color: "red",
+      info: true,
     },
   ];
 
@@ -158,11 +168,55 @@ export default function Dashboard() {
                   Data from production module
                 </div>
               </div>
-              <div className="text-emerald-600">{c.icon}</div>
+              <div className="flex items-center gap-2">
+                {c.info && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPendingInfo(true)}
+                    className="text-emerald-700 hover:text-emerald-900"
+                    title="Pending payments breakdown"
+                  >
+                    <Info size={16} />
+                  </button>
+                )}
+                <div className="text-emerald-600">{c.icon}</div>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {showPendingInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-emerald-900">
+                Pending Payments Breakdown
+              </h3>
+              <button
+                className="text-gray-500 hover:text-gray-700"
+                onClick={() => setShowPendingInfo(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span>GatePass Out Pending</span>
+                <span className="font-semibold">
+                  Rs. {Number(pendingBreakdown.gatePassOut || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-t pt-2 mt-2">
+                <span className="font-semibold">Total</span>
+                <span className="font-bold">
+                  Rs. {Number(pendingBreakdown.total || 0).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Activities + Graph */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

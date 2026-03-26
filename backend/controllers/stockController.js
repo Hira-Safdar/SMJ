@@ -22,7 +22,7 @@ function makeKey(companyId, companyName, productTypeId, productTypeName) {
 function normalizeProductName(productTypeId, productTypeName) {
   if (!productTypeId) {
     const n = String(productTypeName || "").trim().toLowerCase();
-    if (n === "paddy" || n === "unprocessed paddy") return "Unprocessed Paddy";
+    if (n === "paddy" || n === "unprocessed paddy") return "Paddy";
   }
   return productTypeName || "";
 }
@@ -118,6 +118,36 @@ exports.getCurrentStock = async (req, res) => {
         dateTime,
         {
           sourceType: l.gatePassId ? "Gate Pass" : "Production",
+          refNo: l.gatePassNo || "-",
+          date: l.date,
+          dateTime,
+          qtyKg: delta,
+          direction: l.type,
+        }
+      );
+    }
+
+    // 0.5️⃣ Gate pass / ledger entries for finished products (non-paddy)
+    const finishedLedgerRows = await StockLedger.find({
+      $or: [
+        { productTypeId: { $ne: null } },
+        { productTypeName: { $not: /^(paddy|unprocessed paddy)\s*$/i } },
+      ],
+    }).lean();
+    for (const l of finishedLedgerRows) {
+      const net = Number(l.netWeightKg || 0);
+      if (!net) continue;
+      const delta = l.type === "OUT" ? -net : net;
+      const dateTime = l.updatedAt || l.createdAt;
+      addToMap(
+        l.companyId || null,
+        l.companyName || "",
+        l.productTypeId || null,
+        l.productTypeName || "",
+        delta,
+        dateTime,
+        {
+          sourceType: l.gatePassId ? "Gate Pass" : "Ledger",
           refNo: l.gatePassNo || "-",
           date: l.date,
           dateTime,

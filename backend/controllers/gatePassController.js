@@ -2,6 +2,7 @@
 const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const SystemSettings = require("../models/systemSettingsModel");
+const ProductType = require("../models/productTypeModel");
 
 const toKg = (quantity, unit, bagWeightKg = 65) => {
   const qty = Number(quantity || 0);
@@ -31,7 +32,7 @@ const normalizeRawPaddyName = (name) => {
 const normalizeBrandName = (name) => String(name || "").trim();
 
 /** Build production ledger ops from items array (e.g. req.body.items or gp.items). Use gp for type, id, gatePassNo, createdAt. */
-const buildProductionOpsFromItems = (items, gp, bagWeightKg = 65) => {
+const buildProductionOpsFromItems = (items, gp, bagWeightKg = 65, productTypeMap = null) => {
   const ops = [];
   if (!items || !Array.isArray(items) || !["IN", "OUT"].includes(gp.type)) return ops;
   const date = gp.date || gp.createdAt || new Date();
@@ -50,12 +51,21 @@ const buildProductionOpsFromItems = (items, gp, bagWeightKg = 65) => {
       normalizeBrandName(item?.brand) ||
       normalizeBrandName(gp.supplier) ||
       "SMJ Own";
+    let productTypeId = null;
+    if (productTypeMap && name && normalizeRawPaddyName(name) !== "Unprocessed Paddy") {
+      const key = `${String(paddyCompanyName || "").toLowerCase()}::${String(name).toLowerCase()}`;
+      const fallbackKey = `::${String(name).toLowerCase()}`;
+      productTypeId =
+        productTypeMap.get(key) ||
+        productTypeMap.get(fallbackKey) ||
+        null;
+    }
     ops.push({
       date,
       type: gp.type === "OUT" ? "OUT" : "IN",
       companyId: null,
       companyName: paddyCompanyName,
-      productTypeId: null,
+      productTypeId,
       productTypeName: name,
       numBags: 0,
       netWeightKg: kg,
@@ -123,8 +133,19 @@ exports.createGatePass = async (req, res) => {
     try {
       const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
       const bagWeightKg = settings && settings.defaultBagWeightKg != null ? settings.defaultBagWeightKg : 65;
+      const productDocs = await ProductType.find({})
+        .select("_id name brand")
+        .lean();
+      const productTypeMap = new Map();
+      productDocs.forEach((p) => {
+        if (!p?.name) return;
+        const nameKey = String(p.name).toLowerCase();
+        const brandKey = String(p.brand || "").toLowerCase();
+        productTypeMap.set(`${brandKey}::${nameKey}`, p._id);
+        productTypeMap.set(`::${nameKey}`, p._id);
+      });
       // Use body.items (what was sent) so we don't rely on saved doc shape; gp provides _id, gatePassNo, createdAt
-      const productionOps = buildProductionOpsFromItems(body.items || [], gp, bagWeightKg);
+      const productionOps = buildProductionOpsFromItems(body.items || [], gp, bagWeightKg, productTypeMap);
       if (productionOps.length > 0) {
         await StockLedger.insertMany(productionOps);
       }
@@ -219,7 +240,18 @@ exports.updateGatePass = async (req, res) => {
         await StockLedger.deleteMany({ gatePassId: gp._id });
         const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
         const bagWeightKg = settings && settings.defaultBagWeightKg != null ? settings.defaultBagWeightKg : 65;
-        const productionOps = buildProductionOpsFromItems(body.items || gp.items || [], gp, bagWeightKg);
+        const productDocs = await ProductType.find({})
+          .select("_id name brand")
+          .lean();
+        const productTypeMap = new Map();
+        productDocs.forEach((p) => {
+          if (!p?.name) return;
+          const nameKey = String(p.name).toLowerCase();
+          const brandKey = String(p.brand || "").toLowerCase();
+          productTypeMap.set(`${brandKey}::${nameKey}`, p._id);
+          productTypeMap.set(`::${nameKey}`, p._id);
+        });
+        const productionOps = buildProductionOpsFromItems(body.items || gp.items || [], gp, bagWeightKg, productTypeMap);
         if (productionOps.length > 0) {
           await StockLedger.insertMany(productionOps);
         }

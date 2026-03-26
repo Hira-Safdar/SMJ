@@ -435,7 +435,7 @@ export default function DataTable({
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`p-2 text-left font-medium whitespace-nowrap ${col.sortable === false ? "" : "cursor-pointer select-none"}`}
+                  className={`p-2 ${col.align === "center" ? "text-center" : col.align === "right" ? "text-right" : "text-left"} font-medium whitespace-nowrap ${col.sortable === false ? "" : "cursor-pointer select-none"}`}
                   onClick={() => {
                     if (col.sortable === false) return;
                     setSort((prev) => {
@@ -473,7 +473,10 @@ export default function DataTable({
                 className={`border-t border-gray-100 hover:bg-gray-50 ${isActive ? "bg-emerald-50" : ""} ${rowClassName ? rowClassName(row) : ""}`}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className="p-2">
+                  <td
+                    key={col.key}
+                    className={`p-2 ${col.align === "center" ? "text-center" : col.align === "right" ? "text-right" : "text-left"}`}
+                  >
                     {col.render ? col.render(row[col.key], row) : row[col.key] ?? "-"}
                   </td>
                 ))}

@@ -129,27 +129,26 @@ export default function Stock() {
     }
   }
 
+  useEffect(() => {
+    const onRefresh = () => {
+      loadData();
+    };
+    window.addEventListener("stock:refresh", onRefresh);
+    return () => window.removeEventListener("stock:refresh", onRefresh);
+  }, []);
+
   async function handleSaveStockThresholds(pinToSave) {
-    const extreme = Math.max(
-      0,
-      Math.floor(Number(stockThresholdForm.extremeLowKg) || 0),
-    );
     const low = Math.max(0, Math.floor(Number(stockThresholdForm.lowKg) || 0));
-    if (extreme > low) {
-      toast.error("Extreme low (kg) must be ≤ Low (kg)");
-      return;
-    }
     setSavingThresholds(true);
     try {
       const res = await api.put("/settings", {
-        stockStatusExtremeLowKg: extreme,
         stockStatusLowKg: low,
         adminPin: pinToSave,
       });
       if (res.data?.success) {
         setSettings((s) => ({ ...s, ...res.data.data }));
         setStockThresholdForm({
-          extremeLowKg: String(extreme),
+          extremeLowKg: "",
           lowKg: String(low),
         });
         setSaveThresholdPinDialog({ open: false, pin: "", pinError: "" });
@@ -232,18 +231,29 @@ export default function Stock() {
 
   const allCompanies = useMemo(() => {
     const s = new Set();
+    (settings?.brandOptions || []).forEach((b) => b && s.add(b));
     stockRows.forEach((r) => {
       const brand = getBrand(r);
       if (brand) s.add(brand);
     });
     return Array.from(s);
-  }, [stockRows, brandById, brandByName]);
+  }, [stockRows, brandById, brandByName, settings]);
 
   const allProducts = useMemo(() => {
     const s = new Set();
+    (products || []).forEach((p) => p?.name && s.add(p.name));
     stockRows.forEach((r) => r.productTypeName && s.add(r.productTypeName));
-    return Array.from(s);
-  }, [stockRows]);
+    const list = Array.from(s).map((n) =>
+      String(n).toLowerCase() === "unprocessed paddy" ? "Paddy" : n
+    );
+    const unique = Array.from(new Set(list));
+    unique.sort((a, b) => {
+      if (a === "Paddy") return -1;
+      if (b === "Paddy") return 1;
+      return String(a).localeCompare(String(b));
+    });
+    return unique;
+  }, [stockRows, products]);
 
   // --------------------------------------------------------------------
   // DEPENDENT PRODUCT LIST
@@ -368,34 +378,18 @@ export default function Stock() {
   // --------------------------------------------------------------------
   // STATUS LOGIC (uses settings thresholds; 0 = out of stock)
   // --------------------------------------------------------------------
-  const extremeLowKg = Number(settings.stockStatusExtremeLowKg) || 300;
   const lowKg = Number(settings.stockStatusLowKg) || 500;
-  function statusOf(r) {
-    const w = r.balanceKg || 0;
-    if (w <= 0) return "OUT";
-    if (w <= extremeLowKg) return "EXTREME_LOW";
-    if (w <= lowKg) return "LOW";
+  function statusOfWeight(w) {
+    const qty = Number(w || 0);
+    if (qty <= 0) return "OUT";
+    if (qty <= lowKg) return "LOW";
     return "OK";
   }
 
-  function rowColor(status) {
-    if (status === "OUT") return "bg-red-50";
-    if (status === "EXTREME_LOW") return "bg-red-100";
-    if (status === "LOW") return "bg-yellow-50";
-    return "bg-green-50";
-  }
-
-  function statusBadge(status) {
-    if (status === "OUT")
-      return <span className="text-red-700 font-semibold">Out of Stock</span>;
-
-    if (status === "EXTREME_LOW")
-      return <span className="text-red-600 font-semibold">Extreme Low</span>;
-
-    if (status === "LOW")
-      return <span className="text-yellow-600 font-semibold">Low Stock</span>;
-
-    return <span className="text-green-600 font-semibold">Available</span>;
+  function cellColor(status) {
+    if (status === "OUT") return "text-red-700";
+    if (status === "LOW") return "text-yellow-700";
+    return "text-green-700";
   }
 
   const stockTableData = useMemo(() => {
@@ -409,6 +403,7 @@ export default function Stock() {
         balanceKg: 0,
         lastUpdated: null,
         products: [],
+        productMap: {},
         sources: [],
       };
       const kg = Number(row.balanceKg || 0);
@@ -417,6 +412,9 @@ export default function Stock() {
         name: row.productTypeName || "Product",
         kg,
       });
+      const rawName = row.productTypeName || "Product";
+      const pName = String(rawName).toLowerCase() === "unprocessed paddy" ? "Paddy" : rawName;
+      existing.productMap[pName] = (existing.productMap[pName] || 0) + kg;
       if (Array.isArray(row.sources)) {
         existing.sources.push(...row.sources);
       }
@@ -426,16 +424,41 @@ export default function Stock() {
       }
       grouped.set(key, existing);
     });
-    return Array.from(grouped.values()).map((r) => ({
-      ...r,
-      productsText: r.products
-        .map((p) => `${p.name} (${Math.round(Number(p.kg || 0))} kg)`)
-        .join(", "),
-    }));
-  }, [filteredRows, brandById, brandByName]);
+    // Ensure all brands appear
+    allCompanies.forEach((brand) => {
+      const key = brand || "Unbranded";
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          __rowId: key,
+          companyName: key,
+          balanceKg: 0,
+          lastUpdated: null,
+          products: [],
+          productMap: {},
+          sources: [],
+        });
+      }
+    });
+    return Array.from(grouped.values());
+  }, [filteredRows, brandById, brandByName, allCompanies]);
 
   const stockColumns = useMemo(
-    () => [
+    () => {
+      const productCols = allProducts.map((name) => ({
+        key: `prod_${name}`,
+        label: name,
+        align: "center",
+        render: (_value, row) => {
+          const qty = Math.round(Number(row.productMap?.[name] || 0));
+          const status = statusOfWeight(qty);
+          return (
+            <span className={cellColor(status)}>
+              {qty}
+            </span>
+          );
+        },
+      }));
+      return [
       {
         key: "__info",
         label: "",
@@ -456,53 +479,30 @@ export default function Stock() {
         label: "Company Name",
         render: (_value, row) => getBrand(row),
       },
-      {
-        key: "productsText",
-        label: "Products",
-        render: (_value, row) => row.productsText || "-",
-      },
-      {
-        key: "balanceKg",
-        label: "Stock (kg)",
-        render: (_value, row) => (
-          <span className="block text-center">
-            {Math.round(Number(row.balanceKg ?? 0))}
-          </span>
-        ),
-      },
-      {
-        key: "__status",
-        label: "Status",
-        render: (_value, row) => statusBadge(statusOf(row)),
-      },
+      ...productCols,
       {
         key: "lastUpdated",
         label: "Updated",
         render: (_value, row) =>
           row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : "-",
       },
-    ],
-    [statusBadge, statusOf, brandById, brandByName],
+    ];
+    },
+    [allProducts, brandById, brandByName, cellColor, statusOfWeight],
   );
 
-  const exportRows = useMemo(
-    () =>
-      stockTableData.map((r) => ({
+  const exportRows = useMemo(() => {
+    return stockTableData.map((r) => {
+      const row = {
         "Company Name": getBrand(r) || "-",
-        Products: r.productsText || "-",
-        "Stock (kg)": Math.round(Number(r.balanceKg || 0)),
-        Status:
-          statusOf(r) === "OUT"
-            ? "Out of Stock"
-            : statusOf(r) === "EXTREME_LOW"
-              ? "Extreme Low"
-              : statusOf(r) === "LOW"
-                ? "Low Stock"
-                : "Available",
-        Updated: r.lastUpdated ? new Date(r.lastUpdated).toLocaleString() : "-",
-      })),
-    [stockTableData, statusOf, brandById, brandByName],
-  );
+      };
+      allProducts.forEach((p) => {
+        row[p] = Math.round(Number(r.productMap?.[p] || 0));
+      });
+      row.Updated = r.lastUpdated ? new Date(r.lastUpdated).toLocaleString() : "-";
+      return row;
+    });
+  }, [stockTableData, allProducts, brandById, brandByName]);
 
   const handleExportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(exportRows);
@@ -614,29 +614,7 @@ export default function Stock() {
               )}
             </div>
             {!stockThresholdsUnlocked ? null : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs items-end">
-                <div>
-                  <label className="block text-[11px] text-gray-500 mb-1">
-                    Extreme low (kg)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={stockThresholdForm.extremeLowKg}
-                    onChange={(e) =>
-                      setStockThresholdForm((f) => ({
-                        ...f,
-                        extremeLowKg:
-                          e.target.value.replace(/\D/g, "").slice(0, 8) || "",
-                      }))
-                    }
-                    placeholder="e.g. 300"
-                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                  />
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    Below this = Extreme low
-                  </p>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs items-end">
                 <div>
                   <label className="block text-[11px] text-gray-500 mb-1">
                     Low (kg)
@@ -909,10 +887,7 @@ export default function Stock() {
               <div className="bg-white rounded-lg p-4 w-full max-w-lg shadow-xl max-h-[80vh] overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-emerald-800">
-                    Stock source details — {sourceModalRow.productsText || "Products"}
-                    {sourceModalRow.companyName
-                      ? ` (${sourceModalRow.companyName})`
-                      : ""}
+                    Stock source details — {sourceModalRow.companyName || "Company"}
                   </h3>
                   <button
                     className="text-gray-500 hover:text-gray-700"
@@ -930,6 +905,7 @@ export default function Stock() {
                     <table className="w-full border rounded">
                       <thead className="bg-emerald-50 text-emerald-800 sticky top-0">
                         <tr>
+                          <th className="p-2 text-left">Product</th>
                           <th className="p-2 text-left">Source</th>
                           <th className="p-2 text-left">Ref No</th>
                           <th className="p-2 text-left">Date/Time</th>
@@ -938,9 +914,12 @@ export default function Stock() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(sourceModalRow.sources || []).map((s, i) => (
-                          <tr key={i} className="border-t">
-                            <td className="p-2">{s.sourceType}</td>
+                          {(sourceModalRow.sources || []).map((s, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="p-2">
+                                {s.productTypeName || sourceModalRow.companyName || "-"}
+                              </td>
+                              <td className="p-2">{s.sourceType}</td>
                             <td className="p-2">{s.refNo}</td>
                             <td className="p-2">
                               {s.dateTime
@@ -1076,7 +1055,7 @@ export default function Stock() {
                 idKey="__rowId"
                 emptyMessage={loading ? "Loading..." : "No stock records found."}
                 pageSize={10}
-                rowClassName={(row) => rowColor(statusOf(row))}
+                rowClassName={() => ""}
                 showSearch={false}
                 showFilters={false}
                 showClearFilters={false}

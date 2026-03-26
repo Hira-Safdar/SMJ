@@ -93,41 +93,21 @@ const getDashboardStats = async (req, res) => {
       }
     });
 
-    const transactionsToday = await Transaction.find({
-      type: "SALE",
-      date: { $gte: startOfDay, $lte: endOfDay },
-    })
-      .select("paymentStatus totalAmount partialPaid")
+    const gatePassOutPayments = await GatePass.find({ type: "OUT" })
+      .select("paymentStatus amountPaid remainingAmount")
       .lean();
-    const transactionsAll = await Transaction.find({
-      type: "SALE",
-    })
-      .select("paymentStatus totalAmount partialPaid")
-      .lean();
-
-    const paidAmount = (t) => {
-      const total = Number(t.totalAmount || 0);
-      if (t.paymentStatus === "PAID") return total;
-      if (t.paymentStatus === "PARTIAL")
-        return Number(t.partialPaid || 0);
-      return 0;
-    };
-
-    const remainingAmount = (t) => {
-      const total = Number(t.totalAmount || 0);
-      if (t.paymentStatus === "UNPAID") return total;
-      if (t.paymentStatus === "PARTIAL")
-        return Math.max(total - Number(t.partialPaid || 0), 0);
-      return 0;
-    };
 
     let cashInHand = 0;
     let pendingPayments = 0;
-    transactionsToday.forEach((t) => {
-      cashInHand += paidAmount(t);
-    });
-    transactionsAll.forEach((t) => {
-      pendingPayments += remainingAmount(t);
+    let pendingGatePass = 0;
+    gatePassOutPayments.forEach((gp) => {
+      const paid = Number(gp.amountPaid || 0);
+      const rem = Number(gp.remainingAmount || 0);
+      cashInHand += paid;
+      if (rem > 0) {
+        pendingPayments += rem;
+        pendingGatePass += rem;
+      }
     });
 
     const RECENT_LIMIT = 8;
@@ -335,6 +315,10 @@ const getDashboardStats = async (req, res) => {
         // Finance
         cashInHand,
         pendingPayments,
+        pendingPaymentsBreakdown: {
+          gatePassOut: pendingGatePass,
+          total: pendingPayments,
+        },
 
         recentActivities,
         stockSummary: {

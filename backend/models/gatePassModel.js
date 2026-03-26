@@ -41,6 +41,31 @@ const ItemSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    bagCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    bagWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    emptyBagWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    grossWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    netWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
   },
   { _id: true }
 );
@@ -154,6 +179,20 @@ const GatePassSchema = new mongoose.Schema(
 
     // Freight charges
     freightCharges: {
+      type: Number,
+      min: 0,
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["PAID", "UNPAID", "PARTIAL"],
+      default: "PAID",
+    },
+    amountPaid: {
+      type: Number,
+      min: 0,
+    },
+    remainingAmount: {
       type: Number,
       min: 0,
     },

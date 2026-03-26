@@ -14,10 +14,8 @@ import {
   Box,
   Lock,
   Edit2,
-  Clock,
 } from "lucide-react";
 import Pin4Input from "../components/Pin4Input";
-import AddOptionModal from "../components/ui/AddOptionModal";
 
 const OTHER_OPTION = "__OTHER__";
 
@@ -69,12 +67,13 @@ export default function Production() {
 
   const [outputForm, setOutputForm] = useState({
     productTypeId: "",
+    productMode: "list",
+    productInput: "",
     numBags: "",
     perBagWeightKg: "",
     netWeightKg: "",
     durationMinutes: "0",
     durationUnit: "min",
-    plannedCompleteAt: "",
   });
 
   // Delete completed batch confirmation
@@ -89,11 +88,6 @@ export default function Production() {
   const [lastEnteredPin, setLastEnteredPin] = useState("");
   const [editingOutputId, setEditingOutputId] = useState(null);
   const [editOutputForm, setEditOutputForm] = useState({ numBags: "", perBagWeightKg: "", durationMinutes: "0", productTypeId: "" });
-  const [nowTick, setNowTick] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
   const [savingOutputId, setSavingOutputId] = useState(null);
   const [editingBatchInfo, setEditingBatchInfo] = useState(false);
   const [settings, setSettings] = useState({
@@ -104,25 +98,6 @@ export default function Production() {
   const [zeroPaddyConfirm, setZeroPaddyConfirm] = useState(false);
   const [zeroPaddyPin, setZeroPaddyPin] = useState("");
   const [zeroingPaddy, setZeroingPaddy] = useState(false);
-  const [newProductModal, setNewProductModal] = useState({
-    open: false,
-    saving: false,
-    error: "",
-    productRows: [],
-    draft: {
-      nameOther: "",
-      showList: false,
-      bagKg: "65",
-      tonKg: "1000",
-      pricePerKg: "",
-    },
-    errors: {},
-  });
-  const [timePickerOpen, setTimePickerOpen] = useState(false);
-  const [timePicker, setTimePicker] = useState({ hour: "08", minute: "00", ampm: "AM" });
-  const [timePickerMode, setTimePickerMode] = useState("hour");
-  const [timePickerDragging, setTimePickerDragging] = useState(false);
-  const timeDialRef = useRef(null);
 
   // Slip preview (Print opens with this batch)
   const [printBatch, setPrintBatch] = useState(null);
@@ -133,7 +108,6 @@ export default function Production() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [returnedRemainingBatches, setReturnedRemainingBatches] = useState(() => new Set());
   const detailSectionRef = useRef(null);
-  const timePickerRef = useRef(null);
   const [millInfo, setMillInfo] = useState({
     name: "SMJ Rice Mill",
     address: "Mirza Virkan Road, Sheikhupura",
@@ -243,63 +217,6 @@ export default function Production() {
       }));
     }
   }, [settings.defaultBagWeightKg]);
-
-  // Live tick for countdown display
-  useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const durationToMinutes = (value, unit) => {
-    const v = Math.max(0, Math.floor(Number(value || 0)) || 0);
-    if (unit === "hr") return v * 60;
-    return v;
-  };
-
-  const formatCountdown = (ms) => {
-    const total = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-    if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-    return `${s}s`;
-  };
-
-  const buildPlannedCompleteAt = (timeStr) => {
-    if (!timeStr) return null;
-    if (timeStr.includes("T")) {
-      const d = new Date(timeStr);
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
-    const base = selectedBatch?.date ? new Date(selectedBatch.date) : new Date();
-    const [hh, mm] = String(timeStr).split(":").map((n) => Number(n || 0));
-    if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-    const d = new Date(base);
-    d.setHours(hh, mm, 0, 0);
-    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
-    return d;
-  };
-
-  const setTimeFromAngle = (clientX, clientY) => {
-    const dial = timeDialRef.current;
-    if (!dial) return;
-    const rect = dial.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = clientX - cx;
-    const dy = clientY - cy;
-    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-    angle = (angle + 90 + 360) % 360;
-    if (timePickerMode === "hour") {
-      let h = Math.round(angle / 30);
-      if (h === 0) h = 12;
-      setTimePicker((p) => ({ ...p, hour: String(h).padStart(2, "0") }));
-    } else {
-      let m = Math.round(angle / 6) % 60;
-      setTimePicker((p) => ({ ...p, minute: String(m).padStart(2, "0") }));
-    }
-  };
 
   // Auto net weight = bags * perBagWeightKg (integer)
   useEffect(() => {
@@ -515,201 +432,46 @@ export default function Production() {
       .trim()
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const sanitizeIntegerText = (value, max = 8) =>
-    String(value || "")
-      .replace(/\D/g, "")
-      .slice(0, max);
-
-  const validateBrandRow = (row = {}) => {
-    const errors = {};
-    const name = String(row.name || "").trim();
-    if (!name) errors.name = "Product name is required";
-    if (!String(row.bagKg || "").trim()) errors.bagKg = "Required";
-    if (!String(row.tonKg || "").trim()) errors.tonKg = "Required";
-    if (!String(row.pricePerKg || "").trim()) errors.pricePerKg = "Required";
-    if (!errors.bagKg && Number(row.bagKg) <= 0) errors.bagKg = "Must be greater than 0";
-    if (!errors.tonKg && Number(row.tonKg) <= 0) errors.tonKg = "Must be greater than 0";
-    return errors;
-  };
-
-  const openNewProductModal = () => {
-    const bagKg = settings.defaultBagWeightKg || 65;
-    setNewProductModal({
-      open: true,
-      saving: false,
-      error: "",
-      productRows: [],
-      draft: {
-        nameOther: "",
-        showList: false,
-        bagKg: String(bagKg),
-        tonKg: "1000",
-        pricePerKg: "",
-      },
-      errors: {},
-    });
-  };
-
-  const productNameOptions = Array.from(
-    new Set((products || []).map((p) => String(p.name || "").trim()).filter(Boolean))
-  ).sort();
-  const existingBrandProductNames = new Set(
-    (products || [])
-      .filter(
-        (p) =>
-          selectedBatch?.sourceCompanyName &&
-          normalizeText(p.brand) === normalizeText(selectedBatch.sourceCompanyName)
-      )
-      .map((p) => normalizeText(p.name))
-  );
-
-  const handleDraftChange = (field, rawValue) => {
-    setNewProductModal((prev) => {
-      const draft = { ...(prev.draft || {}) };
-      if (field === "nameOther") {
-        draft.nameOther = sanitizeBrandText(rawValue, 80);
-      } else if (field === "toggleProductList") {
-        draft.showList = !draft.showList;
-      } else if (field === "bagKg" || field === "tonKg") {
-        draft[field] = sanitizeIntegerText(rawValue, 5);
-      } else {
-        draft[field] = sanitizeIntegerText(rawValue, 8);
-      }
-      return { ...prev, draft, errors: { ...(prev.errors || {}), draft: {}, rowsGeneral: "" } };
-    });
-  };
-
-  const addDraftProductRow = () => {
-    const name = String(newProductModal.draft?.nameOther || "").trim();
-    const row = {
-      name,
-      bagKg: String(newProductModal.draft?.bagKg || "").trim(),
-      tonKg: String(newProductModal.draft?.tonKg || "").trim(),
-      pricePerKg: String(newProductModal.draft?.pricePerKg || "").trim(),
-    };
-    const rowError = validateBrandRow(row);
-    if (Object.keys(rowError).length > 0) {
-      setNewProductModal((prev) => ({
-        ...prev,
-        errors: { ...(prev.errors || {}), draft: rowError },
-      }));
+  const addProductByName = async (rawName) => {
+    const name = toTitleCase(String(rawName || ""));
+    if (!name) {
+      setFieldErrors((e) => ({ ...e, outputProduct: "Enter product name." }));
       return;
     }
-    const brandName = String(selectedBatch?.sourceCompanyName || "").trim();
-    const existsInBrand = (products || []).some(
-      (p) =>
-        normalizeText(p.brand) === normalizeText(brandName) &&
-        normalizeText(p.name) === normalizeText(name)
+    const existing = (products || []).find(
+      (p) => normalizeText(p.name) === normalizeText(name)
     );
-    if (existsInBrand) {
-      setNewProductModal((prev) => ({
-        ...prev,
-        errors: { ...(prev.errors || {}), draft: { name: "Product already exists." } },
+    if (existing) {
+      setOutputForm((f) => ({
+        ...f,
+        productTypeId: existing._id,
+        productMode: "list",
+        productInput: "",
       }));
+      setFieldErrors((e) => ({ ...e, outputProduct: "" }));
       return;
     }
-    const duplicate = (newProductModal.productRows || []).some(
-      (r) => normalizeText(r.name) === normalizeText(name)
-    );
-    if (duplicate) {
-      setNewProductModal((prev) => ({
-        ...prev,
-        errors: { ...(prev.errors || {}), draft: { name: "Duplicate product name." } },
-      }));
-      return;
-    }
-    setNewProductModal((prev) => ({
-      ...prev,
-      productRows: [
-        ...(prev.productRows || []),
-        {
-          ...row,
-          pricePerBag: String(
-            Math.round(Number(row.pricePerKg || 0) * Number(row.bagKg || 0))
-          ),
-          pricePerTon: String(
-            Math.round(Number(row.pricePerKg || 0) * Number(row.tonKg || 0))
-          ),
-        },
-      ],
-      draft: {
-        nameOther: "",
-        showList: false,
-        bagKg: prev.draft?.bagKg || "65",
-        tonKg: prev.draft?.tonKg || "1000",
-        pricePerKg: "",
-      },
-      errors: { ...(prev.errors || {}), draft: {}, rowsGeneral: "" },
-    }));
-  };
-
-  const saveNewProduct = async () => {
-    if (!selectedBatch?.sourceCompanyName) {
-      setNewProductModal((p) => ({ ...p, error: "Select a source company name first." }));
-      return;
-    }
-    const rows = Array.isArray(newProductModal.productRows)
-      ? newProductModal.productRows
-      : [];
-    const rowErrors = rows.map((row) => validateBrandRow(row));
-    const hasRowErrors = rowErrors.some((e) => Object.keys(e).length > 0);
-    const rowsGeneral = rows.length === 0 ? "Add at least one product." : "";
-    if (hasRowErrors || rowsGeneral) {
-      setNewProductModal((prev) => ({
-        ...prev,
-        errors: { ...(prev.errors || {}), rows: rowErrors, rowsGeneral },
-      }));
-      return;
-    }
-
-    setNewProductModal((p) => ({ ...p, saving: true, error: "" }));
     try {
-      let firstNewId = "";
-      for (const row of rows) {
-        const pricePerKg = Number(row.pricePerKg || 0);
-        const bagKg = Math.max(1, Number(row.bagKg || 65));
-        const tonKg = Math.max(1, Number(row.tonKg || 1000));
-        const payload = {
-          name: row.name,
-          brand: selectedBatch.sourceCompanyName,
-          baseUnit: "KG",
-          allowableSaleUnits: ["Bag", "Ton", "KG"],
-          conversionFactors: { KG: 1, Bag: bagKg, Ton: tonKg },
-          pricePerKg: Math.round(pricePerKg),
-          pricePerBag: Math.round(pricePerKg * bagKg),
-          pricePerTon: Math.round(pricePerKg * tonKg),
-        };
-        const res = await api.post("/product-types", payload);
-        if (!firstNewId) firstNewId = res.data?.data?._id || "";
-      }
-      await loadMeta();
-      if (firstNewId) {
-        if (editingOutputId) {
-          setEditOutputForm((f) => ({ ...f, productTypeId: firstNewId }));
-        } else {
-          setOutputForm((f) => ({ ...f, productTypeId: firstNewId }));
-        }
-      }
-      setNewProductModal({
-        open: false,
-        saving: false,
-        error: "",
-        productRows: [],
-        draft: {
-          nameOther: "",
-          showList: false,
-          bagKg: String(settings.defaultBagWeightKg || 65),
-          tonKg: "1000",
-          pricePerKg: "",
-        },
-        errors: {},
+      const bagKg = Number(settings.defaultBagWeightKg || 65);
+      const res = await api.post("/product-types", {
+        name,
+        brand: "",
+        pricePerKg: 0,
+        pricePerBag: 0,
+        pricePerTon: 0,
+        conversionFactors: { KG: 1, Bag: bagKg, Ton: 1000 },
       });
-    } catch (err) {
-      setNewProductModal((p) => ({
-        ...p,
-        saving: false,
-        error: err?.response?.data?.message || "Failed to add product.",
+      const created = res.data?.data || res.data;
+      await loadMeta();
+      setOutputForm((f) => ({
+        ...f,
+        productTypeId: created._id || "",
+        productMode: "list",
+        productInput: "",
       }));
+      setFieldErrors((e) => ({ ...e, outputProduct: "" }));
+    } catch {
+      setFieldErrors((e) => ({ ...e, outputProduct: "Failed to add product." }));
     }
   };
 
@@ -771,9 +533,6 @@ export default function Production() {
     if (!outputForm.productTypeId) err.outputProduct = "Select product.";
     if (!outputForm.numBags) err.outputBags = "Enter bags.";
     if (!outputForm.perBagWeightKg) err.outputPerBag = "Select product to fetch bag weight.";
-    if (!outputForm.plannedCompleteAt) {
-      err.outputSchedule = "Pick completion time.";
-    }
     const currentOutputsTotal = (selectedBatch.outputs || []).reduce(
       (sum, o) => sum + (o.netWeightKg || 0),
       0
@@ -814,10 +573,6 @@ export default function Production() {
       perBagWeightKg: Number(outputForm.perBagWeightKg),
       durationMinutes: 0,
     };
-    if (outputForm.plannedCompleteAt) {
-      const d = buildPlannedCompleteAt(outputForm.plannedCompleteAt);
-      if (d) payload.plannedCompleteAt = d.toISOString();
-    }
     if (selectedBatch.status === "COMPLETED" && completedBatchUnlocked) {
       payload.adminPin = lastEnteredPin || settings.adminPin || "0000";
     }
@@ -839,7 +594,6 @@ export default function Production() {
           netWeightKg: "",
           durationMinutes: "0",
           durationUnit: "min",
-          plannedCompleteAt: "",
         });
         // keep output form visible
         await loadSummary();
@@ -1591,7 +1345,7 @@ export default function Production() {
                     <th className="p-2 text-left">Company Name</th>
                     <th className="p-2 text-left">Product</th>
                     <th className="p-2 text-left">Status</th>
-                    <th className="p-2 text-left">Complete At</th>
+                    <th className="p-2 text-left">Completed At</th>
                     <th className="p-2 text-right">Bags</th>
                     <th className="p-2 text-right">Net Wt</th>
                     {(selectedBatch.status === "IN_PROCESS" || selectedBatch.status === "COMPLETED") && (
@@ -1617,10 +1371,6 @@ export default function Production() {
                               value={editOutputForm.productTypeId || o.productTypeId}
                               onChange={(e) => {
                                 const nextId = e.target.value;
-                                if (nextId === OTHER_OPTION) {
-                                  openNewProductModal();
-                                  return;
-                                }
                                 const product = products.find((p) => p._id === nextId);
                                 setEditOutputForm((f) => ({
                                   ...f,
@@ -1643,16 +1393,9 @@ export default function Production() {
                               className="border rounded px-1 py-0.5 text-[11px] w-full"
                             >
                               <option value="">Select product</option>
-                              {products
-                                .filter((p) =>
-                                  selectedBatch.sourceCompanyName
-                                    ? p.brand === selectedBatch.sourceCompanyName
-                                    : true
-                                )
-                                .map((p) => (
+                              {products.map((p) => (
                                 <option key={p._id} value={p._id}>{p.name}</option>
                               ))}
-                              <option value={OTHER_OPTION}>Other (Add New)</option>
                             </select>
                           </td>
                           <td className="p-2">
@@ -1666,19 +1409,10 @@ export default function Production() {
                           <td className="p-2">
                             <input
                               type="text"
-                              value={
-                                o.plannedCompleteAt
-                                  ? new Date(o.plannedCompleteAt).toLocaleString()
-                                  : "-"
-                              }
+                              value={o.completedAt ? new Date(o.completedAt).toLocaleString() : "-"}
                               readOnly
                               className="border rounded px-1 py-0.5 text-[11px] w-full bg-gray-100 cursor-not-allowed"
                             />
-                            {(o.status || "COMPLETED") !== "COMPLETED" && o.plannedCompleteAt && (
-                              <div className="text-[10px] text-gray-500">
-                                {formatCountdown(new Date(o.plannedCompleteAt).getTime() - nowTick)} left
-                              </div>
-                            )}
                           </td>
                           <td className="p-2">
                             <input
@@ -1749,14 +1483,7 @@ export default function Production() {
                             {(o.status || "COMPLETED") === "COMPLETED" ? "Completed" : "In process"}
                           </td>
                           <td className="p-2">
-                            {(o.status || "COMPLETED") === "COMPLETED"
-                              ? (o.completedAt ? new Date(o.completedAt).toLocaleString() : "-")
-                              : (o.plannedCompleteAt ? new Date(o.plannedCompleteAt).toLocaleString() : "-")}
-                            {(o.status || "COMPLETED") !== "COMPLETED" && o.plannedCompleteAt && (
-                              <div className="text-[10px] text-gray-500">
-                                {formatCountdown(new Date(o.plannedCompleteAt).getTime() - nowTick)} left
-                              </div>
-                            )}
+                            {o.completedAt ? new Date(o.completedAt).toLocaleString() : "-"}
                           </td>
                           <td className="p-2 text-right">{o.numBags}</td>
                           <td className="p-2 text-right">{Math.round(Number(o.netWeightKg) || 0)}</td>
@@ -1782,7 +1509,7 @@ export default function Production() {
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-gray-600">
                         {selectedBatch.status === "IN_PROCESS"
-                          ? "Schedule outputs (they will auto-complete)."
+                          ? "Add output (it will go to stock immediately)."
                           : "Add output to a completed batch (admin unlock)."}{" "}
                       </div>
                       {selectedBatch.status === "IN_PROCESS" && null}
@@ -1798,32 +1525,58 @@ export default function Production() {
                             className="border rounded px-2 py-1 col-span-3 bg-gray-100 cursor-not-allowed"
                             placeholder="Source company"
                           />
+                          {outputForm.productMode === "list" ? (
                             <select
                               value={outputForm.productTypeId}
                               onChange={(e) => {
                                 const v = e.target.value;
                                 if (v === OTHER_OPTION) {
-                                  openNewProductModal();
+                                  setOutputForm((f) => ({
+                                    ...f,
+                                    productMode: "input",
+                                    productInput: "",
+                                    productTypeId: "",
+                                  }));
                                   return;
                                 }
-                                setOutputForm((f) => ({ ...f, productTypeId: v }));
+                                setOutputForm((f) => ({ ...f, productTypeId: v, productInput: "" }));
                                 setFieldErrors((e) => ({ ...e, outputProduct: "" }));
                               }}
                               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddOutput(); } }}
                               className={`border rounded px-2 py-1 col-span-3 ${fieldErrors.outputProduct ? "border-red-500 bg-red-50" : ""}`}
                             >
                               <option value="">Finished Product</option>
-                              {products
-                                .filter((p) =>
-                                  selectedBatch.sourceCompanyName
-                                    ? p.brand === selectedBatch.sourceCompanyName
-                                    : true
-                                )
-                                .map((p) => (
-                                  <option key={p._id} value={p._id}>{p.name}</option>
-                                ))}
-                              <option value={OTHER_OPTION}>Other (Add New)</option>
+                              {products.map((p) => (
+                                <option key={p._id} value={p._id}>{p.name}</option>
+                              ))}
+                              <option value={OTHER_OPTION}>Add New</option>
                             </select>
+                          ) : (
+                            <div className="col-span-3 flex items-center gap-2">
+                              <input
+                                value={outputForm.productInput || ""}
+                                onChange={(e) =>
+                                  setOutputForm((f) => ({ ...f, productInput: sanitizeBrandText(e.target.value, 80) }))
+                                }
+                                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addProductByName(outputForm.productInput); } }}
+                                placeholder="Enter product name"
+                                className={`flex-1 border rounded px-2 py-1 ${fieldErrors.outputProduct ? "border-red-500 bg-red-50" : ""}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!String(outputForm.productInput || "").trim()) {
+                                    setOutputForm((f) => ({ ...f, productMode: "list" }));
+                                    return;
+                                  }
+                                  await addProductByName(outputForm.productInput);
+                                }}
+                                className="px-3 py-1 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                              >
+                                List
+                              </button>
+                            </div>
+                          )}
                           {fieldErrors.outputProduct && <p className="text-[10px] text-red-600 col-span-3">{fieldErrors.outputProduct}</p>}
                           <input
                             type="number"
@@ -1851,64 +1604,17 @@ export default function Production() {
                             className="border rounded px-2 py-1 bg-gray-50"
                           />
                           {fieldErrors.outputTotal && <p className="text-[10px] text-red-600 col-span-3">{fieldErrors.outputTotal}</p>}
-                          <div className="col-span-3">
-                            <label className="block text-[11px] text-gray-500 mb-1">Schedule</label>
-                            <div className="flex flex-wrap gap-2 items-center">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const base = outputForm.plannedCompleteAt || "08:00";
-                                    const [hhRaw, mmRaw] = base.split(":");
-                                    let hh = Number(hhRaw || 8);
-                                    const mm = String(mmRaw || "00").padStart(2, "0");
-                                    let ampm = "AM";
-                                    if (hh === 0) {
-                                      hh = 12;
-                                      ampm = "AM";
-                                    } else if (hh === 12) {
-                                      ampm = "PM";
-                                    } else if (hh > 12) {
-                                      hh -= 12;
-                                      ampm = "PM";
-                                    }
-                                    setTimePicker({
-                                      hour: String(hh).padStart(2, "0"),
-                                      minute: mm,
-                                      ampm,
-                                    });
-                                    setTimePickerOpen(true);
-                                  }}
-                                  className="flex items-center gap-2 border rounded px-2 py-1 text-xs hover:bg-gray-50"
-                                  title="Pick completion time"
-                                >
-                                  <Clock className="w-4 h-4 text-gray-400" />
-                                  {outputForm.plannedCompleteAt || "Pick time"}
-                                </button>
-                              </div>
-                              <div className="text-[11px] text-gray-600">
-                                {(() => {
-                                  if (!outputForm.plannedCompleteAt) return "Pick time (required)";
-                                  const target = buildPlannedCompleteAt(outputForm.plannedCompleteAt);
-                                  if (!target) return "Invalid time";
-                                  const diffMin = Math.max(0, Math.round((target.getTime() - nowTick) / (60 * 1000)));
-                                  return `${diffMin} min`;
-                                })()}
-                              </div>
-                            </div>
-                            {fieldErrors.outputSchedule && (
-                              <p className="text-[10px] text-red-600 mt-0.5">{fieldErrors.outputSchedule}</p>
-                            )}
-                          </div>
                         </div>
-                        <button
-                          onClick={handleAddOutput}
-                          disabled={working}
-                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
-                        >
-                          <Plus size={14} />
-                          Add Output
-                        </button>
+                        <div className="flex justify-end">
+                          <button
+                            onClick={handleAddOutput}
+                            disabled={working}
+                            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            <Plus size={14} />
+                            Add Output
+                          </button>
+                        </div>
                       </>
                     )}
               </div>
@@ -2147,240 +1853,6 @@ export default function Production() {
         </div>
       )}
 
-      {/* Add new finished product (from production output) */}
-      <AddOptionModal
-        open={newProductModal.open}
-        title="Add Finished Product"
-        subtitle={
-          selectedBatch?.sourceCompanyName
-            ? `Company Name: ${selectedBatch.sourceCompanyName}`
-            : "Select a batch company name first"
-        }
-        submitLabel="Add"
-        loading={newProductModal.saving}
-        maxWidthClass="max-w-[20cm]"
-        onClose={() => setNewProductModal((p) => ({ ...p, open: false, error: "" }))}
-        onSubmit={saveNewProduct}
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-            <div className="grid grid-cols-12 gap-3">
-              <div className="col-span-12 md:col-span-6">
-                <label className="block text-xs text-gray-600 mb-1">Company Name *</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={selectedBatch?.sourceCompanyName || ""}
-                  className="w-full border rounded px-3 py-2 text-sm bg-gray-100 cursor-not-allowed"
-                  placeholder="Select a batch first"
-                />
-              </div>
-              <div className="col-span-12 md:col-span-6">
-                <label className="block text-xs text-gray-600 mb-1">Product Name *</label>
-                <div className="flex gap-2 relative">
-                  <input
-                    type="text"
-                    className={`w-full border rounded px-3 py-2 text-sm ${newProductModal.errors?.draft?.name ? "border-red-400 bg-red-50" : "border-gray-300"}`}
-                    value={newProductModal.draft?.nameOther || ""}
-                    onChange={(e) => handleDraftChange("nameOther", e.target.value)}
-                    onBlur={() =>
-                      setNewProductModal((prev) => ({
-                        ...prev,
-                        draft: {
-                          ...(prev.draft || {}),
-                          nameOther: toTitleCase(prev.draft?.nameOther || ""),
-                        },
-                      }))
-                    }
-                    placeholder="Enter product name"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleDraftChange("toggleProductList")}
-                    className="px-3 py-2 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                  >
-                    List
-                  </button>
-                  {newProductModal.draft?.showList && (
-                    <div className="absolute left-0 right-0 top-full mt-1 border rounded bg-white max-h-40 overflow-y-auto shadow z-10">
-                      {productNameOptions.length === 0 ? (
-                        <div className="px-2 py-2 text-xs text-gray-500">No products</div>
-                      ) : (
-                        <>
-                          {productNameOptions.filter((name) => !existingBrandProductNames.has(normalizeText(name))).length > 0 && (
-                            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-gray-400">Available</div>
-                          )}
-                          {productNameOptions
-                            .filter((name) => !existingBrandProductNames.has(normalizeText(name)))
-                            .map((name, idx) => (
-                              <button
-                                key={`prod-name-available-${name}-${idx}`}
-                                type="button"
-                                onClick={() => {
-                                  handleDraftChange("nameOther", name);
-                                  handleDraftChange("toggleProductList");
-                                }}
-                                className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50"
-                              >
-                                {name}
-                              </button>
-                            ))}
-                          {productNameOptions.filter((name) => existingBrandProductNames.has(normalizeText(name))).length > 0 && (
-                            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-gray-400 border-t">
-                              Already Added
-                            </div>
-                          )}
-                          {productNameOptions
-                            .filter((name) => existingBrandProductNames.has(normalizeText(name)))
-                            .map((name, idx) => (
-                              <button
-                                key={`prod-name-added-${name}-${idx}`}
-                                type="button"
-                                disabled
-                                className="w-full text-left px-2 py-1 text-sm text-gray-400 cursor-not-allowed bg-gray-50"
-                                title="Already added for this company name"
-                              >
-                                {name}
-                              </button>
-                            ))}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {newProductModal.errors?.draft?.name ? (
-                  <p className="mt-1 text-xs text-red-500">{newProductModal.errors.draft.name}</p>
-                ) : null}
-              </div>
-              <div className="col-span-12 md:col-span-3">
-                <label className="block text-xs text-gray-600 mb-1">Base Unit</label>
-                <input
-                  type="text"
-                  value="KG"
-                  readOnly
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-100 text-gray-600"
-                />
-              </div>
-
-              <div className="col-span-12 md:col-span-9">
-                <label className="block text-xs text-gray-600 mb-1">Processing Pricing per KG (PKR) *</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  className={`w-full border rounded px-3 py-2 text-sm ${newProductModal.errors?.draft?.pricePerKg ? "border-red-400 bg-red-50" : "border-gray-300"}`}
-                  value={newProductModal.draft?.pricePerKg || ""}
-                  onChange={(e) =>
-                    setNewProductModal((prev) => ({
-                      ...prev,
-                      draft: {
-                        ...(prev.draft || {}),
-                        pricePerKg: sanitizeIntegerText(e.target.value, 8),
-                      },
-                      errors: { ...(prev.errors || {}), draft: {} },
-                    }))
-                  }
-                  placeholder="Required"
-                />
-              </div>
-
-              <div className="col-span-12">
-                <label className="block text-xs text-gray-600 mb-1">
-                  Conversion Factor (1 unit = ? KG) - editable
-                </label>
-                <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span>1 Bag =</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    className={`w-24 border rounded px-2 py-1 ${newProductModal.errors?.draft?.bagKg ? "border-red-400 bg-red-50" : "border-gray-300"}`}
-                    value={newProductModal.draft?.bagKg || ""}
-                    onChange={(e) => handleDraftChange("bagKg", e.target.value)}
-                  />
-                  <span>KG</span>
-                  <span>1 Ton =</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    className={`w-24 border rounded px-2 py-1 ${newProductModal.errors?.draft?.tonKg ? "border-red-400 bg-red-50" : "border-gray-300"}`}
-                    value={newProductModal.draft?.tonKg || ""}
-                    onChange={(e) => handleDraftChange("tonKg", e.target.value)}
-                  />
-                  <span>KG</span>
-                  <button
-                    type="button"
-                    onClick={addDraftProductRow}
-                    className="ml-auto px-3 py-2 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                  >
-                    + Add Product
-                  </button>
-                </div>
-                {Object.values(newProductModal.errors?.draft || {}).length > 0 ? (
-                  <p className="mt-1 text-xs text-red-500">Please fill all required product fields.</p>
-                ) : null}
-              </div>
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-600 mb-1">Existing Products</div>
-            <div className="rounded border border-gray-200 p-2 min-h-[44px]">
-              {((products || []).filter((p) =>
-                selectedBatch?.sourceCompanyName
-                  ? normalizeText(p.brand) === normalizeText(selectedBatch.sourceCompanyName)
-                  : true
-              )).length === 0 ? (
-                <div className="text-xs text-gray-400">
-                  No products for this company name yet.
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {(products || [])
-                    .filter((p) =>
-                      selectedBatch?.sourceCompanyName
-                        ? normalizeText(p.brand) === normalizeText(selectedBatch.sourceCompanyName)
-                        : true
-                    )
-                    .map((p, idx) => (
-                      <div
-                        key={`existing-prod-${p._id || idx}`}
-                        className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs"
-                      >
-                        {p.name}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-          <div>
-            <div className="rounded border border-gray-200 p-2 min-h-[44px]">
-              {(newProductModal.productRows || []).length === 0 ? (
-                <div className="text-xs text-gray-400">No products added yet.</div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {(newProductModal.productRows || []).map((row, idx) => (
-                    <div
-                      key={`prod-pill-${idx}`}
-                      className="inline-flex items-center px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs"
-                    >
-                      <span>{row.name}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {newProductModal.errors?.rowsGeneral ? (
-              <p className="mt-1 text-xs text-red-500">{newProductModal.errors.rowsGeneral}</p>
-            ) : null}
-          </div>
-        </div>
-        <div className="text-[11px] text-gray-500">
-          Prices are stored per KG and auto-calculated for bag/ton.
-        </div>
-        <div className="text-[11px] text-red-600 min-h-[16px]">
-          {newProductModal.error || ""}
-        </div>
-      </AddOptionModal>
-
       {/* Error dialog */}
       {errorDialog.open && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -2393,139 +1865,6 @@ export default function Production() {
                 className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm"
               >
                 OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Custom time picker (AM/PM) */}
-      {timePickerOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full mx-4 p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-3">Set Completion Time</div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold text-emerald-700">
-                {timePicker.hour}:{timePicker.minute} {timePicker.ampm}
-              </div>
-              <div className="flex gap-1">
-                <button
-                  type="button"
-                  onClick={() => setTimePickerMode("hour")}
-                  className={`px-2 py-1 rounded text-xs border ${
-                    timePickerMode === "hour" ? "bg-emerald-600 text-white border-emerald-600" : "border-gray-300"
-                  }`}
-                >
-                  Hour
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTimePickerMode("minute")}
-                  className={`px-2 py-1 rounded text-xs border ${
-                    timePickerMode === "minute" ? "bg-emerald-600 text-white border-emerald-600" : "border-gray-300"
-                  }`}
-                >
-                  Min
-                </button>
-              </div>
-            </div>
-            <div className="flex justify-center">
-              <div
-                ref={timeDialRef}
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  setTimePickerDragging(true);
-                  setTimeFromAngle(e.clientX, e.clientY);
-                }}
-                onPointerMove={(e) => {
-                  if (!timePickerDragging) return;
-                  setTimeFromAngle(e.clientX, e.clientY);
-                }}
-                onPointerUp={() => setTimePickerDragging(false)}
-                onPointerLeave={() => setTimePickerDragging(false)}
-                className="relative w-44 h-44 rounded-full border border-emerald-200 bg-emerald-50 select-none"
-              >
-                <div
-                  className="absolute left-1/2 top-1/2 h-16 w-0.5 bg-emerald-700 origin-bottom"
-                  style={{
-                    transform: `translate(-50%, -100%) rotate(${
-                      timePickerMode === "hour"
-                        ? (Number(timePicker.hour) % 12) * 30
-                        : Number(timePicker.minute) * 6
-                    }deg)`,
-                  }}
-                />
-                <div className="absolute left-1/2 top-1/2 w-2 h-2 bg-emerald-700 rounded-full -translate-x-1/2 -translate-y-1/2" />
-                {(timePickerMode === "hour"
-                  ? Array.from({ length: 12 }, (_, i) => i + 1)
-                  : Array.from({ length: 12 }, (_, i) => i * 5)
-                ).map((val) => {
-                  const angle = ((timePickerMode === "hour" ? val : val / 5) * 30 - 90) * (Math.PI / 180);
-                  const r = 72;
-                  const x = 88 + r * Math.cos(angle);
-                  const y = 88 + r * Math.sin(angle);
-                  return (
-                    <div
-                      key={`dial-${val}`}
-                      className="absolute text-[11px] text-gray-700"
-                      style={{ left: x, top: y, transform: "translate(-50%, -50%)" }}
-                      onClick={() =>
-                        timePickerMode === "hour"
-                          ? setTimePicker((p) => ({ ...p, hour: String(val).padStart(2, "0") }))
-                          : setTimePicker((p) => ({ ...p, minute: String(val).padStart(2, "0") }))
-                      }
-                    >
-                      {String(val).padStart(2, "0")}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                type="button"
-                onClick={() => setTimePicker((p) => ({ ...p, ampm: "AM" }))}
-                className={`flex-1 px-2 py-1 rounded text-xs border ${
-                  timePicker.ampm === "AM" ? "bg-emerald-600 text-white border-emerald-600" : "border-gray-300"
-                }`}
-              >
-                AM
-              </button>
-              <button
-                type="button"
-                onClick={() => setTimePicker((p) => ({ ...p, ampm: "PM" }))}
-                className={`flex-1 px-2 py-1 rounded text-xs border ${
-                  timePicker.ampm === "PM" ? "bg-emerald-600 text-white border-emerald-600" : "border-gray-300"
-                }`}
-              >
-                PM
-              </button>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setTimePickerOpen(false)}
-                className="px-3 py-2 rounded border border-gray-300 text-gray-700 text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  let hh = Number(timePicker.hour || 8);
-                  const mm = String(timePicker.minute || "00").padStart(2, "0");
-                  if (timePicker.ampm === "AM") {
-                    if (hh === 12) hh = 0;
-                  } else if (hh < 12) {
-                    hh += 12;
-                  }
-                  const hhStr = String(hh).padStart(2, "0");
-                  const next = `${hhStr}:${mm}`;
-                  setOutputForm((f) => ({ ...f, plannedCompleteAt: next }));
-                  setFieldErrors((e) => ({ ...e, outputSchedule: "" }));
-                  setTimePickerOpen(false);
-                }}
-                className="px-3 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-              >
-                Set Time
               </button>
             </div>
           </div>
