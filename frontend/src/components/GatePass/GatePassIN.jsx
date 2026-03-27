@@ -220,6 +220,28 @@ export default function GatePassIN() {
     loadBrands();
   }, []);
 
+  useEffect(() => {
+    const onProductRefresh = () => {
+      // Reuse the same loader to keep product + brand lists in sync.
+      const loadBrands = async () => {
+        try {
+          const res = await api.get("/product-types");
+          const rows = res.data?.data || [];
+          setProductCatalog(rows);
+          const brands = Array.from(
+            new Set(rows.map((r) => String(r.brand || "").trim()).filter(Boolean))
+          ).sort();
+          setBrandOptions((prev) =>
+            Array.from(new Set([...(prev || []), ...brands])).sort()
+          );
+        } catch {}
+      };
+      loadBrands();
+    };
+    window.addEventListener("product:refresh", onProductRefresh);
+    return () => window.removeEventListener("product:refresh", onProductRefresh);
+  }, []);
+
 
   // Fetch rows
   const fetchRows = async () => {
@@ -246,14 +268,21 @@ export default function GatePassIN() {
     // eslint-disable-next-line
   }, []);
   const productNameOptions = Array.from(
-    new Set((productCatalog || []).map((p) => String(p.name || "").trim()).filter(Boolean))
+    new Map(
+      (productCatalog || [])
+        .map((p) => String(p.name || "").trim())
+        .filter(Boolean)
+        .map((name) => [normalizeText(name), name])
+    ).values()
   ).sort();
+
 
   const getProductOptionsForBrand = () => {
     const list = (productCatalog || [])
       .map((p) => String(p.name || "").trim())
-      .filter(Boolean);
-    return Array.from(new Set(list)).sort();
+      .filter(Boolean)
+      .map((name) => [normalizeText(name), name]);
+    return Array.from(new Map(list).values()).sort();
   };
 
   const ensureBrandOption = async (name) => {
@@ -292,11 +321,14 @@ export default function GatePassIN() {
       await api.post("/product-types", payload);
       const pRes = await api.get("/product-types");
       setProductCatalog(pRes.data?.data || []);
+      window.dispatchEvent(new Event("product:refresh"));
     } catch {}
     return { brand: cleanBrand, name: cleanName };
   };
 
-  const normalizeText = (v) => String(v || "").trim().toLowerCase();
+  function normalizeText(v) {
+    return String(v || "").trim().toLowerCase();
+  }
 
   const makeProductRow = (name, template = null) => {
     const bag = Number(template?.conversionFactors?.Bag || 65);
@@ -655,31 +687,47 @@ export default function GatePassIN() {
       return "pcs";
     };
 
-    const manualItems = items
-      .filter((it) => {
-        const name = String(
-          it?.productMode === "input"
-            ? it?.productInput || ""
-            : it?.productName || it?.customName || ""
-        ).trim();
-        return String(it?.brand || "").trim() && name && Number(it?.netWeightKg || 0) > 0;
-      })
-      .map((it) => ({
-        itemType: String(
-          it?.productMode === "input"
-            ? it?.productInput || ""
-            : it?.productName || it?.customName || ""
-        ).trim(),
-        stockType: "Production",
-        brand: String(it.brand || "").trim(),
-        customItemName: "",
-        quantity: Number(it.netWeightKg || 0),
-        unit: normalizeUnit("kg"),
-        bagCount: Number(it.bagCount || 0),
-        bagWeightKg: Number(it.bagWeightKg || 0),
-        emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
-        netWeightKg: Number(it.netWeightKg || 0),
-      }));
+    const manualItems = await Promise.all(
+      items
+        .filter((it) => {
+          const name = String(
+            it?.productMode === "input"
+              ? it?.productInput || ""
+              : it?.productName || it?.customName || ""
+          ).trim();
+          return String(it?.brand || "").trim() && name && Number(it?.netWeightKg || 0) > 0;
+        })
+        .map(async (it) => {
+          const rawName = String(
+            it?.productMode === "input"
+              ? it?.productInput || ""
+              : it?.productName || it?.customName || ""
+          ).trim();
+          const brand = String(it.brand || "").trim();
+          let finalName = rawName;
+          const exists = (productCatalog || []).some(
+            (p) =>
+              normalizeText(p.brand) === normalizeText(brand) &&
+              normalizeText(p.name) === normalizeText(rawName)
+          );
+          if (!exists && rawName) {
+            const created = await ensureProductOption(brand, rawName);
+            finalName = created?.name || rawName;
+          }
+          return {
+            itemType: finalName,
+            stockType: "Production",
+            brand,
+            customItemName: "",
+            quantity: Number(it.netWeightKg || 0),
+            unit: normalizeUnit("kg"),
+            bagCount: Number(it.bagCount || 0),
+            bagWeightKg: Number(it.bagWeightKg || 0),
+            emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
+            netWeightKg: Number(it.netWeightKg || 0),
+          };
+        })
+    );
 
     const firstBrand = manualItems.find((it) => String(it?.brand || "").trim() !== "")?.brand || "";
 

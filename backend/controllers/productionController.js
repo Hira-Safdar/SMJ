@@ -21,16 +21,15 @@ function generateBatchNo() {
 function recomputeAggregates(batch) {
   const totalRaw = Number(batch.paddyWeightKg) || 0;
 
-  // Count only completed outputs for totals (in-process outputs should not hit stock yet).
-  const completed = (batch.outputs || []).filter((o) => (o.status || "COMPLETED") === "COMPLETED");
-  const totalOutput = completed.reduce(
+  const allOutputs = batch.outputs || [];
+  const totalOutput = allOutputs.reduce(
     (sum, o) => sum + (Number(o.netWeightKg) || 0),
     0
   );
-  const dayOut = completed
+  const dayOut = allOutputs
     .filter((o) => o.shift === "DAY")
     .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
-  const nightOut = completed
+  const nightOut = allOutputs
     .filter((o) => o.shift === "NIGHT")
     .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
 
@@ -419,7 +418,7 @@ exports.getBatchById = async (req, res) => {
 /**
  * POST /api/production/batches/:id/outputs
  * Body: { productTypeId, productTypeName, companyId?, companyName?, numBags, perBagWeightKg, shift, adminPin? }
- * For COMPLETED batch, adminPin is required; adds output and creates IN stock entry.
+ * For COMPLETED batch, adminPin is required; adds output and creates IN stock entry immediately.
  */
 exports.addOutput = async (req, res) => {
   try {
@@ -432,8 +431,6 @@ exports.addOutput = async (req, res) => {
       numBags,
       perBagWeightKg,
       outputDate,
-      durationMinutes,
-      plannedCompleteAt,
       adminPin,
     } = req.body;
 
@@ -488,21 +485,7 @@ exports.addOutput = async (req, res) => {
 
     const now = new Date();
     const outDate = outputDate ? new Date(outputDate) : now;
-    // Scheduling: allow either durationMinutes or an explicit plannedCompleteAt timestamp.
-    let durMin = Math.max(0, Number(durationMinutes || 0) || 0);
-    let planned = durMin > 0 ? new Date(outDate.getTime() + durMin * 60 * 1000) : null;
-    if (plannedCompleteAt) {
-      const target = new Date(plannedCompleteAt);
-      if (!Number.isNaN(target.getTime())) {
-        const diff = Math.round((target.getTime() - outDate.getTime()) / (60 * 1000));
-        durMin = Math.max(0, diff);
-        planned = durMin > 0 ? target : null;
-      }
-    }
-    const isCompletedNow = batch.status === "COMPLETED" || durMin === 0;
-
-    const completedAt = isCompletedNow ? now : null;
-    const hour = (completedAt || outDate).getHours();
+    const hour = outDate.getHours();
     const shift = hour >= 6 && hour < 18 ? "DAY" : "NIGHT";
 
     const output = {
@@ -514,21 +497,17 @@ exports.addOutput = async (req, res) => {
       netWeightKg: netWeight,
       shift,
       outputDate: outDate,
-      status: isCompletedNow ? "COMPLETED" : "IN_PROCESS",
-      durationMinutes: durMin,
-      plannedCompleteAt: planned,
-      completedAt,
     };
 
     batch.outputs.push(output);
     recomputeAggregates(batch);
     const saved = await batch.save();
 
-    // Only post stock/journal when output is completed (immediately or via scheduler later).
-    if (output.status === "COMPLETED" && batch.ownerType !== "CUSTOM") {
+    // Post stock immediately for SMJ-owned batches.
+    if (batch.ownerType !== "CUSTOM") {
       try {
         await StockLedger.create({
-          date: output.completedAt || output.outputDate || new Date(),
+          date: output.outputDate || new Date(),
           type: "IN",
           companyId: output.companyId || null,
           companyName: output.companyName || "",
@@ -558,7 +537,7 @@ exports.addOutput = async (req, res) => {
 /**
  * PATCH /api/production/batches/:id/outputs/:outputId
  * Body: { numBags?, perBagWeightKg?, shift?, companyId?, companyName?, productTypeId?, productTypeName? }
- * Edit output and adjust stock (OUT old, IN new) for COMPLETED batch. No admin PIN required.
+ * Edit output and adjust stock (OUT old, IN new). No admin PIN required.
  */
 exports.updateOutput = async (req, res) => {
   try {
@@ -569,8 +548,6 @@ exports.updateOutput = async (req, res) => {
       outputDate,
       productTypeId,
       productTypeName,
-      durationMinutes,
-      plannedCompleteAt,
     } = req.body;
 
     if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(outputId)) {
@@ -609,24 +586,6 @@ exports.updateOutput = async (req, res) => {
     output.companyId = batch.sourceCompanyId || null;
     output.companyName = String(batch.sourceCompanyName || "").trim();
 
-    // Allow rescheduling only if output is not completed yet.
-    if ((output.status || "COMPLETED") !== "COMPLETED" && durationMinutes != null) {
-      const durMin = Math.max(0, Number(durationMinutes || 0) || 0);
-      output.durationMinutes = durMin;
-      output.plannedCompleteAt = durMin > 0
-        ? new Date((output.outputDate || new Date()).getTime() + durMin * 60 * 1000)
-        : null;
-    }
-    if ((output.status || "COMPLETED") !== "COMPLETED" && plannedCompleteAt) {
-      const base = output.outputDate || new Date();
-      const target = new Date(plannedCompleteAt);
-      if (!Number.isNaN(target.getTime())) {
-        const diff = Math.round((target.getTime() - new Date(base).getTime()) / (60 * 1000));
-        const durMin = Math.max(0, diff);
-        output.durationMinutes = durMin;
-        output.plannedCompleteAt = durMin > 0 ? target : null;
-      }
-    }
     if (productTypeId !== undefined) output.productTypeId = productTypeId;
     if (productTypeName !== undefined) output.productTypeName = productTypeName || "";
 
@@ -636,7 +595,6 @@ exports.updateOutput = async (req, res) => {
 
     if (
       batch.ownerType !== "CUSTOM" &&
-      (output.status || "COMPLETED") === "COMPLETED" &&
       (oldNet !== newNet ||
         oldProductTypeId?.toString() !== output.productTypeId?.toString() ||
         new Date(oldOutputDate).getTime() !==
@@ -717,7 +675,6 @@ exports.resolveRemainingPaddyDecision = async (req, res) => {
       // Fallback: compute remaining from batch if no pending action exists.
       const raw = Number(batch.paddyWeightKg || 0) || 0;
       const outKg = (batch.outputs || [])
-        .filter((o) => (o.status || "COMPLETED") === "COMPLETED")
         .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
       remainingKg = Math.max(0, +(raw - outKg).toFixed(3));
       if (remainingKg <= 0) {

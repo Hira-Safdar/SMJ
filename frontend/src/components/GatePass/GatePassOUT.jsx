@@ -235,6 +235,12 @@ export default function GatePassOUT() {
     loadProducts();
   }, []);
 
+  useEffect(() => {
+    const onProductRefresh = () => loadProducts();
+    window.addEventListener("product:refresh", onProductRefresh);
+    return () => window.removeEventListener("product:refresh", onProductRefresh);
+  }, []);
+
   const normalizeText = (v) => String(v || "").trim().toLowerCase();
   const formatPhone = (value) => {
     const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -259,14 +265,18 @@ export default function GatePassOUT() {
     loadCustomers();
   }, []);
 
+  const loadStock = async () => {
+    try {
+      const res = await api.get("/stock/current");
+      setStockRows(res.data?.data || []);
+    } catch {}
+  };
+
   useEffect(() => {
-    const loadStock = async () => {
-      try {
-        const res = await api.get("/stock/current");
-        setStockRows(res.data?.data || []);
-      } catch {}
-    };
     loadStock();
+    const onRefresh = () => loadStock();
+    window.addEventListener("stock:refresh", onRefresh);
+    return () => window.removeEventListener("stock:refresh", onRefresh);
   }, []);
 
   const setCustomerField = (name, value) => {
@@ -355,8 +365,9 @@ export default function GatePassOUT() {
   const getProductOptionsForBrand = () => {
     const list = (productCatalog || [])
       .map((p) => String(p.name || "").trim())
-      .filter(Boolean);
-    return Array.from(new Set(list)).sort();
+      .filter(Boolean)
+      .map((name) => [normalizeText(name), name]);
+    return Array.from(new Map(list).values()).sort();
   };
 
   const brandByProductName = React.useMemo(() => {
@@ -438,6 +449,8 @@ export default function GatePassOUT() {
     return Array.from(s).sort();
   }, [stockRows, brandByProductName]);
 
+
+
   const ensureBrandOption = async (name) => {
     const clean = toTitleCase(String(name || "").trim());
     if (!clean) return "";
@@ -473,6 +486,7 @@ export default function GatePassOUT() {
       await api.post("/product-types", payload);
       const pRes = await api.get("/product-types");
       setProductCatalog(pRes.data?.data || []);
+      window.dispatchEvent(new Event("product:refresh"));
     } catch {}
     return { brand: cleanBrand, name: cleanName };
   };
@@ -621,12 +635,8 @@ export default function GatePassOUT() {
       return;
     }
 
-    const payload = {
-      ...form,
-      type: "OUT",
-      date: form.date,
-      customer: form.customer,
-      items: (items || [])
+    const normalizedItems = await Promise.all(
+      (items || [])
         .filter((it) => {
           const name = String(
             it?.productMode === "input"
@@ -635,25 +645,47 @@ export default function GatePassOUT() {
           ).trim();
           return name && Number(it.netWeightKg || 0) > 0;
         })
-        .map((it) => ({
-          itemType: String(
+        .map(async (it) => {
+          const rawName = String(
             it?.productMode === "input"
               ? it?.productInput || ""
               : it?.productName || it?.customName || ""
-          ).trim(),
-          stockType: "Production",
-          brand: String(it.brand || "").trim(),
-          customItemName: "",
-          quantity: Number(it.netWeightKg || 0) || 0,
-          unit: "kg",
-          rate: Number(it.rate || 0) || 0,
-          amount: Number(it.amount || 0) || 0,
-          bagCount: Number(it.bagCount || 0),
-          bagWeightKg: Number(it.bagWeightKg || 0),
-          emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
-          grossWeightKg: Number(it.grossWeightKg || 0),
-          netWeightKg: Number(it.netWeightKg || 0),
-        })),
+          ).trim();
+          const brand = String(it.brand || "").trim();
+          let finalName = rawName;
+          const exists = (productCatalog || []).some(
+            (p) =>
+              normalizeText(p.brand) === normalizeText(brand) &&
+              normalizeText(p.name) === normalizeText(rawName)
+          );
+          if (!exists && rawName) {
+            const created = await ensureProductOption(brand, rawName);
+            finalName = created?.name || rawName;
+          }
+          return {
+            itemType: finalName,
+            stockType: "Production",
+            brand,
+            customItemName: "",
+            quantity: Number(it.netWeightKg || 0) || 0,
+            unit: "kg",
+            rate: Number(it.rate || 0) || 0,
+            amount: Number(it.amount || 0) || 0,
+            bagCount: Number(it.bagCount || 0),
+            bagWeightKg: Number(it.bagWeightKg || 0),
+            emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
+            grossWeightKg: Number(it.grossWeightKg || 0),
+            netWeightKg: Number(it.netWeightKg || 0),
+          };
+        })
+    );
+
+    const payload = {
+      ...form,
+      type: "OUT",
+      date: form.date,
+      customer: form.customer,
+      items: normalizedItems,
       paymentStatus: paymentInfo.status,
       amountPaid: paymentInfo.amountPaid ? Number(paymentInfo.amountPaid) : 0,
       remainingAmount: paymentInfo.remaining ? Number(paymentInfo.remaining) : 0,

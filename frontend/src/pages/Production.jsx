@@ -1,5 +1,5 @@
 ﻿// src/pages/Production.jsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import api from "../services/api";
 import {
   Factory,
@@ -72,8 +72,6 @@ export default function Production() {
     numBags: "",
     perBagWeightKg: "",
     netWeightKg: "",
-    durationMinutes: "0",
-    durationUnit: "min",
   });
 
   // Delete completed batch confirmation
@@ -87,7 +85,7 @@ export default function Production() {
   const [completedBatchUnlocked, setCompletedBatchUnlocked] = useState(false);
   const [lastEnteredPin, setLastEnteredPin] = useState("");
   const [editingOutputId, setEditingOutputId] = useState(null);
-  const [editOutputForm, setEditOutputForm] = useState({ numBags: "", perBagWeightKg: "", durationMinutes: "0", productTypeId: "" });
+  const [editOutputForm, setEditOutputForm] = useState({ numBags: "", perBagWeightKg: "", productTypeId: "" });
   const [savingOutputId, setSavingOutputId] = useState(null);
   const [editingBatchInfo, setEditingBatchInfo] = useState(false);
   const [settings, setSettings] = useState({
@@ -108,6 +106,22 @@ export default function Production() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [returnedRemainingBatches, setReturnedRemainingBatches] = useState(() => new Set());
   const detailSectionRef = useRef(null);
+  const autoCompleteRef = useRef({ batchId: null, done: false });
+
+  const uniqueProducts = useMemo(() => {
+    const byName = new Map();
+    (products || []).forEach((p) => {
+      const name = String(p?.name || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, p);
+    });
+    return Array.from(byName.values()).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""))
+    );
+  }, [products]);
+
+
   const [millInfo, setMillInfo] = useState({
     name: "SMJ Rice Mill",
     address: "Mirza Virkan Road, Sheikhupura",
@@ -122,6 +136,12 @@ export default function Production() {
     loadMeta();
     loadBatches();
     loadMillInfo();
+  }, []);
+
+  useEffect(() => {
+    const onProductRefresh = () => loadMeta();
+    window.addEventListener("product:refresh", onProductRefresh);
+    return () => window.removeEventListener("product:refresh", onProductRefresh);
   }, []);
 
   const paddyCompanyOptions = Array.from(
@@ -436,7 +456,7 @@ export default function Production() {
     const name = toTitleCase(String(rawName || ""));
     if (!name) {
       setFieldErrors((e) => ({ ...e, outputProduct: "Enter product name." }));
-      return;
+      return "";
     }
     const existing = (products || []).find(
       (p) => normalizeText(p.name) === normalizeText(name)
@@ -449,7 +469,7 @@ export default function Production() {
         productInput: "",
       }));
       setFieldErrors((e) => ({ ...e, outputProduct: "" }));
-      return;
+      return existing._id;
     }
     try {
       const bagKg = Number(settings.defaultBagWeightKg || 65);
@@ -463,6 +483,7 @@ export default function Production() {
       });
       const created = res.data?.data || res.data;
       await loadMeta();
+      window.dispatchEvent(new Event("product:refresh"));
       setOutputForm((f) => ({
         ...f,
         productTypeId: created._id || "",
@@ -470,8 +491,10 @@ export default function Production() {
         productInput: "",
       }));
       setFieldErrors((e) => ({ ...e, outputProduct: "" }));
+      return created._id || "";
     } catch {
       setFieldErrors((e) => ({ ...e, outputProduct: "Failed to add product." }));
+      return "";
     }
   };
 
@@ -530,7 +553,11 @@ export default function Production() {
   async function handleAddOutput() {
     if (!selectedBatchId || !selectedBatch) return;
     const err = {};
-    if (!outputForm.productTypeId) err.outputProduct = "Select product.";
+    let productTypeId = outputForm.productTypeId;
+    if (!productTypeId && outputForm.productMode === "input" && outputForm.productInput) {
+      productTypeId = await addProductByName(outputForm.productInput);
+    }
+    if (!productTypeId) err.outputProduct = "Select product.";
     if (!outputForm.numBags) err.outputBags = "Enter bags.";
     if (!outputForm.perBagWeightKg) err.outputPerBag = "Select product to fetch bag weight.";
     const currentOutputsTotal = (selectedBatch.outputs || []).reduce(
@@ -564,14 +591,13 @@ export default function Production() {
       outputTotal: "",
     }));
 
-    const product = products.find((p) => p._id === outputForm.productTypeId);
+    const product = products.find((p) => p._id === productTypeId);
 
     const payload = {
-      productTypeId: outputForm.productTypeId,
+      productTypeId,
       productTypeName: product?.name || "",
       numBags: Number(outputForm.numBags),
       perBagWeightKg: Number(outputForm.perBagWeightKg),
-      durationMinutes: 0,
     };
     if (selectedBatch.status === "COMPLETED" && completedBatchUnlocked) {
       payload.adminPin = lastEnteredPin || settings.adminPin || "0000";
@@ -592,8 +618,6 @@ export default function Production() {
           numBags: "",
           perBagWeightKg: settings.defaultBagWeightKg ? String(settings.defaultBagWeightKg) : "",
           netWeightKg: "",
-          durationMinutes: "0",
-          durationUnit: "min",
         });
         // keep output form visible
         await loadSummary();
@@ -637,7 +661,6 @@ export default function Production() {
           productTypeName: product?.name || o.productTypeName,
           numBags,
           perBagWeightKg: perBag,
-          durationMinutes: Number(editOutputForm.durationMinutes || 0),
         }
       );
       if (res.data?.success) {
@@ -656,13 +679,6 @@ export default function Production() {
     if (!selectedBatchId || !selectedBatch) return;
     if ((selectedBatch.outputs || []).length === 0) {
       setFieldErrors((e) => ({ ...e, completeBatch: "Add at least one output before completing." }));
-      return;
-    }
-    const allDone = (selectedBatch.outputs || []).every(
-      (o) => (o.status || "COMPLETED") === "COMPLETED",
-    );
-    if (!allDone) {
-      setFieldErrors((e) => ({ ...e, completeBatch: "Wait for all scheduled outputs to complete." }));
       return;
     }
     setFieldErrors((e) => ({ ...e, completeBatch: "" }));
@@ -843,6 +859,23 @@ export default function Production() {
     );
     return Math.max(0, (selectedBatch.paddyWeightKg || 0) - plannedOut);
   })();
+
+  useEffect(() => {
+    const id = selectedBatch?._id || null;
+    if (autoCompleteRef.current.batchId !== id) {
+      autoCompleteRef.current = { batchId: id, done: false };
+    }
+    if (
+      selectedBatch &&
+      selectedBatch.status === "IN_PROCESS" &&
+      (selectedBatch.outputs || []).length > 0 &&
+      remainingPaddy < 65 &&
+      !autoCompleteRef.current.done
+    ) {
+      autoCompleteRef.current.done = true;
+      handleMarkBatchCompleted();
+    }
+  }, [selectedBatch, remainingPaddy]);
 
   return (
     <div className="space-y-6">
@@ -1344,8 +1377,6 @@ export default function Production() {
                   <tr>
                     <th className="p-2 text-left">Company Name</th>
                     <th className="p-2 text-left">Product</th>
-                    <th className="p-2 text-left">Status</th>
-                    <th className="p-2 text-left">Completed At</th>
                     <th className="p-2 text-right">Bags</th>
                     <th className="p-2 text-right">Net Wt</th>
                     {(selectedBatch.status === "IN_PROCESS" || selectedBatch.status === "COMPLETED") && (
@@ -1393,26 +1424,10 @@ export default function Production() {
                               className="border rounded px-1 py-0.5 text-[11px] w-full"
                             >
                               <option value="">Select product</option>
-                              {products.map((p) => (
+                              {uniqueProducts.map((p) => (
                                 <option key={p._id} value={p._id}>{p.name}</option>
                               ))}
                             </select>
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="text"
-                              value={(o.status || "COMPLETED") === "COMPLETED" ? "Completed" : "In process"}
-                              readOnly
-                              className="border rounded px-1 py-0.5 text-[11px] w-full bg-gray-100 cursor-not-allowed"
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="text"
-                              value={o.completedAt ? new Date(o.completedAt).toLocaleString() : "-"}
-                              readOnly
-                              className="border rounded px-1 py-0.5 text-[11px] w-full bg-gray-100 cursor-not-allowed"
-                            />
                           </td>
                           <td className="p-2">
                             <input
@@ -1423,39 +1438,11 @@ export default function Production() {
                               className="border rounded px-1 py-0.5 text-[11px] w-14 text-right"
                             />
                           </td>
-                          <td className="p-2">
-                            <input
-                              type="number"
-                              value={editOutputForm.perBagWeightKg}
-                              readOnly
-                              className="border rounded px-1 py-0.5 text-[11px] w-14 text-right bg-gray-100 cursor-not-allowed"
-                            />
-                          </td>
-                          <td className="p-2" colSpan={1}>
-                            <input
-                              type="number"
-                              value={editOutputForm.durationMinutes}
-                              onChange={(e) =>
-                                setEditOutputForm((f) => ({
-                                  ...f,
-                                  durationMinutes: intClean(e.target.value),
-                                }))
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  handleSaveOutput(o._id);
-                                }
-                                if (e.key === "Escape") {
-                                  setEditingOutputId(null);
-                                  setFieldErrors((f) => ({ ...f, editOutputTotal: "" }));
-                                }
-                              }}
-                              className="border rounded px-1 py-0.5 text-[11px] w-20 text-right"
-                              placeholder="Minutes"
-                              disabled={(o.status || "COMPLETED") === "COMPLETED"}
-                              title="Timer in minutes (only for in-process outputs)"
-                            />
+                          <td className="p-2 text-right">
+                            {Math.round(
+                              (Number(editOutputForm.numBags) || 0) *
+                                (Number(editOutputForm.perBagWeightKg) || 0)
+                            )}
                           </td>
                           <td className="p-2">
                             <button
@@ -1479,12 +1466,6 @@ export default function Production() {
                         <>
                           <td className="p-2">{o.companyName || "-"}</td>
                           <td className="p-2">{o.productTypeName}</td>
-                          <td className="p-2">
-                            {(o.status || "COMPLETED") === "COMPLETED" ? "Completed" : "In process"}
-                          </td>
-                          <td className="p-2">
-                            {o.completedAt ? new Date(o.completedAt).toLocaleString() : "-"}
-                          </td>
                           <td className="p-2 text-right">{o.numBags}</td>
                           <td className="p-2 text-right">{Math.round(Number(o.netWeightKg) || 0)}</td>
                           {selectedBatch.status === "COMPLETED" && <td className="p-2"></td>}
@@ -1494,7 +1475,7 @@ export default function Production() {
                   ))}
                       {(!selectedBatch.outputs || selectedBatch.outputs.length === 0) && (
                         <tr>
-                          <td className="p-2 text-center text-gray-400" colSpan={7}>No outputs yet.</td>
+                          <td className="p-2 text-center text-gray-400" colSpan={5}>No outputs yet.</td>
                         </tr>
                       )}
                 </tbody>
@@ -1546,7 +1527,7 @@ export default function Production() {
                               className={`border rounded px-2 py-1 col-span-3 ${fieldErrors.outputProduct ? "border-red-500 bg-red-50" : ""}`}
                             >
                               <option value="">Finished Product</option>
-                              {products.map((p) => (
+                              {uniqueProducts.map((p) => (
                                 <option key={p._id} value={p._id}>{p.name}</option>
                               ))}
                               <option value={OTHER_OPTION}>Add New</option>
@@ -1644,19 +1625,11 @@ export default function Production() {
             </div>
           )}
           {selectedBatch.status === "IN_PROCESS" && (
-            <div className="flex items-center justify-between pt-2 border-t">
-              <p className="text-xs text-gray-500">
-                When all scheduled outputs are completed, you can finish this batch.
-              </p>
+            <div className="flex items-center justify-end pt-2 border-t">
               <button
                 type="button"
                 onClick={() => setMarkCompleteConfirmOpen(true)}
-                disabled={
-                  !(selectedBatch.outputs || []).length ||
-                  (selectedBatch.outputs || []).some(
-                    (o) => (o.status || "COMPLETED") !== "COMPLETED",
-                  )
-                }
+                disabled={!(selectedBatch.outputs || []).length}
                 className="px-3 py-1.5 rounded text-xs bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
               >
                 Mark Batch Completed

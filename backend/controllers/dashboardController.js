@@ -103,12 +103,13 @@ const getDashboardStats = async (req, res) => {
     });
 
     const gatePassOutPayments = await GatePass.find({ type: "OUT" })
-      .select("paymentStatus amountPaid remainingAmount")
+      .select("paymentStatus amountPaid remainingAmount customer gatePassNo")
       .lean();
 
     let cashInHand = 0;
     let pendingPayments = 0;
     let pendingGatePass = 0;
+    const pendingGatePassDetails = [];
     gatePassOutPayments.forEach((gp) => {
       const paid = Number(gp.amountPaid || 0);
       const rem = Number(gp.remainingAmount || 0);
@@ -116,6 +117,11 @@ const getDashboardStats = async (req, res) => {
       if (rem > 0) {
         pendingPayments += rem;
         pendingGatePass += rem;
+        pendingGatePassDetails.push({
+          customer: gp.customer || "Customer",
+          gatePassNo: gp.gatePassNo || "-",
+          remainingAmount: rem,
+        });
       }
     });
 
@@ -273,7 +279,27 @@ const getDashboardStats = async (req, res) => {
         if (net > 0) addToProduct(name, -net);
       });
     });
-    const productionStockKg = productionInKg + purchaseInKg - salesOutKg;
+    // Gate pass stock adjustments for finished products (non-paddy).
+    // Use ledger rows tied to gate passes only to avoid double-counting production outputs.
+    const gatePassFinishedLedger = await StockLedger.find({
+      gatePassId: { $ne: null },
+      productTypeName: { $not: /^(paddy|unprocessed paddy)\s*$/i },
+    })
+      .select("type netWeightKg productTypeName")
+      .lean();
+
+    let gatePassFinishedDeltaKg = 0;
+    gatePassFinishedLedger.forEach((l) => {
+      const net = Number(l.netWeightKg || 0);
+      if (!net) return;
+      const delta = l.type === "OUT" ? -net : net;
+      gatePassFinishedDeltaKg += delta;
+      const name = l.productTypeName || "Unknown";
+      addToProduct(name, delta);
+    });
+
+    const productionStockKg =
+      productionInKg + purchaseInKg - salesOutKg + gatePassFinishedDeltaKg;
 
     // Raw paddy stock from full paddy ledger (gate pass + production batch allocation/returns)
     const paddyLedgerRows = await StockLedger.find({ productTypeId: null })
@@ -328,6 +354,7 @@ const getDashboardStats = async (req, res) => {
           gatePassOut: pendingGatePass,
           total: pendingPayments,
         },
+        pendingGatePassDetails,
 
         recentActivities,
         stockSummary: {

@@ -35,6 +35,7 @@ export default function Dashboard() {
     total: 0,
   });
   const [showPendingInfo, setShowPendingInfo] = useState(false);
+  const [pendingDetails, setPendingDetails] = useState([]);
   const [stockSummary, setStockSummary] = useState({
     productionKg: 0,
   });
@@ -60,6 +61,7 @@ export default function Dashboard() {
           gatePassOut: data.pendingPaymentsBreakdown?.gatePassOut || 0,
           total: data.pendingPaymentsBreakdown?.total || data.pendingPayments || 0,
         });
+        setPendingDetails(data.pendingGatePassDetails || []);
         setActivities(data.recentActivities || []);
         setStockSummary({
           productionKg: data.stockSummary?.productionKg || 0,
@@ -200,19 +202,31 @@ export default function Dashboard() {
                 ✕
               </button>
             </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span>GatePass Out Pending</span>
-                <span className="font-semibold">
-                  Rs. {Number(pendingBreakdown.gatePassOut || 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex items-center justify-between border-t pt-2 mt-2">
-                <span className="font-semibold">Total</span>
-                <span className="font-bold">
-                  Rs. {Number(pendingBreakdown.total || 0).toLocaleString()}
-                </span>
-              </div>
+            <div className="text-xs font-semibold text-gray-600 mb-2">
+              Pending by Customer
+            </div>
+              {pendingDetails.length === 0 ? (
+                <div className="text-xs text-gray-400">No pending payments</div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1 thin-scrollbar">
+                  {pendingDetails.map((p, i) => (
+                    <div key={`${p.gatePassNo}-${i}`} className="flex items-center justify-between text-xs">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-gray-700">{p.customer || "Customer"}</span>
+                        <span className="text-[11px] text-gray-400">GP No: {p.gatePassNo || "-"}</span>
+                      </div>
+                      <span className="font-semibold text-gray-800">
+                        Rs. {Number(p.remainingAmount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            <div className="flex items-center justify-between border-t pt-2 mt-3 text-sm">
+              <span className="font-semibold">Total</span>
+              <span className="font-bold">
+                Rs. {Number(pendingBreakdown.total || 0).toLocaleString()}
+              </span>
             </div>
           </div>
         </div>

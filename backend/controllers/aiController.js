@@ -104,7 +104,7 @@ async function buildBusinessSnapshot() {
         { $unwind: "$outputs" },
         {
           $group: {
-            _id: "$outputs.status",
+            _id: null,
             count: { $sum: 1 },
             totalKg: { $sum: "$outputs.netWeightKg" },
           },
@@ -205,7 +205,7 @@ async function buildBusinessSnapshot() {
   const out30 = aggRow(gateOut30);
 
   const outputsByStatus = (Array.isArray(outputAgg) ? outputAgg : []).reduce((acc, row) => {
-    const key = String(row?._id || "UNKNOWN");
+    const key = String(row?._id || "ALL");
     acc[key] = { count: toNum(row.count), totalKg: toNum(row.totalKg) };
     return acc;
   }, {});

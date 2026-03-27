@@ -25,15 +25,6 @@ const ProductionOutputSchema = new mongoose.Schema(
     shift: { type: String, enum: ["DAY", "NIGHT"], required: true },
     outputDate: { type: Date, default: Date.now },
 
-    // Scheduling / completion
-    status: {
-      type: String,
-      enum: ["IN_PROCESS", "COMPLETED"],
-      default: "COMPLETED",
-    },
-    durationMinutes: { type: Number, default: 0, min: 0 },
-    plannedCompleteAt: { type: Date, default: null },
-    completedAt: { type: Date, default: null },
   },
   { _id: true }
 );

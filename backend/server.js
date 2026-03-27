@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
-const productionScheduler = require("./services/productionScheduler");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -57,9 +56,6 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ MongoDB Error:", err.message));
-
-// Background: auto-complete production outputs and batches based on schedule.
-productionScheduler.start({ intervalMs: 30_000 });
 
 // Start server
 const PORT = process.env.PORT || 5000;
