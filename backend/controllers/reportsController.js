@@ -202,8 +202,33 @@ exports.getByProductReport = async (req, res) => {
 
 exports.getCompanyListReport = async (_req, res) => {
   try {
-    const rows = await Company.find({}).sort({ name: 1 }).lean();
-    res.json({ success: true, data: rows });
+    const [rows, products] = await Promise.all([
+      Company.find({}).sort({ name: 1 }).lean(),
+      ProductType.find({}).select("name brand").lean(),
+    ]);
+
+    const productMap = new Map(); // brandLower -> Set(productName)
+    (products || []).forEach((p) => {
+      const brand = String(p?.brand || "").trim().toLowerCase();
+      const name = String(p?.name || "").trim();
+      if (!brand || !name) return;
+      if (!productMap.has(brand)) productMap.set(brand, new Set());
+      productMap.get(brand).add(name);
+    });
+
+    const data = (rows || []).map((c) => {
+      const brandKey = String(c?.name || "").trim().toLowerCase();
+      const list = productMap.has(brandKey)
+        ? Array.from(productMap.get(brandKey)).sort((a, b) => a.localeCompare(b))
+        : [];
+      return {
+        ...c,
+        products: list,
+        productCount: list.length,
+      };
+    });
+
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load company list." });
   }

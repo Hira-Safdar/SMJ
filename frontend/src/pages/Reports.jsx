@@ -14,9 +14,8 @@ import {
   BookCopy,
   FileText,
   UserRound,
-  UsersRound,
-  Tag,
   Activity,
+  Filter,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api from "../services/api";
@@ -37,10 +36,7 @@ const REPORT_TABS = [
   { key: "production", label: "Production Detail", icon: <Factory size={16} /> },
 
   { key: "companies", label: "Company List", icon: <Building2 size={16} /> },
-  { key: "products", label: "Product List", icon: <Tag size={16} /> },
-
   { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
-  { key: "wholesellers", label: "Wholeseller List", icon: <UsersRound size={16} /> },
 ];
 
 const RANGE_OPTIONS = [
@@ -135,8 +131,11 @@ export default function Reports() {
 
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, title: "", loading: false, rows: [], columns: [] });
-  // Kept for backward compatibility; customers/wholesellers now load from dedicated tables.
-  const [partyBuckets, setPartyBuckets] = useState({ customers: [], wholesalers: [] });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const filterInputClass =
+    "border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
+  const filterLabelClass = "block text-xs font-medium text-gray-600 mb-1";
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -193,7 +192,7 @@ export default function Reports() {
   const loadReport = async () => {
     try {
       setLoading(true);
-      if (activeTab === "customers" || activeTab === "wholesellers") {
+      if (activeTab === "customers") {
         setRows([]);
         return;
       }
@@ -206,23 +205,9 @@ export default function Reports() {
             phone: c.phone || "-",
             email: c.email || "-",
             address: c.address || "-",
+            products: Array.isArray(c.products) ? c.products : [],
+            productCount: Number(c.productCount || 0),
             updatedAt: c.updatedAt || c.createdAt,
-          }))
-        );
-        return;
-      }
-      if (activeTab === "products") {
-        const res = await api.get("/reports/master/products");
-        setRows(
-          (res.data?.data || []).map((p) => ({
-            id: p._id,
-            name: p.name || "-",
-            category: p.productCategory || "-",
-            unit: p.baseUnit || "-",
-            companyName: p.brand || "-",
-            pricePerKg: num(p.pricePerKg),
-            defaultSaleRate: num(p.defaultSaleRate),
-            updatedAt: p.updatedAt || p.createdAt,
           }))
         );
         return;
@@ -438,7 +423,7 @@ export default function Reports() {
   }, []);
 
   useEffect(() => {
-    const templateSupported = REPORT_TABS.some((t) => t.key === activeTab) && !["customers", "wholesellers"].includes(activeTab);
+    const templateSupported = REPORT_TABS.some((t) => t.key === activeTab) && !["customers"].includes(activeTab);
     if (!templateSupported) {
       setFilterTemplates([]);
       setSelectedTemplateId("");
@@ -465,35 +450,20 @@ export default function Reports() {
 
   useEffect(() => {
     const loadPartyBuckets = async () => {
-      if (activeTab !== "customers" && activeTab !== "wholesellers") return;
+      if (activeTab !== "customers") return;
       try {
-        if (activeTab === "customers") {
-          const res = await api.get("/customers");
-          const list = res.data?.data || [];
-          setRows(
-            list.map((c) => ({
-              id: c._id,
-              name: c.name || "-",
-              phone: c.phone || "-",
-              email: c.email || "-",
-              address: c.address || "-",
-              updatedAt: c.updatedAt || c.createdAt,
-            }))
-          );
-        } else {
-          const res = await api.get("/wholesellers");
-          const list = res.data?.data || [];
-          setRows(
-            list.map((c) => ({
-              id: c._id,
-              name: c.name || "-",
-              phone: c.phone || "-",
-              email: c.email || "-",
-              address: c.address || "-",
-              updatedAt: c.updatedAt || c.createdAt,
-            }))
-          );
-        }
+        const res = await api.get("/customers");
+        const list = res.data?.data || [];
+        setRows(
+          list.map((c) => ({
+            id: c._id,
+            name: c.name || "-",
+            phone: c.phone || "-",
+            email: c.email || "-",
+            address: c.address || "-",
+            updatedAt: c.updatedAt || c.createdAt,
+          }))
+        );
       } catch {
         setRows([]);
       }
@@ -599,7 +569,7 @@ export default function Reports() {
   }
 
   const columns = useMemo(() => {
-    if (activeTab === "customers" || activeTab === "wholesellers") {
+    if (activeTab === "customers") {
       return [
         { key: "name", label: "Name" },
         { key: "phone", label: "Phone" },
@@ -614,17 +584,21 @@ export default function Reports() {
         { key: "phone", label: "Phone" },
         { key: "email", label: "Email" },
         { key: "address", label: "Address" },
-        { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
-      ];
-    }
-    if (activeTab === "products") {
-      return [
-        { key: "name", label: "Product" },
-        { key: "category", label: "Category" },
-        { key: "unit", label: "Unit" },
-        { key: "companyName", label: "Company Name" },
-        { key: "pricePerKg", label: "Price/Kg", render: (v) => fmt(v) },
-        { key: "defaultSaleRate", label: "Default Rate", render: (v) => fmt(v) },
+        {
+          key: "products",
+          label: "Products",
+          sortable: false,
+          render: (v) => {
+            const list = Array.isArray(v) ? v : [];
+            const text = list.join(", ");
+            return (
+              <span className="block max-w-[360px] truncate" title={text || "-"}>
+                {text || "-"}
+              </span>
+            );
+          },
+        },
+        { key: "productCount", label: "Total Products" },
         { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
       ];
     }
@@ -925,233 +899,259 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-3 flex flex-wrap items-end gap-3">
-        <label className="text-sm">
-          <span className="block text-gray-600 mb-1">Range</span>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[160px]"
-          >
-            {RANGE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {range === "particular" && (
-          <label className="text-sm">
-            <span className="block text-gray-600 mb-1">Date</span>
-            <input
-              type="date"
-              value={particularDate}
-              onChange={(e) => setParticularDate(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-2 text-sm"
-            />
-          </label>
-        )}
-        {range === "custom" && (
-          <>
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Start Date</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="border border-gray-300 rounded px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">End Date</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="border border-gray-300 rounded px-3 py-2 text-sm"
-              />
-            </label>
-          </>
-        )}
-
-        {["trial", "pl", "balance", "receivables", "payables", "daybook", "ledger"].includes(activeTab) && (
-          <>
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Company</span>
-              <select
-                value={accCompanyId}
-                onChange={(e) => setAccCompanyId(e.target.value)}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px]"
-              >
-                <option value="">All</option>
-                {(accCompanies || []).map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Templates</span>
-              <div className="flex gap-2">
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSelectedTemplateId(v);
-                    applyTemplate(v);
-                  }}
-                  className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px]"
-                >
-                  <option value="">Select template</option>
-                  {(filterTemplates || []).map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={openSaveTemplate}
-                  className="px-3 py-2 rounded border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
-                >
-                  Save Template
-                </button>
-              </div>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Voucher Types</span>
-              <select
-                multiple
-                value={accVoucherTypes}
-                onChange={(e) => setAccVoucherTypes(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px] h-[42px]"
-              >
-                {["JOURNAL", "PAYMENT", "RECEIPT"].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Accounts</span>
-              <select
-                multiple
-                value={accAccountIds}
-                onChange={(e) => setAccAccountIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[260px] h-[42px]"
-              >
-                {(accAccounts || []).filter((a) => a.isActive !== false).map((a) => (
-                  <option key={a._id} value={a._id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Parties</span>
-              <select
-                multiple
-                value={accPartyIds}
-                onChange={(e) => setAccPartyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px] h-[42px]"
-              >
-                {(accParties || []).filter((p) => p.isActive !== false).map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Products</span>
-              <select
-                multiple
-                value={accProductIds}
-                onChange={(e) => setAccProductIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px] h-[42px]"
-              >
-                {(accProducts || []).filter((p) => p.isActive !== false).map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-
-        {["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab) && (
-          <>
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Company</span>
-              <select
-                multiple
-                value={invCompanyIds}
-                onChange={(e) => setInvCompanyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[200px] h-[42px]"
-              >
-                {(invCompanies || []).map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Product</span>
-              <select
-                multiple
-                value={invProductTypeIds}
-                onChange={(e) => setInvProductTypeIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px] h-[42px]"
-              >
-                {(invProducts || []).map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm">
-              <span className="block text-gray-600 mb-1">Templates</span>
-              <div className="flex gap-2">
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSelectedTemplateId(v);
-                    applyTemplate(v);
-                  }}
-                  className="border border-gray-300 rounded px-3 py-2 text-sm min-w-[220px]"
-                >
-                  <option value="">Select template</option>
-                  {(filterTemplates || []).map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={openSaveTemplate}
-                  className="px-3 py-2 rounded border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
-                >
-                  Save Template
-                </button>
-              </div>
-            </label>
-          </>
-        )}
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-gray-700">Report Filters</div>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
+            filtersOpen ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          <Filter size={16} />
+          {filtersOpen ? "Hide Filters" : "Show Filters"}
+        </button>
       </div>
+
+      {filtersOpen && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+            <div className="text-sm">
+              <span className={filterLabelClass}>Range</span>
+              <select
+                value={range}
+                onChange={(e) => setRange(e.target.value)}
+                className={`${filterInputClass} w-full`}
+              >
+                {RANGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {range === "particular" && (
+              <div className="text-sm">
+                <span className={filterLabelClass}>Date</span>
+                <input
+                  type="date"
+                  value={particularDate}
+                  onChange={(e) => setParticularDate(e.target.value)}
+                  className={`${filterInputClass} w-full`}
+                />
+              </div>
+            )}
+
+            {range === "custom" && (
+              <>
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Start Date</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className={`${filterInputClass} w-full`}
+                  />
+                </div>
+                <div className="text-sm">
+                  <span className={filterLabelClass}>End Date</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className={`${filterInputClass} w-full`}
+                  />
+                </div>
+              </>
+            )}
+
+            {["trial", "pl", "balance", "receivables", "payables", "daybook", "ledger"].includes(activeTab) && (
+              <>
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Company</span>
+                  <select
+                    value={accCompanyId}
+                    onChange={(e) => setAccCompanyId(e.target.value)}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    <option value="">All</option>
+                    {(accCompanies || []).map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Templates</span>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSelectedTemplateId(v);
+                        applyTemplate(v);
+                      }}
+                      className={`${filterInputClass} w-full`}
+                    >
+                      <option value="">Select template</option>
+                      {(filterTemplates || []).map((t) => (
+                        <option key={t._id} value={t._id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={openSaveTemplate}
+                      className="px-3 py-2 rounded-lg border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
+                    >
+                      Save Template
+                    </button>
+                  </div>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Voucher Types</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={accVoucherTypes}
+                    onChange={(e) => setAccVoucherTypes(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {["JOURNAL", "PAYMENT", "RECEIPT"].map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Accounts</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={accAccountIds}
+                    onChange={(e) => setAccAccountIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {(accAccounts || []).filter((a) => a.isActive !== false).map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {a.code} - {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Parties</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={accPartyIds}
+                    onChange={(e) => setAccPartyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {(accParties || []).filter((p) => p.isActive !== false).map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Products</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={accProductIds}
+                    onChange={(e) => setAccProductIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {(accProducts || []).filter((p) => p.isActive !== false).map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab) && (
+              <>
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Company</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={invCompanyIds}
+                    onChange={(e) => setInvCompanyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {(invCompanies || []).map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Product</span>
+                  <select
+                    multiple
+                    size={1}
+                    value={invProductTypeIds}
+                    onChange={(e) => setInvProductTypeIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className={`${filterInputClass} w-full`}
+                  >
+                    {(invProducts || []).map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Templates</span>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSelectedTemplateId(v);
+                        applyTemplate(v);
+                      }}
+                      className={`${filterInputClass} w-full`}
+                    >
+                      <option value="">Select template</option>
+                      {(filterTemplates || []).map((t) => (
+                        <option key={t._id} value={t._id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={openSaveTemplate}
+                      className="px-3 py-2 rounded-lg border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
+                    >
+                      Save Template
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm p-4">
         {loading ? (

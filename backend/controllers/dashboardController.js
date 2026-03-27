@@ -8,6 +8,15 @@ const SystemSettings = require("../models/systemSettingsModel");
 const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
 const StockLedger = require("../models/stockLedgerModel");
 
+const paidAmount = (t) => {
+  const status = String(t?.paymentStatus || "").toUpperCase();
+  const total = Number(t?.totalAmount || 0);
+  const partial = Number(t?.partialPaid || 0);
+  if (status === "PAID") return total;
+  if (status === "PARTIAL") return partial;
+  return 0;
+};
+
 const getDashboardStats = async (req, res) => {
   try {
     // Today range (server local time)
