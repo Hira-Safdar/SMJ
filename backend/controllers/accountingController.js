@@ -312,9 +312,6 @@ exports.getLedger = async (req, res) => {
     const companyId = String(req.query.companyId || "").trim();
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
-    const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
-    const companyName = String(req.query.companyName || "").trim();
-    const voucherNo = String(req.query.voucherNo || "").trim();
     const productIds = parseListParam(req.query.productId || req.query.productIds || req.query.itemId || req.query.itemIds);
     const party = String(req.query.party || "").trim(); // legacy name filter
     const item = String(req.query.item || "").trim(); // legacy product name filter
@@ -824,6 +821,7 @@ exports.getVouchers = async (req, res) => {
     const lineFilter = { journalEntryId: { $in: entryIds } };
     if (accountIds.length) lineFilter.accountId = { $in: accountIds };
     if (partyIds.length) lineFilter.partyId = { $in: partyIds };
+    if (partyName) lineFilter.partyName = new RegExp(escRe(partyName), "i");
 
     const lines = await JournalLine.find(lineFilter).lean();
     const bucket = new Map(); // entryId -> { debit, credit }
@@ -1013,7 +1011,10 @@ exports.getJournalEntries = async (req, res) => {
     });
     entries.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    const lineFilter = partyIds.length ? { partyId: { $in: partyIds } } : {};
+    const lineFilter = {
+      ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
+      ...(partyName ? { partyName: new RegExp(escRe(partyName), "i") } : {}),
+    };
     const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
     const accountMap = await getAccountMapForLines(lines);
 
