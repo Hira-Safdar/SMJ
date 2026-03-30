@@ -9,6 +9,20 @@ const journalEntrySchema = new mongoose.Schema(
       enum: ["JOURNAL", "PAYMENT", "RECEIPT"],
       default: "JOURNAL",
     },
+    bookType: {
+      type: String,
+      enum: [
+        "JOURNAL",
+        "CASH_BOOK",
+        "PURCHASE_BOOK",
+        "SALES_BOOK",
+        "PURCHASE_RETURN",
+        "SALES_RETURN",
+        "BILLS_RECEIVABLE",
+        "BILLS_PAYABLE",
+      ],
+      default: "JOURNAL",
+    },
     companyId: { type: String, default: "", trim: true },
     companyName: { type: String, default: "", trim: true },
     referenceNo: { type: String, default: "", trim: true },
@@ -31,6 +45,7 @@ const journalEntrySchema = new mongoose.Schema(
 journalEntrySchema.index({ date: 1 });
 journalEntrySchema.index({ companyId: 1, date: 1 });
 journalEntrySchema.index({ voucherType: 1, date: 1 });
+journalEntrySchema.index({ bookType: 1, date: 1 });
 journalEntrySchema.index({ sourceModule: 1, sourceRefType: 1, sourceRefId: 1 });
 
 module.exports = mongoose.model("JournalEntry", journalEntrySchema);

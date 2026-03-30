@@ -40,12 +40,14 @@ async function nextVoucherNo() {
   return `${prefix}${String(seq).padStart(4, "0")}`;
 }
 
-async function getEntriesInRange({ start, end, companyId, voucherType, status = "POSTED" }) {
+async function getEntriesInRange({ start, end, companyId, voucherType, status = "POSTED", bookType }) {
   const filter = { date: { $gte: start, $lte: end } };
   if (status) filter.status = status;
   if (companyId) filter.companyId = companyId;
   if (Array.isArray(voucherType) && voucherType.length) filter.voucherType = { $in: voucherType };
   else if (voucherType) filter.voucherType = voucherType;
+  if (Array.isArray(bookType) && bookType.length) filter.bookType = { $in: bookType };
+  else if (bookType) filter.bookType = bookType;
   return await JournalEntry.find(filter).sort({ date: 1, createdAt: 1 }).lean();
 }
 
@@ -261,8 +263,10 @@ exports.getDaybook = async (req, res) => {
     const { start, end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
     const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
+    const bookType = parseListParam(req.query.bookType || req.query.bookTypes);
+    const companyName = String(req.query.companyName || "").trim();
 
-    const entries = await getEntriesInRange({ start, end, companyId, voucherType, status: "POSTED" });
+    const entries = await getEntriesInRange({ start, end, companyId, voucherType, bookType, status: "POSTED" });
     const entryIds = entries.map((e) => e._id);
     const lines = await getLinesForEntries(entryIds);
 
@@ -275,13 +279,16 @@ exports.getDaybook = async (req, res) => {
       totalsByEntry.set(k, row);
     });
 
-    const rows = entries.map((e) => {
+    const rows = entries
+      .filter((e) => (companyName ? new RegExp(escRe(companyName), "i").test(e.companyName || "") : true))
+      .map((e) => {
       const t = totalsByEntry.get(String(e._id)) || { debit: 0, credit: 0 };
       return {
         journalEntryId: String(e._id),
         date: e.date,
         voucherNo: e.voucherNo,
         type: e.voucherType || "JOURNAL",
+        bookType: e.bookType || "JOURNAL",
         companyId: e.companyId || "",
         companyName: e.companyName || "",
         referenceNo: e.referenceNo || "",
@@ -305,6 +312,9 @@ exports.getLedger = async (req, res) => {
     const companyId = String(req.query.companyId || "").trim();
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+    const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
+    const companyName = String(req.query.companyName || "").trim();
+    const voucherNo = String(req.query.voucherNo || "").trim();
     const productIds = parseListParam(req.query.productId || req.query.productIds || req.query.itemId || req.query.itemIds);
     const party = String(req.query.party || "").trim(); // legacy name filter
     const item = String(req.query.item || "").trim(); // legacy product name filter
@@ -363,11 +373,19 @@ exports.getTrialBalance = async (req, res) => {
     const { end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
     const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
+    const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
+    const companyName = String(req.query.companyName || "").trim();
+    const voucherNo = String(req.query.voucherNo || "").trim();
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
 
     const entryFilter = { date: { $lte: end }, status: "POSTED" };
     if (companyId) entryFilter.companyId = companyId;
     if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
+    if (bookTypes.length) entryFilter.bookType = { $in: bookTypes };
+    if (companyName) entryFilter.companyName = new RegExp(escRe(companyName), "i");
+    if (voucherNo) entryFilter.voucherNo = new RegExp(escRe(voucherNo), "i");
+    if (bookTypes.length) entryFilter.bookType = { $in: bookTypes };
+    if (companyName) entryFilter.companyName = new RegExp(escRe(companyName), "i");
     const entries = await JournalEntry.find(entryFilter).lean();
     const lines = await getLinesForEntries(entries.map((e) => e._id), {
       ...(accountIds.length ? { accountId: { $in: accountIds } } : {}),
@@ -739,6 +757,7 @@ exports.postManualJournal = async (req, res) => {
     const entry = await postJournalEntry({
       date: body.date || new Date(),
       voucherType: body.voucherType || "JOURNAL",
+      bookType: body.bookType || "JOURNAL",
       companyId,
       companyName,
       referenceNo: String(body.referenceNo || "").trim(),
@@ -828,6 +847,7 @@ exports.getVouchers = async (req, res) => {
         voucherNo: e.voucherNo,
         date: e.date,
         voucherType: e.voucherType,
+        bookType: e.bookType || "JOURNAL",
         companyId: e.companyId || "",
         companyName: e.companyName || "",
         referenceNo: e.referenceNo || "",
@@ -871,6 +891,7 @@ exports.createVoucher = async (req, res) => {
     const entry = await postJournalEntry({
       date: body.date || new Date(),
       voucherType: body.voucherType || "JOURNAL",
+      bookType: body.bookType || "JOURNAL",
       companyId,
       companyName,
       referenceNo: String(body.referenceNo || "").trim(),
@@ -926,6 +947,7 @@ exports.updateVoucher = async (req, res) => {
 
     entry.date = body.date ? new Date(body.date) : entry.date;
     entry.voucherType = body.voucherType || entry.voucherType;
+    entry.bookType = body.bookType || entry.bookType || "JOURNAL";
     entry.companyId = companyId;
     entry.companyName = companyName;
     entry.referenceNo = String(body.referenceNo ?? entry.referenceNo ?? "").trim();
@@ -977,23 +999,41 @@ exports.getJournalEntries = async (req, res) => {
     const { start, end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
     const voucherType = String(req.query.voucherType || "").trim();
+    const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
+    const companyName = String(req.query.companyName || "").trim();
+    const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
 
-    const entries = await getEntriesInRange({ start, end, companyId, voucherType, status: null });
+    const entries = await getEntriesInRange({
+      start,
+      end,
+      companyId,
+      voucherType,
+      bookType: bookTypes,
+      status: null,
+    });
     entries.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    const lines = await getLinesForEntries(entries.map((e) => e._id));
+    const lineFilter = partyIds.length ? { partyId: { $in: partyIds } } : {};
+    const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
     const accountMap = await getAccountMapForLines(lines);
 
-    const data = entries.map((e) => ({
-      ...e,
-      lines: lines
-        .filter((l) => String(l.journalEntryId) === String(e._id))
-        .map((l) => ({
-          ...l,
-          accountCode: accountMap.get(String(l.accountId))?.code || "",
-          accountName: accountMap.get(String(l.accountId))?.name || "",
-        })),
-    }));
+    const filteredEntries = partyIds.length
+      ? entries.filter((e) => lines.some((l) => String(l.journalEntryId) === String(e._id)))
+      : entries;
+
+    const data = filteredEntries
+      .filter((e) => (companyName ? new RegExp(escRe(companyName), "i").test(e.companyName || "") : true))
+      .filter((e) => (voucherNo ? new RegExp(escRe(voucherNo), "i").test(e.voucherNo || "") : true))
+      .map((e) => ({
+        ...e,
+        lines: lines
+          .filter((l) => String(l.journalEntryId) === String(e._id))
+          .map((l) => ({
+            ...l,
+            accountCode: accountMap.get(String(l.accountId))?.code || "",
+            accountName: accountMap.get(String(l.accountId))?.name || "",
+          })),
+      }));
 
     res.json({ success: true, data });
   } catch (err) {
@@ -1018,6 +1058,7 @@ exports.reverseJournalEntry = async (req, res) => {
       voucherNo: await nextVoucherNo(),
       date: new Date(),
       voucherType: entry.voucherType || "JOURNAL",
+      bookType: entry.bookType || "JOURNAL",
       companyId: entry.companyId || "",
       companyName: entry.companyName || "",
       referenceNo: entry.referenceNo || "",
