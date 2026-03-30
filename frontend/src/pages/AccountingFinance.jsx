@@ -111,6 +111,7 @@ export default function AccountingFinance() {
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: "", voucherNo: "" });
   const [generatedJournals, setGeneratedJournals] = useState([]);
   const [selectedGeneratedIds, setSelectedGeneratedIds] = useState(new Set());
+  const [submitErrors, setSubmitErrors] = useState([]);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -385,6 +386,20 @@ export default function AccountingFinance() {
     const bothAmounts = lines.find((l) => n0(l.debitAmount) > 0 && n0(l.creditAmount) > 0);
     if (bothAmounts) errs.push("Each line can have either Debit or Credit amount (not both).");
 
+    const groups = new Map();
+    lines.forEach((l) => {
+      const gid = l.groupId || l.rowId;
+      if (!groups.has(gid)) groups.set(gid, []);
+      groups.get(gid).push(l);
+    });
+    const missingNarration = Array.from(groups.values()).some((items) => {
+      const hasAmt = items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
+      if (!hasAmt) return false;
+      const narration = String(items.find((x) => String(x.narration || "").trim())?.narration || "").trim();
+      return !narration;
+    });
+    if (missingNarration) errs.push("Narration is required for each entry.");
+
     if (!totals.balanced) errs.push("Total debit must equal total credit.");
     return errs;
   };
@@ -401,6 +416,7 @@ export default function AccountingFinance() {
     });
     setLines([blankLine(), blankLine()]);
     setSubmitAttempted(false);
+    setSubmitErrors([]);
   };
 
   const buildVoucherPayload = () => {
@@ -444,10 +460,12 @@ export default function AccountingFinance() {
     try {
       setSubmitAttempted(true);
       const errs = validate();
+      setSubmitErrors(errs);
       if (errs.length) {
         toast.error(errs[0]);
         return;
       }
+      setSubmitErrors([]);
       setLoading(true);
       const payload = buildVoucherPayload();
       if (!payload) {
@@ -653,41 +671,54 @@ export default function AccountingFinance() {
       }
       seen.get(gid).items.push(l);
     });
+
+    const sortedGroups = groups
+      .map((g) => ({
+        ...g,
+        date: g.items.find((x) => x.date)?.date || header.date,
+      }))
+      .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+
     const rows = [];
-    groups.forEach((g) => {
-      const date = g.items.find((x) => x.date)?.date || header.date;
+    sortedGroups.forEach((g) => {
+      const date = g.date;
       const narration = String(g.items.find((x) => String(x.narration || "").trim())?.narration || "").trim();
+      const debitItems = g.items.filter((l) => round2(n0(l.debitAmount)) > 0 && l.debitAccountId);
+      const creditItems = g.items.filter((l) => round2(n0(l.creditAmount)) > 0 && l.creditAccountId);
+
       let dateShown = false;
-      g.items.forEach((l, index) => {
+      const groupRows = [];
+
+      debitItems.forEach((l) => {
         const debitAmt = round2(n0(l.debitAmount));
-        const creditAmt = round2(n0(l.creditAmount));
-        if (debitAmt > 0 && l.debitAccountId) {
-          rows.push({
-            date,
-            showDate: !dateShown,
-            side: "debit",
-            account: accountLabel(l.debitAccountId),
-            amount: debitAmt,
-            narration,
-            isNarrationRow: false,
-          });
-          dateShown = true;
-        }
-        if (creditAmt > 0 && l.creditAccountId) {
-          rows.push({
-            date,
-            showDate: !dateShown,
-            side: "credit",
-            account: accountLabel(l.creditAccountId),
-            amount: creditAmt,
-            narration,
-            isNarrationRow: false,
-          });
-          dateShown = true;
-        }
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "debit",
+          account: accountLabel(l.debitAccountId),
+          amount: debitAmt,
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
       });
+
+      creditItems.forEach((l) => {
+        const creditAmt = round2(n0(l.creditAmount));
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "credit",
+          account: accountLabel(l.creditAccountId),
+          amount: creditAmt,
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
+      });
+
       if (narration) {
-        rows.push({
+        groupRows.push({
           date,
           showDate: false,
           side: "narration",
@@ -697,8 +728,16 @@ export default function AccountingFinance() {
           isNarrationRow: true,
         });
       }
+
+      groupRows.forEach((r, idx) => {
+        rows.push({
+          ...r,
+          isFirstInGroup: idx === 0,
+          isLastInGroup: idx === groupRows.length - 1,
+        });
+      });
     });
-    return rows.sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+    return rows;
   }, [lines, accountOptions, header.date]);
 
   const amountClass = (line) => {
@@ -710,6 +749,12 @@ export default function AccountingFinance() {
     if (!hasAccounts && amt <= 0) return "border-gray-300";
     if (hasAccounts && amt <= 0) return "border-red-300 bg-red-50";
     if (debitAmt > 0 && creditAmt > 0) return "border-red-300 bg-red-50";
+    return "border-emerald-300 bg-emerald-50";
+  };
+
+  const narrationClass = (missing) => {
+    if (!submitAttempted) return "border-gray-300";
+    if (missing) return "border-red-300 bg-red-50";
     return "border-emerald-300 bg-emerald-50";
   };
 
@@ -1204,6 +1249,8 @@ export default function AccountingFinance() {
                   {groupedLines.map((group) => {
                     const groupNarration =
                       group.items.find((x) => String(x.narration || "").trim())?.narration || "";
+                    const groupHasAmt = group.items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
+                    const missingNarration = groupHasAmt && !String(groupNarration || "").trim();
                     return group.items.map((l, idx) => {
                       const hasAmt = n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0;
                       const debitOk = n0(l.debitAmount) > 0 ? !!l.debitAccountId : true;
@@ -1486,7 +1533,9 @@ export default function AccountingFinance() {
                                       prev.map((x) => (x.groupId === group.groupId ? { ...x, narration: v } : x))
                                     );
                                   }}
-                                  className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
+                                  className={`w-full px-2 py-1.5 rounded border text-sm ${narrationClass(
+                                    missingNarration
+                                  )}`}
                                   placeholder="Narration"
                                 />
                               </td>
@@ -1509,7 +1558,7 @@ export default function AccountingFinance() {
                           <button
                             type="button"
                             onClick={() => saveVoucher({ andNew: false })}
-                            disabled={loading}
+                            disabled={loading || !totals.balanced}
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
                           >
                             <Save size={16} /> Save
@@ -1522,7 +1571,13 @@ export default function AccountingFinance() {
               </table>
             </div>
 
-            {submitAttempted && false}
+            {submitAttempted && submitErrors.length > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2 space-y-1">
+                {submitErrors.map((e, i) => (
+                  <div key={`${e}-${i}`}>{e}</div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
@@ -1554,7 +1609,7 @@ export default function AccountingFinance() {
                     <th className="text-left font-semibold px-3 py-2 w-[120px] border border-gray-200">Amount (Cr.)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody>
                   {previewEntries.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
@@ -1565,18 +1620,42 @@ export default function AccountingFinance() {
                   {previewEntries.map((entry, idx) => (
                     <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
                       {entry.isNarrationRow ? (
-                        <tr className="border-t border-gray-200">
-                          <td className="px-3 py-2 border border-gray-200"></td>
-                          <td className="px-3 py-2 italic text-gray-600 border border-gray-200">
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
                             ({withBeing(entry.narration)})
                           </td>
-                          <td className="px-3 py-2 border border-gray-200"></td>
-                          <td className="px-3 py-2 border border-gray-200"></td>
-                          <td className="px-3 py-2 border border-gray-200"></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
                         </tr>
                       ) : (
-                        <tr className="border-t border-gray-200">
-                          <td className="px-3 py-2 border border-gray-200">
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
                             {entry.showDate && (
                               <>
                                 <div className="text-xs text-gray-700">{formatYear(entry.date)}</div>
@@ -1584,7 +1663,11 @@ export default function AccountingFinance() {
                               </>
                             )}
                           </td>
-                          <td className="px-3 py-2 border border-gray-200">
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
                             <div
                               className={`flex items-center justify-between gap-2 ${
                                 entry.side === "credit" ? "pl-8 text-gray-700" : ""
@@ -1594,11 +1677,23 @@ export default function AccountingFinance() {
                               {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
                             </div>
                           </td>
-                          <td className="px-3 py-2 border border-gray-200"></td>
-                          <td className="px-3 py-2 text-right border border-gray-200">
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
                             {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
-                          <td className="px-3 py-2 text-right border border-gray-200">
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
                             {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
                         </tr>
@@ -1612,7 +1707,7 @@ export default function AccountingFinance() {
               <button
                 type="button"
                 onClick={() => saveVoucher({ andNew: true, autoPrint: true })}
-                disabled={loading}
+                disabled={loading || !totals.balanced}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
               >
                 <Printer size={16} /> Generate
