@@ -808,12 +808,15 @@ exports.getVouchers = async (req, res) => {
     const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+    const partyName = String(req.query.partyName || "").trim();
+    const voucherNo = String(req.query.voucherNo || "").trim();
 
     const entryFilter = { date: { $gte: start, $lte: end } };
     if (companyId) entryFilter.companyId = companyId;
     if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
     // Status filter optional
     if (req.query.status) entryFilter.status = String(req.query.status);
+    if (voucherNo) entryFilter.voucherNo = new RegExp(escRe(voucherNo), "i");
 
     const entries = await JournalEntry.find(entryFilter).sort({ date: -1, createdAt: -1 }).lean();
     const entryIds = entries.map((e) => e._id);
@@ -882,15 +885,19 @@ exports.createVoucher = async (req, res) => {
     const body = req.body || {};
     const lines = Array.isArray(body.lines) ? body.lines : [];
     const companyId = String(body.companyId || "").trim();
-    const companyName = String(body.companyName || "").trim();
-    if (!companyId || !companyName) {
+    let companyName = String(body.companyName || "").trim();
+    if (!companyId && !companyName) {
       return res.status(400).json({ success: false, message: "Company is required." });
+    }
+    if (!companyName && companyId) {
+      const match = await AccountingEntity.findById(companyId).lean();
+      companyName = match?.name || companyId;
     }
     const entry = await postJournalEntry({
       date: body.date || new Date(),
       voucherType: body.voucherType || "JOURNAL",
       bookType: body.bookType || "JOURNAL",
-      companyId,
+      companyId: companyId || "",
       companyName,
       referenceNo: String(body.referenceNo || "").trim(),
       description: String(body.description || "").trim(),
@@ -921,9 +928,13 @@ exports.updateVoucher = async (req, res) => {
 
     const body = req.body || {};
     const companyId = String(body.companyId || entry.companyId || "").trim();
-    const companyName = String(body.companyName || entry.companyName || "").trim();
-    if (!companyId || !companyName) {
+    let companyName = String(body.companyName || entry.companyName || "").trim();
+    if (!companyId && !companyName) {
       return res.status(400).json({ success: false, message: "Company is required." });
+    }
+    if (!companyName && companyId) {
+      const match = await AccountingEntity.findById(companyId).lean();
+      companyName = match?.name || companyId;
     }
 
     const lines = Array.isArray(body.lines) ? body.lines : [];
@@ -999,7 +1010,9 @@ exports.getJournalEntries = async (req, res) => {
     const voucherType = String(req.query.voucherType || "").trim();
     const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
     const companyName = String(req.query.companyName || "").trim();
+    const voucherNo = String(req.query.voucherNo || "").trim();
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+    const partyName = String(req.query.partyName || "").trim();
 
     const entries = await getEntriesInRange({
       start,

@@ -40,7 +40,6 @@ exports.createOrUpdateCustomer = async (req, res) => {
       }
     }
 
-    // Otherwise, upsert by name (case-insensitive)
     const escaped = escapeRegex(name);
     const existing = await Customer.findOne({ name: { $regex: new RegExp(`^${escaped}$`, "i") } });
     if (existing) {

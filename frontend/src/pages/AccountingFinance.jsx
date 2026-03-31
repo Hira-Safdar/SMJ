@@ -24,8 +24,11 @@ import * as XLSX from "xlsx";
 
 const TABS = [
   { key: "journal-entry", label: "Journal Entry", icon: <FileText size={16} /> },
+  { key: "ledger", label: "Ledger", icon: <BookOpen size={16} /> },
+  { key: "trial-balance", label: "Trial Balance", icon: <BookOpen size={16} /> },
+  { key: "profit-loss", label: "Profit & Loss", icon: <BookOpen size={16} /> },
+  { key: "balance-sheet", label: "Balance Sheet", icon: <BookOpen size={16} /> },
   { key: "vouchers", label: "Voucher List", icon: <List size={16} /> },
-  { key: "reports", label: "Reports", icon: <BookOpen size={16} /> },
 ];
 
 const VOUCHER_TYPES = ["JOURNAL", "PAYMENT", "RECEIPT"];
@@ -147,19 +150,33 @@ export default function AccountingFinance() {
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [companies, gatepassCompanies]);
-  const accountOptions = useMemo(
-    () =>
-      accounts
-        .filter((a) => a.isActive !== false)
-        .map((a) => ({
-          id: String(a._id),
-          label: a.code ? `${a.code} - ${a.name}` : `${a.name}`,
-          name: a.name,
-          code: a.code,
-          type: a.type,
-        })),
-    [accounts]
-  );
+  const accountOptions = useMemo(() => {
+    const seen = new Set();
+    return (accounts || [])
+      .filter((a) => a.isActive !== false)
+      .filter((a) => {
+        const key = String(a?.name || "").trim().toLowerCase();
+        if (!key) return false;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((a) => ({
+        id: String(a._id),
+        label: `${a.name}`,
+        name: a.name,
+        code: a.code,
+        type: a.type,
+      }));
+  }, [accounts]);
+  const debitAccountOptions = useMemo(() => {
+    const debitTypes = new Set(["ASSET", "EXPENSE", "LOSS", "COGS", "DRAWING"]);
+    return accountOptions.filter((a) => !a.type || debitTypes.has(String(a.type).toUpperCase()));
+  }, [accountOptions]);
+  const creditAccountOptions = useMemo(() => {
+    const creditTypes = new Set(["LIABILITY", "EQUITY", "CAPITAL", "INCOME", "PROFIT"]);
+    return accountOptions.filter((a) => !a.type || creditTypes.has(String(a.type).toUpperCase()));
+  }, [accountOptions]);
   const partyOptions = useMemo(
     () => parties.filter((p) => p.isActive !== false).map((p) => ({ id: String(p._id), name: p.name })),
     [parties]
@@ -360,49 +377,53 @@ export default function AccountingFinance() {
     const errs = [];
     if (!header.date) errs.push("Date is required.");
     if (!header.voucherType) errs.push("Voucher Type is required.");
-    const hasCompany = !!header.companyId || !!header.companyName || !!filterCompanyId || !!filterCompanyName;
-    if (!hasCompany) errs.push("Company is required.");
 
-    const hasAnyLine = lines.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
-    if (!hasAnyLine) errs.push("Add at least 1 valid line (debit or credit + amount).");
+    return errs;
+  };
 
-    const missingAccount = lines.find((l) => {
+  const groupedLines = useMemo(() => {
+    const groups = [];
+    const seen = new Map();
+    lines.forEach((l) => {
+      const gid = l.groupId || l.rowId;
+      if (!seen.has(gid)) {
+        const entry = { groupId: gid, items: [] };
+        seen.set(gid, entry);
+        groups.push(entry);
+      }
+      seen.get(gid).items.push(l);
+    });
+    return groups;
+  }, [lines]);
+  const hasAnyInput = useMemo(
+    () =>
+      lines.some(
+        (l) =>
+          n0(l.debitAmount) > 0 ||
+          n0(l.creditAmount) > 0 ||
+          l.debitAccountId ||
+          l.creditAccountId
+      ),
+    [lines]
+  );
+  const hasAnyAmount = useMemo(
+    () => lines.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0),
+    [lines]
+  );
+  const hasEmptyFieldErrors = useMemo(() => {
+    if (!submitAttempted) return false;
+    if (groupedLines[0] && !groupedLines[0].items[0]?.date) return true;
+    if (!hasAnyInput) return true;
+    for (const l of lines) {
       const debitAmt = n0(l.debitAmount);
       const creditAmt = n0(l.creditAmount);
       if (debitAmt > 0 && !l.debitAccountId) return true;
       if (creditAmt > 0 && !l.creditAccountId) return true;
-      return false;
-    });
-    if (missingAccount) errs.push("Each line must have the matching Debit/Credit account.");
-
-    const emptyAmountRow = lines.find(
-      (l) =>
-        (l.debitAccountId || l.creditAccountId) &&
-        n0(l.debitAmount) === 0 &&
-        n0(l.creditAmount) === 0
-    );
-    if (emptyAmountRow) errs.push("Each line must have either Debit or Credit amount.");
-
-    const bothAmounts = lines.find((l) => n0(l.debitAmount) > 0 && n0(l.creditAmount) > 0);
-    if (bothAmounts) errs.push("Each line can have either Debit or Credit amount (not both).");
-
-    const groups = new Map();
-    lines.forEach((l) => {
-      const gid = l.groupId || l.rowId;
-      if (!groups.has(gid)) groups.set(gid, []);
-      groups.get(gid).push(l);
-    });
-    const missingNarration = Array.from(groups.values()).some((items) => {
-      const hasAmt = items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
-      if (!hasAmt) return false;
-      const narration = String(items.find((x) => String(x.narration || "").trim())?.narration || "").trim();
-      return !narration;
-    });
-    if (missingNarration) errs.push("Narration is required for each entry.");
-
-    if (!totals.balanced) errs.push("Total debit must equal total credit.");
-    return errs;
-  };
+      if (l.debitAccountId && debitAmt <= 0) return true;
+      if (l.creditAccountId && creditAmt <= 0) return true;
+    }
+    return false;
+  }, [submitAttempted, groupedLines, hasAnyInput, lines]);
 
   const resetEntry = () => {
     setEditingVoucherId("");
@@ -445,11 +466,14 @@ export default function AccountingFinance() {
     if (!lineItems.length) return null;
     const firstDate = lines.find((l) => l.date)?.date || header.date;
     const firstType = lines.find((l) => l.transactionType)?.transactionType || "JOURNAL";
+    const companyId = header.companyId || filterCompanyId || "";
+    const companyName =
+      String(header.companyName || filterCompanyName || "").trim() || (companyId ? String(companyId) : "General");
     return {
       date: firstDate,
       voucherType: header.voucherType,
-      companyId: header.companyId || filterCompanyId || "",
-      companyName: header.companyName || filterCompanyName || "",
+      companyId,
+      companyName,
       description: buildNarration(),
       bookType: firstType,
       lines: lineItems,
@@ -461,8 +485,20 @@ export default function AccountingFinance() {
       setSubmitAttempted(true);
       const errs = validate();
       setSubmitErrors(errs);
-      if (errs.length) {
-        toast.error(errs[0]);
+      const emptyFieldNow = (() => {
+        if (groupedLines[0] && !groupedLines[0].items[0]?.date) return true;
+        if (!hasAnyInput) return true;
+        for (const l of lines) {
+          const debitAmt = n0(l.debitAmount);
+          const creditAmt = n0(l.creditAmount);
+          if (debitAmt > 0 && !l.debitAccountId) return true;
+          if (creditAmt > 0 && !l.creditAccountId) return true;
+          if (l.debitAccountId && debitAmt <= 0) return true;
+          if (l.creditAccountId && creditAmt <= 0) return true;
+        }
+        return false;
+      })();
+      if (errs.length || emptyFieldNow || (hasAnyAmount && !totals.balanced)) {
         return;
       }
       setSubmitErrors([]);
@@ -758,20 +794,6 @@ export default function AccountingFinance() {
     return "border-emerald-300 bg-emerald-50";
   };
 
-  const groupedLines = useMemo(() => {
-    const groups = [];
-    const seen = new Map();
-    lines.forEach((l) => {
-      const gid = l.groupId || l.rowId;
-      if (!seen.has(gid)) {
-        const entry = { groupId: gid, items: [] };
-        seen.set(gid, entry);
-        groups.push(entry);
-      }
-      seen.get(gid).items.push(l);
-    });
-    return groups;
-  }, [lines]);
 
 
   const printEntry = (entry) => {
@@ -1204,11 +1226,35 @@ export default function AccountingFinance() {
         </div>
       )}
 
-      {activeTab === "reports" && (
+      {activeTab === "ledger" && (
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="text-sm text-gray-700">
-            Accounting reports are available in the main <span className="font-semibold">Reports</span> module. This
-            page focuses on fast voucher entry and voucher management.
+            Ledger is generated from journal entries. We will render account-wise ledger here based on the journal
+            lines you enter in the Journal tab.
+          </div>
+        </div>
+      )}
+
+      {activeTab === "trial-balance" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-sm text-gray-700">
+            Trial Balance will summarize debit and credit totals from the ledger.
+          </div>
+        </div>
+      )}
+
+      {activeTab === "profit-loss" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-sm text-gray-700">
+            Profit &amp; Loss will be derived from income and expense accounts in the ledger.
+          </div>
+        </div>
+      )}
+
+      {activeTab === "balance-sheet" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-sm text-gray-700">
+            Balance Sheet will be derived from assets, liabilities, and equity accounts.
           </div>
         </div>
       )}
@@ -1251,37 +1297,57 @@ export default function AccountingFinance() {
                       group.items.find((x) => String(x.narration || "").trim())?.narration || "";
                     const groupHasAmt = group.items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
                     const missingNarration = groupHasAmt && !String(groupNarration || "").trim();
+                    const firstGroupId = groupedLines[0]?.groupId;
                     return group.items.map((l, idx) => {
                       const hasAmt = n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0;
-                      const debitOk = n0(l.debitAmount) > 0 ? !!l.debitAccountId : true;
-                      const creditOk = n0(l.creditAmount) > 0 ? !!l.creditAccountId : true;
+                      const debitAmt = n0(l.debitAmount);
+                      const creditAmt = n0(l.creditAmount);
                       const debitDisabled = l.entryType === "credit";
                       const creditDisabled = l.entryType === "debit";
+                      const showDateError = submitAttempted && idx === 0 && !l.date;
+                      const showDebitAccountError =
+                        submitAttempted &&
+                        ((debitAmt > 0 && !l.debitAccountId) ||
+                          (!hasAnyInput && firstGroupId === group.groupId && idx === 0));
+                      const showCreditAccountError =
+                        submitAttempted && creditAmt > 0 && !l.creditAccountId;
+                      const showDebitAmountError = submitAttempted && l.debitAccountId && debitAmt <= 0;
+                      const showCreditAmountError = submitAttempted && l.creditAccountId && creditAmt <= 0;
+                      const showNarrationError = submitAttempted && missingNarration;
                       return (
                         <React.Fragment key={l.rowId}>
                           <tr className="hover:bg-gray-50">
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 pb-4 relative">
                               {idx === 0 ? (
-                                <input
-                                  type="date"
-                                  value={l.date}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.groupId === group.groupId ? { ...x, date: v } : x
-                                      )
-                                    );
-                                  }}
-                                  className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
-                                />
+                                <>
+                                  <input
+                                    type="date"
+                                    value={l.date}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setLines((prev) =>
+                                        prev.map((x) =>
+                                          x.groupId === group.groupId ? { ...x, date: v } : x
+                                        )
+                                      );
+                                    }}
+                                  className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                    showDateError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                  }`}
+                                  />
+                                  {showDateError && (
+                                    <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                      Required
+                                    </div>
+                                  )}
+                                </>
                               ) : (
-                                <div className="text-gray-400">—</div>
+                                <div className="text-gray-400">-</div>
                               )}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 pb-4 relative">
                               {debitDisabled ? (
-                                <div className="text-gray-400">—</div>
+                                <div className="text-gray-400">-</div>
                               ) : l.debitMode === "input" ? (
                                 <div className="flex gap-2">
                                   <input
@@ -1311,7 +1377,9 @@ export default function AccountingFinance() {
                                       )
                                     );
                                     }}
-                                    className="w-[80%] px-2 py-1.5 rounded border border-gray-300 text-sm disabled:bg-gray-100"
+                                  className={`w-[80%] px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                    showDebitAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                  }`}
                                     placeholder="Type debit account"
                                     disabled={debitDisabled}
                                   />
@@ -1348,14 +1416,13 @@ export default function AccountingFinance() {
                                       prev.map((x) => (x.rowId === l.rowId ? { ...x, debitAccountId: v } : x))
                                     );
                                   }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${fieldClass(
-                                    debitOk,
-                                    !!l.debitAccountId
-                                  )}`}
+                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                    showDebitAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                  }`}
                                   disabled={debitDisabled}
                                 >
                                   <option value="">Select debit account</option>
-                                  {accountOptions.map((a) => (
+                                  {debitAccountOptions.map((a) => (
                                     <option key={a.id} value={a.id}>
                                       {a.label}
                                     </option>
@@ -1363,10 +1430,15 @@ export default function AccountingFinance() {
                                   <option value="__ADD__">+ Add new account</option>
                                 </select>
                               )}
+                              {showDebitAccountError && (
+                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                  Required
+                                </div>
+                              )}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 pb-4 relative">
                               {debitDisabled ? (
-                                <div className="text-gray-400">—</div>
+                                <div className="text-gray-400">-</div>
                               ) : (
                                 <div className="flex items-center gap-2">
                                   <input
@@ -1378,9 +1450,9 @@ export default function AccountingFinance() {
                                         prev.map((x) => (x.rowId === l.rowId ? { ...x, debitAmount: v } : x))
                                       );
                                     }}
-                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${amountClass(
-                                      l
-                                    )}`}
+                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                      showDebitAmountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                    }`}
                                     placeholder="0"
                                     disabled={debitDisabled}
                                   />
@@ -1394,10 +1466,15 @@ export default function AccountingFinance() {
                                   </button>
                                 </div>
                               )}
+                              {showDebitAmountError && (
+                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                  Amount required
+                                </div>
+                              )}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 pb-4 relative">
                               {creditDisabled ? (
-                                <div className="text-gray-400">—</div>
+                                <div className="text-gray-400">-</div>
                               ) : l.creditMode === "input" ? (
                                 <div className="flex gap-2">
                                   <input
@@ -1427,7 +1504,9 @@ export default function AccountingFinance() {
                                       )
                                     );
                                     }}
-                                    className="w-[80%] px-2 py-1.5 rounded border border-gray-300 text-sm disabled:bg-gray-100"
+                                  className={`w-[80%] px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                    showCreditAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                  }`}
                                     placeholder="Type credit account"
                                     disabled={creditDisabled}
                                   />
@@ -1464,14 +1543,13 @@ export default function AccountingFinance() {
                                       prev.map((x) => (x.rowId === l.rowId ? { ...x, creditAccountId: v } : x))
                                     );
                                   }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${fieldClass(
-                                    creditOk,
-                                    !!l.creditAccountId
-                                  )}`}
+                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                    showCreditAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                  }`}
                                   disabled={creditDisabled}
                                 >
                                   <option value="">Select credit account</option>
-                                  {accountOptions.map((a) => (
+                                  {creditAccountOptions.map((a) => (
                                     <option key={a.id} value={a.id}>
                                       {a.label}
                                     </option>
@@ -1479,10 +1557,15 @@ export default function AccountingFinance() {
                                   <option value="__ADD__">+ Add new account</option>
                                 </select>
                               )}
+                              {showCreditAccountError && (
+                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                  Required
+                                </div>
+                              )}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 pb-4 relative">
                               {creditDisabled ? (
-                                <div className="text-gray-400">—</div>
+                                <div className="text-gray-400">-</div>
                               ) : (
                                 <div className="flex items-center gap-2">
                                   <input
@@ -1494,9 +1577,9 @@ export default function AccountingFinance() {
                                         prev.map((x) => (x.rowId === l.rowId ? { ...x, creditAmount: v } : x))
                                       );
                                     }}
-                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${amountClass(
-                                      l
-                                    )}`}
+                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
+                                      showCreditAmountError ? "border-red-300 bg-red-50" : "border-gray-300"
+                                    }`}
                                     placeholder="0"
                                     disabled={creditDisabled}
                                   />
@@ -1508,6 +1591,11 @@ export default function AccountingFinance() {
                                   >
                                     +
                                   </button>
+                                </div>
+                              )}
+                              {showCreditAmountError && (
+                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                  Amount required
                                 </div>
                               )}
                             </td>
@@ -1524,7 +1612,7 @@ export default function AccountingFinance() {
                           </tr>
                           {idx === group.items.length - 1 && (
                             <tr className="bg-gray-50/40">
-                              <td className="px-3 py-2" colSpan={5}>
+                              <td className="px-3 py-2 pb-4 relative" colSpan={5}>
                                 <input
                                   value={groupNarration}
                                   onChange={(e) => {
@@ -1538,6 +1626,11 @@ export default function AccountingFinance() {
                                   )}`}
                                   placeholder="Narration"
                                 />
+                                {false && showNarrationError && (
+                                  <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                    Narration required
+                                  </div>
+                                )}
                               </td>
                               <td className="px-3 py-2"></td>
                             </tr>
@@ -1553,12 +1646,12 @@ export default function AccountingFinance() {
                     <td className="px-3 py-2 font-semibold">{totals.totalDebit}</td>
                     <td className="px-3 py-2 font-semibold">{totals.totalCredit}</td>
                     <td className="px-3 py-2" colSpan={3}>
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-end gap-2">
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => saveVoucher({ andNew: false })}
-                            disabled={loading || !totals.balanced}
+                            disabled={loading}
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
                           >
                             <Save size={16} /> Save
@@ -1571,11 +1664,9 @@ export default function AccountingFinance() {
               </table>
             </div>
 
-            {submitAttempted && submitErrors.length > 0 && (
-              <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2 space-y-1">
-                {submitErrors.map((e, i) => (
-                  <div key={`${e}-${i}`}>{e}</div>
-                ))}
+            {submitAttempted && !hasEmptyFieldErrors && hasAnyAmount && !totals.balanced && (
+              <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2">
+                Total debit must equal total credit.
               </div>
             )}
           </div>
@@ -1652,7 +1743,7 @@ export default function AccountingFinance() {
                       ) : (
                         <tr>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
