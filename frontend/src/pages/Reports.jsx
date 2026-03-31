@@ -16,9 +16,13 @@ import {
   UserRound,
   Activity,
   Filter,
+  Download,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api from "../services/api";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 
 const REPORT_TABS = [
   { key: "daybook", label: "Day Book", icon: <BookOpen size={16} /> },
@@ -110,14 +114,12 @@ export default function Reports() {
   // Accounting filters (manual-entry reports)
   const [accCompanies, setAccCompanies] = useState([]);
   const [accAccounts, setAccAccounts] = useState([]);
-  const [accParties, setAccParties] = useState([]);
-  const [accProducts, setAccProducts] = useState([]);
+  const [accCustomers, setAccCustomers] = useState([]);
 
   const [accCompanyId, setAccCompanyId] = useState("");
   const [accVoucherTypes, setAccVoucherTypes] = useState([]);
   const [accAccountIds, setAccAccountIds] = useState([]);
-  const [accPartyIds, setAccPartyIds] = useState([]);
-  const [accProductIds, setAccProductIds] = useState([]);
+  const [accCustomerNames, setAccCustomerNames] = useState([]);
 
   const [filterTemplates, setFilterTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -130,7 +132,7 @@ export default function Reports() {
   const [invProductTypeIds, setInvProductTypeIds] = useState([]);
 
   // Drill-down modal
-  const [drill, setDrill] = useState({ open: false, title: "", loading: false, rows: [], columns: [] });
+  const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filterInputClass =
@@ -164,8 +166,7 @@ export default function Reports() {
       if (accCompanyId) p.companyId = accCompanyId;
       if (accVoucherTypes.length) p.voucherTypes = accVoucherTypes.join(",");
       if (accAccountIds.length) p.accountIds = accAccountIds.join(",");
-      if (accPartyIds.length) p.partyIds = accPartyIds.join(",");
-      if (accProductIds.length) p.productIds = accProductIds.join(",");
+      if (accCustomerNames.length) p.partyNames = accCustomerNames.join(",");
     }
 
     const isInventoryReport = ["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab);
@@ -183,8 +184,7 @@ export default function Reports() {
     accCompanyId,
     accVoucherTypes,
     accAccountIds,
-    accPartyIds,
-    accProductIds,
+    accCustomerNames,
     invCompanyIds,
     invProductTypeIds,
   ]);
@@ -402,18 +402,16 @@ export default function Reports() {
   useEffect(() => {
     (async () => {
       try {
-        const [compRes, accRes, partyRes, prodRes, invCompRes, invProdRes] = await Promise.all([
-          api.get("/accounting/entities"),
+        const [compRes, accRes, customerRes, invCompRes, invProdRes] = await Promise.all([
+          api.get("/companies"),
           api.get("/accounting/accounts"),
-          api.get("/accounting/parties"),
-          api.get("/accounting/products"),
+          api.get("/customers"),
           api.get("/companies"),
           api.get("/product-types"),
         ]);
         setAccCompanies(compRes.data?.data || []);
         setAccAccounts(accRes.data?.data || []);
-        setAccParties(partyRes.data?.data || []);
-        setAccProducts(prodRes.data?.data || []);
+        setAccCustomers(customerRes.data?.data || []);
         setInvCompanies(invCompRes.data?.data || []);
         setInvProducts(invProdRes.data?.data || []);
       } catch {
@@ -481,10 +479,12 @@ export default function Reports() {
       setDrill({
         open: true,
         title: t || "Ledger Details",
+        kind: "ledger",
         loading: true,
         rows: [],
         columns: [
           { key: "date", label: "Date", render: (v) => fmtDate(v) },
+          { key: "references", label: "References" },
           { key: "voucherNo", label: "Voucher No" },
           { key: "description", label: "Description" },
           { key: "debit", label: "Debit", render: (v) => fmt(v) },
@@ -820,8 +820,7 @@ export default function Reports() {
     if (f.accCompanyId != null) setAccCompanyId(String(f.accCompanyId || ""));
     if (Array.isArray(f.voucherTypes)) setAccVoucherTypes(f.voucherTypes);
     if (Array.isArray(f.accountIds)) setAccAccountIds(f.accountIds);
-    if (Array.isArray(f.partyIds)) setAccPartyIds(f.partyIds);
-    if (Array.isArray(f.productIds)) setAccProductIds(f.productIds);
+    if (Array.isArray(f.partyNames)) setAccCustomerNames(f.partyNames);
 
     // Inventory filters
     if (Array.isArray(f.invCompanyIds)) setInvCompanyIds(f.invCompanyIds);
@@ -832,6 +831,192 @@ export default function Reports() {
   };
 
   const openSaveTemplate = () => setTemplateDialog({ open: true, name: "" });
+
+  const asOfDate = useMemo(() => {
+    if (range === "custom" && endDate) return endDate;
+    if (range === "particular" && particularDate) return particularDate;
+    return new Date().toISOString().slice(0, 10);
+  }, [range, endDate, particularDate]);
+
+  const selectedCompanyName = useMemo(() => {
+    const c = (accCompanies || []).find((x) => String(x._id) === String(accCompanyId));
+    return c?.name || "Name of Business";
+  }, [accCompanies, accCompanyId]);
+
+  const fmtAmt = (v) => {
+    const n = Number(v || 0);
+    if (!Number.isFinite(n)) return "";
+    return n.toLocaleString();
+  };
+
+  const downloadTrialPdf = () => {
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.setFontSize(14);
+    doc.text("TRIAL BALANCE", 105, 14, { align: "center" });
+    doc.setFontSize(10);
+    doc.text(`as at ${asOfDate}`, 105, 20, { align: "center" });
+
+    const body = (rows || []).map((r, idx) => [
+      String(idx + 1),
+      r.account || r.line || "-",
+      String(r.code || ""),
+      fmtAmt(r.debit),
+      fmtAmt(r.credit),
+    ]);
+
+    autoTable(doc, {
+      head: [["S. No", "Account Names", "A/c No.", "Debit", "Credit"]],
+      body,
+      startY: 26,
+      styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+      theme: "grid",
+      columnStyles: { 0: { cellWidth: 14 }, 2: { cellWidth: 22 }, 3: { halign: "right" }, 4: { halign: "right" } },
+    });
+
+    doc.save(`trial_balance_${asOfDate}.pdf`);
+  };
+
+  const downloadTrialExcel = () => {
+    const out = (rows || []).map((r, idx) => ({
+      "S. No": idx + 1,
+      "Account Names": r.account || r.line || "",
+      "A/c No.": r.code || "",
+      Debit: r.debit || 0,
+      Credit: r.credit || 0,
+    }));
+    const ws = XLSX.utils.json_to_sheet(out);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Trial Balance");
+    XLSX.writeFile(wb, `trial_balance_${asOfDate}.xlsx`);
+  };
+
+  const downloadPlPdf = async () => {
+    const res = await api.get("/accounting/pl", params);
+    const p = res.data?.data || {};
+    const income = p.income || [];
+    const cogs = p.cogs || [];
+    const expenses = p.expenses || [];
+    const totals = p.totals || {};
+
+    const dr = [
+      ...cogs.map((r) => ({ label: r.account, amount: num(r.amount) })),
+      ...expenses.map((r) => ({ label: r.account, amount: num(r.amount) })),
+    ];
+    const cr = income.map((r) => ({ label: r.account, amount: num(r.amount) }));
+
+    const max = Math.max(dr.length, cr.length);
+    const body = Array.from({ length: max }).map((_, i) => [
+      dr[i]?.label || "",
+      dr[i] ? fmtAmt(dr[i].amount) : "",
+      cr[i]?.label || "",
+      cr[i] ? fmtAmt(cr[i].amount) : "",
+    ]);
+
+    body.push(["", "", "", ""]);
+    body.push(["Gross Profit / (Loss)", fmtAmt(num(totals.grossProfit)), "", ""]);
+    body.push(["Net Profit / (Loss)", fmtAmt(num(totals.profit)), "", ""]);
+
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.setFontSize(12);
+    doc.text(`Profit and Loss A/c for the year ended`, 105, 12, { align: "center" });
+    doc.setFontSize(10);
+    doc.text(`${selectedCompanyName}`, 105, 18, { align: "center" });
+
+    autoTable(doc, {
+      head: [["Dr.", "Rs.", "Cr.", "Rs."]],
+      body,
+      startY: 24,
+      styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+      theme: "grid",
+      columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+    });
+
+    doc.save(`profit_loss_${asOfDate}.pdf`);
+  };
+
+  const downloadBalancePdf = async () => {
+    const res = await api.get("/accounting/balance", params);
+    const b = res.data?.data || {};
+    const assets = b.assets || [];
+    const right = [...(b.liabilities || []), ...(b.equity || [])];
+    const totals = b.totals || {};
+
+    const max = Math.max(assets.length, right.length);
+    const body = Array.from({ length: max }).map((_, i) => [
+      assets[i]?.account || "",
+      assets[i] ? fmtAmt(num(assets[i].balance)) : "",
+      right[i]?.account || "",
+      right[i] ? fmtAmt(num(right[i].balance)) : "",
+    ]);
+
+    body.push(["", "", "", ""]);
+    body.push(["Total Assets", fmtAmt(num(totals.totalAssets)), "Total L + E", fmtAmt(num(totals.totalLE))]);
+
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.setFontSize(12);
+    doc.text(`${selectedCompanyName}`, 105, 12, { align: "center" });
+    doc.text("Balance Sheet", 105, 18, { align: "center" });
+    doc.setFontSize(10);
+    doc.text(`as at ${asOfDate}`, 105, 24, { align: "center" });
+
+    autoTable(doc, {
+      head: [["Assets", "Rs.", "Liabilities and Capital", "Rs."]],
+      body,
+      startY: 30,
+      styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+      theme: "grid",
+      columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+    });
+
+    doc.save(`balance_sheet_${asOfDate}.pdf`);
+  };
+
+  const downloadLedgerDrillPdf = () => {
+    const debits = (drill.rows || []).filter((r) => Number(r.debit || 0) > 0);
+    const credits = (drill.rows || []).filter((r) => Number(r.credit || 0) > 0);
+    const max = Math.max(debits.length, credits.length);
+    const body = Array.from({ length: max }).map((_, i) => {
+      const d = debits[i];
+      const c = credits[i];
+      const dDate = d?.date ? new Date(d.date).toLocaleDateString() : "";
+      const cDate = c?.date ? new Date(c.date).toLocaleDateString() : "";
+      return [
+        dDate,
+        d?.references || d?.description || "",
+        "",
+        d ? fmtAmt(num(d.debit)) : "",
+        cDate,
+        c?.references || c?.description || "",
+        "",
+        c ? fmtAmt(num(c.credit)) : "",
+      ];
+    });
+
+    const doc = new jsPDF("l", "pt", "a4");
+    doc.setFont("times", "normal");
+    doc.setFontSize(12);
+    doc.text(drill.title?.replace(/\s*\(Ledger\)\s*$/, "") ? `${drill.title.replace(/\s*\(Ledger\)\s*$/, "")} Account in Ledger` : "Account in Ledger", 420, 24, { align: "center" });
+    doc.text("Dr.", 40, 24);
+    doc.text("Cr.", 780, 24);
+
+    autoTable(doc, {
+      head: [["Date", "References", "J.R.", "Amount Rs.", "Date", "References", "J.R.", "Amount Rs."]],
+      body,
+      startY: 34,
+      styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+      theme: "grid",
+      columnStyles: { 3: { halign: "right" }, 7: { halign: "right" } },
+    });
+
+    doc.save(`ledger_${asOfDate}.pdf`);
+  };
 
   const saveTemplate = async (templateName) => {
     const trimmed = String(templateName || "").trim();
@@ -846,8 +1031,7 @@ export default function Reports() {
           // common
           voucherTypes: accVoucherTypes,
           accountIds: accAccountIds,
-          partyIds: accPartyIds,
-          productIds: accProductIds,
+          partyNames: accCustomerNames,
           accCompanyId,
           invCompanyIds,
           invProductTypeIds,
@@ -1048,34 +1232,17 @@ export default function Reports() {
                 </div>
 
                 <div className="text-sm">
-                  <span className={filterLabelClass}>Parties</span>
+                  <span className={filterLabelClass}>Customers</span>
                   <select
                     multiple
                     size={1}
-                    value={accPartyIds}
-                    onChange={(e) => setAccPartyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    value={accCustomerNames}
+                    onChange={(e) => setAccCustomerNames(Array.from(e.target.selectedOptions).map((o) => o.value))}
                     className={`${filterInputClass} w-full`}
                   >
-                    {(accParties || []).filter((p) => p.isActive !== false).map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Products</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={accProductIds}
-                    onChange={(e) => setAccProductIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {(accProducts || []).filter((p) => p.isActive !== false).map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name}
+                    {(accCustomers || []).map((c) => (
+                      <option key={c._id || c.name} value={c.name}>
+                        {c.name}
                       </option>
                     ))}
                   </select>
@@ -1165,6 +1332,54 @@ export default function Reports() {
             searchPlaceholder={`Search ${title.toLowerCase()}...`}
             emptyMessage={`No ${title.toLowerCase()} found.`}
             rowClassName={reportRowClass}
+            showExport={!["trial", "pl", "balance"].includes(activeTab)}
+            showPrint={!["trial", "pl", "balance"].includes(activeTab)}
+            toolbarActions={
+              ["trial", "pl", "balance"].includes(activeTab) ? (
+                <div className="flex flex-wrap gap-2">
+                  {activeTab === "trial" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={downloadTrialPdf}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Download size={16} /> PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadTrialExcel}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Download size={16} /> Excel
+                      </button>
+                    </>
+                  )}
+                  {activeTab === "pl" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadPlPdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Download size={16} /> PDF
+                    </button>
+                  )}
+                  {activeTab === "balance" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadBalancePdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Download size={16} /> PDF
+                    </button>
+                  )}
+                </div>
+              ) : null
+            }
           />
         )}
       </div>
@@ -1241,6 +1456,19 @@ export default function Reports() {
                   idKey="id"
                   searchPlaceholder="Search..."
                   emptyMessage="No records found."
+                  showExport={drill.kind !== "ledger"}
+                  showPrint={drill.kind !== "ledger"}
+                  toolbarActions={
+                    drill.kind === "ledger" ? (
+                      <button
+                        type="button"
+                        onClick={downloadLedgerDrillPdf}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Download size={16} /> PDF
+                      </button>
+                    ) : null
+                  }
                 />
               )}
             </div>

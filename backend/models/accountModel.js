@@ -17,6 +17,11 @@ const accountSchema = new mongoose.Schema(
     },
     isControl: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    journalSide: {
+      type: String,
+      enum: ["BOTH", "DEBIT", "CREDIT"],
+      default: "BOTH",
+    },
     tags: { type: [String], default: [] },
   },
   { timestamps: true }

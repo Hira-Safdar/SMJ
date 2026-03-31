@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   BookOpen,
@@ -23,11 +23,8 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const TABS = [
+  { key: "coa", label: "Chart of Accounts", icon: <BookOpen size={16} /> },
   { key: "journal-entry", label: "Journal Entry", icon: <FileText size={16} /> },
-  { key: "ledger", label: "Ledger", icon: <BookOpen size={16} /> },
-  { key: "trial-balance", label: "Trial Balance", icon: <BookOpen size={16} /> },
-  { key: "profit-loss", label: "Profit & Loss", icon: <BookOpen size={16} /> },
-  { key: "balance-sheet", label: "Balance Sheet", icon: <BookOpen size={16} /> },
   { key: "vouchers", label: "Voucher List", icon: <List size={16} /> },
 ];
 
@@ -43,13 +40,19 @@ const BOOK_TYPES = [
   { value: "BILLS_PAYABLE", label: "Bills Payable" },
 ];
 
+const ACCOUNT_SUBTYPES = {
+  ASSET: ["CURRENT_ASSET", "FIXED_ASSET", "CASH", "BANK", "INVENTORY", "AR", "OTHER"],
+  LIABILITY: ["CURRENT_LIABILITY", "LONG_TERM_LIABILITY", "AP", "PAYROLL", "OTHER"],
+  EQUITY: ["OWNER_EQUITY", "CAPITAL", "DRAWING", "RESERVE", "OTHER"],
+  INCOME: ["SALES", "SERVICE", "OTHER_INCOME", "OTHER"],
+  EXPENSE: ["PURCHASE", "OPERATING", "PAYROLL", "ADMIN", "SELLING", "OTHER"],
+  COGS: ["COGS", "OTHER"],
+};
+
 const blankLine = () => {
   const rowId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return {
     rowId,
-    groupId: rowId,
-    date: new Date().toISOString().slice(0, 10),
-    transactionType: "JOURNAL",
     entryType: "both",
     debitAccountId: "",
     debitMode: "list",
@@ -57,9 +60,34 @@ const blankLine = () => {
     creditAccountId: "",
     creditMode: "list",
     creditInput: "",
+    customerId: "",
+    customerName: "",
+    productTypeId: "",
+    productName: "",
     debitAmount: "",
     creditAmount: "",
+  };
+};
+
+const blankEntry = ({ like } = {}) => {
+  const entryId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const likeLines = Array.isArray(like?.lines) ? like.lines : null;
+  const lines =
+    likeLines && likeLines.length
+      ? likeLines.map((l, idx) => ({ ...blankLine(), entryType: l?.entryType || "both", isBase: idx === 0 }))
+      : [{ ...blankLine(), entryType: "both", isBase: true }];
+
+  return {
+    entryId,
+    date: new Date().toISOString().slice(0, 10),
+    companyId: "",
+    companyName: "",
+    customerId: "",
+    customerName: "",
+    productTypeId: "",
+    productName: "",
     narration: "",
+    lines,
   };
 };
 
@@ -74,27 +102,171 @@ const formatYear = (iso) => {
   return d.getFullYear();
 };
 
+function GroupedProductDropdown({
+  valueId,
+  valueLabel,
+  groups = [],
+  preferredBrandKey = "",
+  onSelect,
+  disabled = false,
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!ref.current) return;
+      if (ref.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    setQ(valueId ? String(valueLabel || "") : "");
+  }, [open, valueId, valueLabel]);
+
+  const normalizedPreferred = String(preferredBrandKey || "").trim().toLowerCase();
+  const scopedGroups = useMemo(() => {
+    if (!normalizedPreferred) return groups;
+    const preferred = (groups || []).find((g) => String(g.brandKey || "").toLowerCase() === normalizedPreferred);
+    return preferred ? [preferred] : groups;
+  }, [groups, normalizedPreferred]);
+
+  const filtered = useMemo(() => {
+    const s = String(q || "").trim().toLowerCase();
+    if (!s) return scopedGroups;
+    return (scopedGroups || [])
+      .map((g) => ({
+        ...g,
+        items: (g.items || []).filter((p) => String(p?.name || "").toLowerCase().includes(s)),
+      }))
+      .filter((g) => (g.items || []).length);
+  }, [q, scopedGroups]);
+
+  const showBrandInItem = !normalizedPreferred && String(q || "").trim().length > 0;
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onMouseDown={() => {
+          if (disabled) return;
+          setOpen(true);
+          queueMicrotask(() => inputRef.current?.focus());
+        }}
+        className="w-full relative"
+      >
+        <input
+          ref={inputRef}
+          disabled={disabled}
+          value={q}
+          onFocus={(e) => {
+            if (disabled) return;
+            setOpen(true);
+            e.target.select?.();
+          }}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          placeholder="(Optional)"
+          className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm focus:outline-none ${
+            disabled ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
+          } placeholder:text-gray-500`}
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-700">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            <path
+              fillRule="evenodd"
+              d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.24 4.5a.75.75 0 0 1-1.08 0l-4.24-4.5a.75.75 0 0 1 .02-1.06Z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </span>
+      </div>
+
+      {open && (
+        <div className="absolute z-40 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+          <div className="max-h-64 overflow-auto">
+            {!!valueId && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect?.({ id: "", label: "" });
+                  setQ("");
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-900 hover:bg-blue-50"
+              >
+                Clear selection
+              </button>
+            )}
+            {(filtered || []).map((g) => (
+              <div key={`grp-${g.brandKey || g.brand}`}>
+                <div className="px-3 py-2 text-sm font-semibold text-gray-900 bg-white border-b border-gray-300">
+                  {g.brand || "Other"}
+                </div>
+                {(g.items || []).map((p) => {
+                  const label = showBrandInItem
+                    ? `${String(g.brand || "").trim()} - ${String(p?.name || "").trim()}`.trim()
+                    : String(p?.name || "").trim();
+                  const selected = String(valueId) === String(p._id);
+                  return (
+                    <button
+                      key={p._id}
+                      type="button"
+                      onClick={() => {
+                        onSelect?.({ id: String(p._id), label });
+                        setQ(label);
+                        setOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm ${
+                        selected ? "bg-blue-600 text-white hover:bg-blue-600" : "text-gray-900 hover:bg-blue-50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-sm text-gray-500">No products found.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const isEntryActive = (e) => {
+  const hasText = String(e?.companyId || "").trim() || String(e?.customerId || "").trim() || String(e?.productTypeId || "").trim() || String(e?.narration || "").trim();
+  const hasLines =
+    (e?.lines || []).some((l) => n0(l?.debitAmount) > 0 || n0(l?.creditAmount) > 0 || l?.debitAccountId || l?.creditAccountId);
+  return !!(hasText || hasLines);
+};
+
 export default function AccountingFinance() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState("journal-entry");
+  const [activeTab, setActiveTab] = useState("coa");
   const [loading, setLoading] = useState(false);
 
   const [accounts, setAccounts] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [gatepassCompanies, setGatepassCompanies] = useState([]);
+  const [productTypes, setProductTypes] = useState([]);
   const [customerOptions, setCustomerOptions] = useState([]);
-  const [parties, setParties] = useState([]);
 
   const [editingVoucherId, setEditingVoucherId] = useState("");
   const [editingVoucherNo, setEditingVoucherNo] = useState("");
-  const [header, setHeader] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    voucherType: "JOURNAL",
-    companyId: "",
-    companyName: "",
-    description: "",
-  });
-  const [lines, setLines] = useState([blankLine(), blankLine()]);
+  const [entries, setEntries] = useState([blankEntry()]);
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const [rangeStart, setRangeStart] = useState("");
@@ -107,7 +279,6 @@ export default function AccountingFinance() {
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterVoucherType, setFilterVoucherType] = useState("");
   const [filterAccountId, setFilterAccountId] = useState("");
-  const [filterPartyId, setFilterPartyId] = useState("");
   const [filterCustomerName, setFilterCustomerName] = useState("");
   const [vouchers, setVouchers] = useState([]);
 
@@ -115,11 +286,43 @@ export default function AccountingFinance() {
   const [generatedJournals, setGeneratedJournals] = useState([]);
   const [selectedGeneratedIds, setSelectedGeneratedIds] = useState(new Set());
   const [submitErrors, setSubmitErrors] = useState([]);
+  const [firstValidationError, setFirstValidationError] = useState(null);
+
+  const [accountDialog, setAccountDialog] = useState({
+    open: false,
+    mode: "create", // create|edit
+    id: "",
+    form: {
+      code: "",
+      name: "",
+      type: "ASSET",
+      subType: "CURRENT_ASSET",
+      parentAccountId: "",
+      isControl: false,
+      isActive: true,
+      journalSide: "BOTH",
+    },
+  });
 
   useEffect(() => {
     const tab = searchParams.get("tab");
+    const reportRedirect = {
+      ledger: "ledger",
+      "trial-balance": "trial",
+      "profit-loss": "pl",
+      "balance-sheet": "balance",
+      daybook: "daybook",
+    };
+    if (tab && reportRedirect[tab]) {
+      navigate(`/reports?tab=${reportRedirect[tab]}`, { replace: true });
+      return;
+    }
+    if (tab && !TABS.some((t) => t.key === tab)) {
+      setActiveTab("coa");
+      return;
+    }
     if (tab && TABS.some((t) => t.key === tab)) setActiveTab(tab);
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     setSearchParams((prev) => {
@@ -129,15 +332,33 @@ export default function AccountingFinance() {
     });
   }, [activeTab, setSearchParams]);
 
+  const entryTotals = useMemo(() => {
+    return (entries || []).map((e) => {
+      const active = isEntryActive(e);
+      const totalDebit = round2((e.lines || []).reduce((s, l) => s + n0(l.debitAmount), 0));
+      const totalCredit = round2((e.lines || []).reduce((s, l) => s + n0(l.creditAmount), 0));
+      return {
+        entryId: e.entryId,
+        totalDebit,
+        totalCredit,
+        balanced: !active || (totalDebit > 0 && totalDebit === totalCredit),
+      };
+    });
+  }, [entries]);
+
+  const entryTotalsById = useMemo(() => new Map(entryTotals.map((t) => [t.entryId, t])), [entryTotals]);
+
   const totals = useMemo(() => {
-    const totalDebit = round2(lines.reduce((s, l) => s + n0(l.debitAmount), 0));
-    const totalCredit = round2(lines.reduce((s, l) => s + n0(l.creditAmount), 0));
-    return { totalDebit, totalCredit, balanced: totalDebit > 0 && totalDebit === totalCredit };
-  }, [lines]);
+    const totalDebit = round2(entryTotals.reduce((s, t) => s + n0(t.totalDebit), 0));
+    const totalCredit = round2(entryTotals.reduce((s, t) => s + n0(t.totalCredit), 0));
+    const balanced = entryTotals.length ? entryTotals.every((t) => t.balanced) : false;
+    return { totalDebit, totalCredit, balanced };
+  }, [entryTotals]);
 
   const companyOptions = useMemo(() => {
     const map = new Map();
     (companies || []).forEach((c) => {
+      if (c?.isActive === false) return;
       const name = String(c?.name || "").trim();
       if (!name) return;
       map.set(name.toLowerCase(), { id: String(c._id), name });
@@ -167,31 +388,43 @@ export default function AccountingFinance() {
         name: a.name,
         code: a.code,
         type: a.type,
+        journalSide: a.journalSide || "BOTH",
       }));
   }, [accounts]);
   const debitAccountOptions = useMemo(() => {
-    const debitTypes = new Set(["ASSET", "EXPENSE", "LOSS", "COGS", "DRAWING"]);
-    return accountOptions.filter((a) => !a.type || debitTypes.has(String(a.type).toUpperCase()));
+    return accountOptions.filter((a) => String(a.journalSide || "BOTH").toUpperCase() !== "CREDIT");
   }, [accountOptions]);
   const creditAccountOptions = useMemo(() => {
-    const creditTypes = new Set(["LIABILITY", "EQUITY", "CAPITAL", "INCOME", "PROFIT"]);
-    return accountOptions.filter((a) => !a.type || creditTypes.has(String(a.type).toUpperCase()));
+    return accountOptions.filter((a) => String(a.journalSide || "BOTH").toUpperCase() !== "DEBIT");
   }, [accountOptions]);
-  const partyOptions = useMemo(
-    () => parties.filter((p) => p.isActive !== false).map((p) => ({ id: String(p._id), name: p.name })),
-    [parties]
-  );
- 
+
+  const productTypesByBrand = useMemo(() => {
+    const buckets = new Map(); // brandKey -> { brand, items: [] }
+    (productTypes || []).forEach((p) => {
+      const brand = String(p?.brand || "").trim();
+      const brandKey = brand.toLowerCase();
+      const name = String(p?.name || "").trim();
+      if (!name) return;
+      const row = buckets.get(brandKey) || { brand: brand || "Other", items: [] };
+      row.items.push(p);
+      buckets.set(brandKey, row);
+    });
+    const groups = Array.from(buckets.values()).map((g) => ({
+      brand: g.brand,
+      brandKey: String(g.brand || "").trim().toLowerCase(),
+      items: (g.items || []).slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
+    }));
+    groups.sort((a, b) => a.brand.localeCompare(b.brand));
+    return { buckets, groups };
+  }, [productTypes]);
 
   const loadDropdowns = async () => {
-    const [accRes, compRes, partyRes] = await Promise.all([
+    const [accRes, compRes] = await Promise.all([
       api.get("/accounting/accounts"),
-      api.get("/accounting/entities"),
-      api.get("/accounting/parties"),
+      api.get("/companies"),
     ]);
     setAccounts(accRes.data?.data || []);
     setCompanies(compRes.data?.data || []);
-    setParties(partyRes.data?.data || []);
   };
 
   const loadCustomers = async () => {
@@ -202,6 +435,7 @@ export default function AccountingFinance() {
   const loadGatepassCompanies = async () => {
     const res = await api.get("/product-types");
     const rows = res.data?.data || [];
+    setProductTypes(rows);
     const names = Array.from(
       new Set(rows.map((r) => String(r.brand || "").trim()).filter(Boolean))
     ).sort();
@@ -234,7 +468,13 @@ export default function AccountingFinance() {
     if (!trimmed) return "";
     const existing = (accounts || []).find((a) => String(a.name || "").toLowerCase() === trimmed.toLowerCase());
     if (existing) {
-      toast.error(`Account already exists: ${existing.name}`);
+      if (existing.isActive === false) {
+        await api.put(`/accounting/accounts/${existing._id}`, { isActive: true });
+        await loadDropdowns();
+        toast.success(`Re-activated account: ${existing.name}`);
+      } else {
+        toast.error(`Account already exists: ${existing.name}`);
+      }
       return String(existing._id);
     }
     const type = inferAccountType(trimmed);
@@ -245,10 +485,134 @@ export default function AccountingFinance() {
       type,
       subType: "",
       isControl: false,
+      journalSide: "BOTH",
     });
     const id = res.data?.data?._id || "";
     await loadDropdowns();
     return id;
+  };
+
+  const openNewAccount = () => {
+    setAccountDialog({
+      open: true,
+      mode: "create",
+      id: "",
+      form: {
+        code: "",
+        name: "",
+        type: "ASSET",
+        subType: "CURRENT_ASSET",
+        parentAccountId: "",
+        isControl: false,
+        isActive: true,
+        journalSide: "BOTH",
+      },
+    });
+  };
+
+  const openEditAccount = (row) => {
+    setAccountDialog({
+      open: true,
+      mode: "edit",
+      id: String(row?._id || ""),
+      form: {
+        code: String(row?.code || ""),
+        name: String(row?.name || ""),
+        type: row?.type || "ASSET",
+        subType: String(row?.subType || ""),
+        parentAccountId: row?.parentAccountId ? String(row.parentAccountId) : "",
+        isControl: !!row?.isControl,
+        isActive: row?.isActive !== false,
+        journalSide: row?.journalSide || "BOTH",
+      },
+    });
+  };
+
+  const saveAccount = async () => {
+    const f = accountDialog.form || {};
+    const code = String(f.code || "").trim();
+    const name = String(f.name || "").trim();
+    if (!code) return toast.error("Account code is required.");
+    if (!name) return toast.error("Account name is required.");
+    try {
+      setLoading(true);
+      if (accountDialog.mode === "edit" && accountDialog.id) {
+        await api.put(`/accounting/accounts/${accountDialog.id}`, {
+          code,
+          name,
+          type: f.type,
+          subType: String(f.subType || "").trim(),
+          parentAccountId: f.parentAccountId || null,
+          isControl: !!f.isControl,
+          isActive: f.isActive !== false,
+          journalSide: f.journalSide || "BOTH",
+        });
+        toast.success("Account updated.");
+      } else {
+        await api.post("/accounting/accounts", {
+          code,
+          name,
+          type: f.type,
+          subType: String(f.subType || "").trim(),
+          parentAccountId: f.parentAccountId || null,
+          isControl: !!f.isControl,
+          isActive: f.isActive !== false,
+          journalSide: f.journalSide || "BOTH",
+        });
+        toast.success("Account created.");
+      }
+      setAccountDialog((d) => ({ ...d, open: false }));
+      await loadDropdowns();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save account.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cycleJournalSide = async (account) => {
+    const id = String(account?._id || "");
+    if (!id) return;
+    const current = String(account?.journalSide || "BOTH").toUpperCase();
+    const next = current === "BOTH" ? "DEBIT" : current === "DEBIT" ? "CREDIT" : "BOTH";
+    try {
+      setLoading(true);
+      await api.put(`/accounting/accounts/${id}`, { journalSide: next });
+      setAccounts((prev) => prev.map((a) => (String(a._id) === id ? { ...a, journalSide: next } : a)));
+      toast.success("Account side updated.");
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update account side.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deactivateAccount = async (id) => {
+    try {
+      setLoading(true);
+      setAccounts((prev) => (prev || []).map((a) => (String(a?._id) === String(id) ? { ...a, isActive: false } : a)));
+      await api.put(`/accounting/accounts/${id}`, { isActive: false });
+      toast.success("Account deactivated.");
+      await loadDropdowns();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to deactivate account.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const activateAccount = async (id) => {
+    try {
+      setLoading(true);
+      setAccounts((prev) => (prev || []).map((a) => (String(a?._id) === String(id) ? { ...a, isActive: true } : a)));
+      await api.put(`/accounting/accounts/${id}`, { isActive: true });
+      toast.success("Account activated.");
+      await loadDropdowns();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to activate account.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loadVouchers = async () => {
@@ -259,7 +623,6 @@ export default function AccountingFinance() {
       companyName: filterCompanyName || undefined,
       voucherType: filterVoucherType || undefined,
       accountId: filterAccountId || undefined,
-      partyId: filterPartyId || undefined,
       partyName: filterCustomerName || undefined,
       bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
       range: "custom",
@@ -274,7 +637,6 @@ export default function AccountingFinance() {
       endDate: rangeEnd || undefined,
       companyId: filterCompanyId || undefined,
       companyName: filterCompanyName || undefined,
-      partyId: filterPartyId || undefined,
       partyName: filterCustomerName || undefined,
       bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
       voucherNo: filterVoucherNo || undefined,
@@ -290,6 +652,13 @@ export default function AccountingFinance() {
     (async () => {
       try {
         setLoading(true);
+        const syncRes = await Promise.allSettled([
+          api.post("/accounting/sync/parties"),
+          api.post("/accounting/sync/products"),
+        ]);
+        if (syncRes.some((r) => r.status === "rejected")) {
+          toast.error("Master sync failed. Loading saved data.");
+        }
         await Promise.all([loadDropdowns(), loadGatepassCompanies(), loadCustomers()]);
       } catch (err) {
         toast.error(err?.response?.data?.message || "Failed to load accounting master data.");
@@ -341,116 +710,184 @@ export default function AccountingFinance() {
     rangeEnd,
     filterCompanyId,
     filterCompanyName,
-    filterPartyId,
     filterBookType,
     filterVoucherNo,
   ]);
 
-  const setCompany = (companyId) => {
+  const patchEntry = (entryId, patch) => {
+    setEntries((prev) => prev.map((e) => (e.entryId === entryId ? { ...e, ...patch } : e)));
+  };
+
+  const patchLine = (entryId, rowId, patch) => {
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.entryId !== entryId) return e;
+        return { ...e, lines: (e.lines || []).map((l) => (l.rowId === rowId ? { ...l, ...patch } : l)) };
+      })
+    );
+  };
+
+  const setEntryCompany = (entryId, companyId) => {
     const c = companyOptions.find((x) => String(x.id) === String(companyId));
-    setHeader((p) => ({
-      ...p,
-      companyId: companyId || "",
-      companyName: c?.name || "",
-    }));
+    patchEntry(entryId, { companyId: companyId || "", companyName: c?.name || "" });
   };
 
-  const insertLineAfter = (idx, entryType) => {
-    setLines((prev) => {
-      const next = [...prev];
-      const baseDate = prev[idx]?.date || new Date().toISOString().slice(0, 10);
-      const baseType = prev[idx]?.transactionType || "JOURNAL";
-      const baseGroup = prev[idx]?.groupId || prev[idx]?.rowId;
-      const newLine = {
-        ...blankLine(),
-        date: baseDate,
-        transactionType: baseType,
-        groupId: baseGroup,
-        entryType,
-      };
-      next.splice(idx + 1, 0, newLine);
-      return next;
+  const insertLineAfter = (entryId, rowId, entryType) => {
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.entryId !== entryId) return e;
+        const idx = (e.lines || []).findIndex((l) => l.rowId === rowId);
+        if (idx < 0) return e;
+        const nextLines = [...(e.lines || [])];
+        nextLines.splice(idx + 1, 0, { ...blankLine(), entryType, isBase: false });
+        return { ...e, lines: nextLines };
+      })
+    );
+  };
+
+  const deleteLine = (entryId, rowId) => {
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.entryId !== entryId) return e;
+        const target = (e.lines || []).find((l) => l.rowId === rowId);
+        if (target?.isBase) return e;
+        return { ...e, lines: (e.lines || []).filter((l) => l.rowId !== rowId) };
+      })
+    );
+  };
+
+  const addEntry = () => {
+    setEntries((prev) => {
+      const last = prev[prev.length - 1];
+      const next = blankEntry({ like: last });
+      next.companyId = "";
+      next.companyName = "";
+      next.customerId = "";
+      next.customerName = "";
+      next.productTypeId = "";
+      next.productName = "";
+      next.narration = "";
+      next.date = "";
+      return [...prev, next];
     });
   };
 
-  const validate = () => {
-    const errs = [];
-    if (!header.date) errs.push("Date is required.");
-    if (!header.voucherType) errs.push("Voucher Type is required.");
-
-    return errs;
+  const deleteEntry = (entryId) => {
+    setEntries((prev) => prev.filter((e) => e.entryId !== entryId));
   };
 
-  const groupedLines = useMemo(() => {
-    const groups = [];
-    const seen = new Map();
-    lines.forEach((l) => {
-      const gid = l.groupId || l.rowId;
-      if (!seen.has(gid)) {
-        const entry = { groupId: gid, items: [] };
-        seen.set(gid, entry);
-        groups.push(entry);
-      }
-      seen.get(gid).items.push(l);
-    });
-    return groups;
-  }, [lines]);
-  const hasAnyInput = useMemo(
-    () =>
-      lines.some(
-        (l) =>
-          n0(l.debitAmount) > 0 ||
-          n0(l.creditAmount) > 0 ||
-          l.debitAccountId ||
-          l.creditAccountId
-      ),
-    [lines]
-  );
-  const hasAnyAmount = useMemo(
-    () => lines.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0),
-    [lines]
-  );
-  const hasEmptyFieldErrors = useMemo(() => {
-    if (!submitAttempted) return false;
-    if (groupedLines[0] && !groupedLines[0].items[0]?.date) return true;
-    if (!hasAnyInput) return true;
-    for (const l of lines) {
-      const debitAmt = n0(l.debitAmount);
-      const creditAmt = n0(l.creditAmount);
-      if (debitAmt > 0 && !l.debitAccountId) return true;
-      if (creditAmt > 0 && !l.creditAccountId) return true;
-      if (l.debitAccountId && debitAmt <= 0) return true;
-      if (l.creditAccountId && creditAmt <= 0) return true;
+  const collectValidation = (allEntries) => {
+    const errorsByEntry = new Map();
+    let ok = true;
+
+    let activeEntries = (allEntries || []).filter(isEntryActive);
+    if ((!activeEntries || activeEntries.length === 0) && (allEntries || []).length) {
+      activeEntries = [allEntries[0]];
     }
-    return false;
-  }, [submitAttempted, groupedLines, hasAnyInput, lines]);
+
+    for (const e of activeEntries) {
+      const fields = {};
+      const lines = new Map(); // rowId -> { debitAccountId?, debitAmount?, creditAccountId?, creditAmount? }
+
+      const setLineErr = (rowId, key, msg) => {
+        if (!rowId) return;
+        const prev = lines.get(rowId) || {};
+        if (!prev[key]) lines.set(rowId, { ...prev, [key]: msg });
+      };
+
+      if (!String(e.date || "").trim()) fields.date = "Date is required.";
+      if (!String(e.companyId || "").trim()) fields.companyId = "Company is required.";
+      if (!String(e.narration || "").trim()) fields.narration = "Narration is required.";
+
+      const base = (e.lines || [])[0];
+      if (base) {
+        if (!String(base.debitAccountId || "").trim()) setLineErr(base.rowId, "debitAccountId", "Debit account required.");
+        if (n0(base.debitAmount) <= 0) setLineErr(base.rowId, "debitAmount", "Debit amount required.");
+        if (!String(base.creditAccountId || "").trim()) setLineErr(base.rowId, "creditAccountId", "Credit account required.");
+        if (n0(base.creditAmount) <= 0) setLineErr(base.rowId, "creditAmount", "Credit amount required.");
+      } else {
+        fields.lines = "At least 1 row is required.";
+      }
+
+      (e.lines || []).forEach((l) => {
+        const debitDisabled = l.entryType === "credit";
+        const creditDisabled = l.entryType === "debit";
+        const debitAmt = n0(l.debitAmount);
+        const creditAmt = n0(l.creditAmount);
+
+        if (!debitDisabled) {
+          if (debitAmt > 0 && !String(l.debitAccountId || "").trim()) setLineErr(l.rowId, "debitAccountId", "Required");
+          if (String(l.debitAccountId || "").trim() && debitAmt <= 0) setLineErr(l.rowId, "debitAmount", "Required");
+        }
+        if (!creditDisabled) {
+          if (creditAmt > 0 && !String(l.creditAccountId || "").trim()) setLineErr(l.rowId, "creditAccountId", "Required");
+          if (String(l.creditAccountId || "").trim() && creditAmt <= 0) setLineErr(l.rowId, "creditAmount", "Required");
+        }
+        if (debitAmt > 0 && creditAmt > 0) {
+          setLineErr(l.rowId, "debitAmount", "Only one side per row.");
+          setLineErr(l.rowId, "creditAmount", "Only one side per row.");
+        }
+      });
+
+      const td = round2((e.lines || []).reduce((s, l) => s + n0(l.debitAmount), 0));
+      const tc = round2((e.lines || []).reduce((s, l) => s + n0(l.creditAmount), 0));
+      const hasLineInput = (e.lines || []).some(
+        (l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0 || String(l.debitAccountId || "").trim() || String(l.creditAccountId || "").trim()
+      );
+      if (hasLineInput && !(td > 0 && td === tc)) fields.balance = "Debit must equal credit.";
+
+      const hasErr = Object.keys(fields).length > 0 || lines.size > 0;
+      if (hasErr) ok = false;
+      errorsByEntry.set(e.entryId, { fields, lines });
+    }
+
+    return { ok, errorsByEntry };
+  };
+
+  const validation = useMemo(() => {
+    if (!submitAttempted) return { ok: true, errorsByEntry: new Map() };
+    return collectValidation(entries);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitAttempted, entries]);
+
+  const hasAnyInput = useMemo(() => {
+    return (entries || []).some((e) =>
+      (e.lines || []).some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0 || l.debitAccountId || l.creditAccountId)
+    );
+  }, [entries]);
+
+  const hasAnyAmount = useMemo(() => {
+    return (entries || []).some((e) => (e.lines || []).some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0));
+  }, [entries]);
+
+  const hasValidationErrors = useMemo(() => {
+    if (!submitAttempted) return false;
+    return !validation.ok;
+  }, [submitAttempted, validation]);
 
   const resetEntry = () => {
     setEditingVoucherId("");
     setEditingVoucherNo("");
-    setHeader({
-      date: new Date().toISOString().slice(0, 10),
-      voucherType: "JOURNAL",
-      companyId: "",
-      companyName: "",
-      description: "",
-    });
-    setLines([blankLine(), blankLine()]);
+    setEntries([blankEntry()]);
     setSubmitAttempted(false);
     setSubmitErrors([]);
   };
 
-  const buildVoucherPayload = () => {
+  const buildSingleVoucherPayload = (entry) => {
     const lineItems = [];
-    lines.forEach((l) => {
+    (entry?.lines || []).forEach((l) => {
       const debitAmt = round2(n0(l.debitAmount));
       const creditAmt = round2(n0(l.creditAmount));
-      const narration = withBeing(String(l.narration || "").trim() || "");
+      const narration = String(entry?.narration || "").trim();
+      const partyName = String(entry?.customerName || "").trim();
+      const itemName = String(entry?.productName || "").trim();
       if (debitAmt > 0 && l.debitAccountId) {
         lineItems.push({
           accountId: l.debitAccountId,
           debit: debitAmt,
           credit: 0,
+          partyName,
+          itemName,
           remarks: narration,
         });
       }
@@ -459,23 +896,23 @@ export default function AccountingFinance() {
           accountId: l.creditAccountId,
           debit: 0,
           credit: creditAmt,
+          partyName,
+          itemName,
           remarks: narration,
         });
       }
     });
     if (!lineItems.length) return null;
-    const firstDate = lines.find((l) => l.date)?.date || header.date;
-    const firstType = lines.find((l) => l.transactionType)?.transactionType || "JOURNAL";
-    const companyId = header.companyId || filterCompanyId || "";
     const companyName =
-      String(header.companyName || filterCompanyName || "").trim() || (companyId ? String(companyId) : "General");
+      String(entry?.companyName || "").trim() ||
+      (entry?.companyId ? String(entry.companyId) : "");
     return {
-      date: firstDate,
-      voucherType: header.voucherType,
-      companyId,
+      date: entry?.date || new Date().toISOString().slice(0, 10),
+      voucherType: "JOURNAL",
+      companyId: entry?.companyId || "",
       companyName,
-      description: buildNarration(),
-      bookType: firstType,
+      description: String(entry?.narration || "").trim(),
+      bookType: "JOURNAL",
       lines: lineItems,
     };
   };
@@ -483,46 +920,55 @@ export default function AccountingFinance() {
   const saveVoucher = async ({ andNew, autoPrint } = { andNew: false, autoPrint: false }) => {
     try {
       setSubmitAttempted(true);
-      const errs = validate();
-      setSubmitErrors(errs);
-      const emptyFieldNow = (() => {
-        if (groupedLines[0] && !groupedLines[0].items[0]?.date) return true;
-        if (!hasAnyInput) return true;
-        for (const l of lines) {
-          const debitAmt = n0(l.debitAmount);
-          const creditAmt = n0(l.creditAmount);
-          if (debitAmt > 0 && !l.debitAccountId) return true;
-          if (creditAmt > 0 && !l.creditAccountId) return true;
-          if (l.debitAccountId && debitAmt <= 0) return true;
-          if (l.creditAccountId && creditAmt <= 0) return true;
-        }
-        return false;
-      })();
-      if (errs.length || emptyFieldNow || (hasAnyAmount && !totals.balanced)) {
+      const v = collectValidation(entries);
+      setFirstValidationError(null);
+      setSubmitErrors([]);
+      if (!v.ok) {
+        toast.error("Please fix highlighted fields.");
         return;
       }
       setSubmitErrors([]);
       setLoading(true);
-      const payload = buildVoucherPayload();
-      if (!payload) {
-        toast.error("No valid rows to save.");
-        return;
-      }
       let savedId = "";
       if (editingVoucherId) {
+        const payload = buildSingleVoucherPayload(entries[0]);
+        if (!payload) {
+          toast.error("No valid rows to save.");
+          return;
+        }
         const res = await api.put(`/accounting/vouchers/${editingVoucherId}`, payload);
         setEditingVoucherNo(res.data?.data?.voucherNo || editingVoucherNo || "");
         savedId = res.data?.data?._id || editingVoucherId;
         toast.success("Voucher updated.");
       } else {
-        const res = await api.post("/accounting/vouchers", payload);
-        const saved = res.data?.data || null;
-        if (saved?._id) {
-          setEditingVoucherId(saved._id);
-          setEditingVoucherNo(saved.voucherNo || "");
-          savedId = saved._id;
+        const activeEntries = (entries || []).filter((e) => isEntryActive(e) && buildSingleVoucherPayload(e));
+        if (!activeEntries.length) {
+          toast.error("No valid rows to save.");
+          return;
         }
-        toast.success("Voucher saved.");
+        const payloadEntries = activeEntries.map((e) => ({
+          date: e.date,
+          voucherType: "JOURNAL",
+          bookType: "JOURNAL",
+          companyId: e.companyId,
+          companyName: e.companyName,
+          customerId: e.customerId,
+          customerName: e.customerName,
+          productTypeId: e.productTypeId,
+          productName: e.productName,
+          narration: e.narration,
+          lines: (buildSingleVoucherPayload(e)?.lines || []).map((l) => ({
+            accountId: l.accountId,
+            debit: l.debit,
+            credit: l.credit,
+            partyName: l.partyName,
+            itemName: l.itemName,
+            remarks: l.remarks,
+          })),
+        }));
+        const res = await api.post("/accounting/vouchers", { entries: payloadEntries });
+        const created = res.data?.data?.created || 0;
+        toast.success(created > 1 ? `Saved ${created} vouchers.` : "Voucher saved.");
       }
       if (andNew) resetEntry();
       await loadVouchers();
@@ -547,31 +993,36 @@ export default function AccountingFinance() {
       if (!v) throw new Error("Voucher not found.");
       setEditingVoucherId(String(v._id));
       setEditingVoucherNo(v.voucherNo || "");
-      setHeader({
-        date: v.date ? new Date(v.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-        voucherType: v.voucherType || "JOURNAL",
-        companyId: v.companyId || "",
-        companyName: v.companyName || "",
-        description: v.description || "",
-      });
-      const groupId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const mapped = (v.lines || []).map((l) => ({
+      const firstParty = (v.lines || []).find((l) => String(l.partyName || "").trim())?.partyName || "";
+      const firstItem = (v.lines || []).find((l) => String(l.itemName || "").trim())?.itemName || "";
+      const mappedLines = (v.lines || []).map((l) => ({
         rowId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        groupId,
-        date: v.date ? new Date(v.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-        transactionType: v.bookType || "JOURNAL",
         debitAccountId: n0(l.debit) > 0 ? String(l.accountId || "") : "",
         debitMode: "list",
         debitInput: "",
         creditAccountId: n0(l.credit) > 0 ? String(l.accountId || "") : "",
         creditMode: "list",
         creditInput: "",
+        customerId: "",
+        customerName: "",
+        productTypeId: "",
+        productName: "",
         debitAmount: n0(l.debit) > 0 ? String(round2(n0(l.debit))) : "",
         creditAmount: n0(l.credit) > 0 ? String(round2(n0(l.credit))) : "",
-        narration: l?.remarks || "",
         entryType: n0(l.debit) > 0 ? "debit" : n0(l.credit) > 0 ? "credit" : "both",
       }));
-      setLines(mapped.length ? mapped : [blankLine(), blankLine()]);
+      const e = {
+        ...blankEntry(),
+        entryId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        date: v.date ? new Date(v.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        companyId: v.companyId || "",
+        companyName: v.companyName || "",
+        customerName: firstParty || "",
+        productName: firstItem || "",
+        narration: v.description || "",
+        lines: mappedLines.length ? mappedLines : [{ ...blankLine(), entryType: "debit" }, { ...blankLine(), entryType: "credit" }],
+      };
+      setEntries([e]);
       setSubmitAttempted(false);
       setActiveTab("journal-entry");
     } catch (err) {
@@ -653,14 +1104,20 @@ export default function AccountingFinance() {
   };
 
   const handleFilterCompany = (value) => {
-    const match = (companies || []).find((c) => String(c._id) === String(value));
-    if (match) {
-      setFilterCompanyId(String(match._id));
-      setFilterCompanyName(match.name || "");
-    } else {
+    const v = String(value || "").trim();
+    if (!v) {
       setFilterCompanyId("");
-      setFilterCompanyName(value || "");
+      setFilterCompanyName("");
+      return;
     }
+    const match = companyOptions.find((c) => String(c.id) === String(v));
+    if (match) {
+      setFilterCompanyId(String(match.id));
+      setFilterCompanyName(match.name || "");
+      return;
+    }
+    setFilterCompanyId(v);
+    setFilterCompanyName(v);
   };
 
   const accountLabel = (id) => {
@@ -671,24 +1128,6 @@ export default function AccountingFinance() {
     return `${raw} A/c`;
   };
 
-  const buildNarration = () => {
-    const desc = String(header.description || "").trim();
-    const rowNarrations = lines.map((l) => String(l.narration || "").trim()).filter(Boolean);
-    if (rowNarrations.length) return rowNarrations.join("; ");
-    if (desc) return desc;
-    const auto = lines
-      .map((l) => {
-        const debit = accountLabel(l.debitAccountId);
-        const credit = accountLabel(l.creditAccountId);
-        if (debit && credit) return `${debit} to ${credit}`;
-        if (debit) return debit;
-        if (credit) return credit;
-        return "";
-      })
-      .filter(Boolean);
-    return auto.join("; ");
-  };
-
   const withBeing = (text) => {
     const t = String(text || "").trim();
     if (!t) return "";
@@ -696,32 +1135,13 @@ export default function AccountingFinance() {
   };
 
   const previewEntries = useMemo(() => {
-    const groups = [];
-    const seen = new Map();
-    lines.forEach((l) => {
-      const gid = l.groupId || l.rowId;
-      if (!seen.has(gid)) {
-        const entry = { groupId: gid, items: [] };
-        seen.set(gid, entry);
-        groups.push(entry);
-      }
-      seen.get(gid).items.push(l);
-    });
-
-    const sortedGroups = groups
-      .map((g) => ({
-        ...g,
-        date: g.items.find((x) => x.date)?.date || header.date,
-      }))
-      .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
-
     const rows = [];
-    sortedGroups.forEach((g) => {
-      const date = g.date;
-      const narration = String(g.items.find((x) => String(x.narration || "").trim())?.narration || "").trim();
-      const debitItems = g.items.filter((l) => round2(n0(l.debitAmount)) > 0 && l.debitAccountId);
-      const creditItems = g.items.filter((l) => round2(n0(l.creditAmount)) > 0 && l.creditAccountId);
-
+    const sortedEntries = [...(entries || [])].sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+    sortedEntries.forEach((e) => {
+      const date = e.date;
+      const narration = String(e.narration || "").trim();
+      const debitItems = (e.lines || []).filter((l) => round2(n0(l.debitAmount)) > 0 && l.debitAccountId);
+      const creditItems = (e.lines || []).filter((l) => round2(n0(l.creditAmount)) > 0 && l.creditAccountId);
       let dateShown = false;
       const groupRows = [];
 
@@ -774,7 +1194,7 @@ export default function AccountingFinance() {
       });
     });
     return rows;
-  }, [lines, accountOptions, header.date]);
+  }, [entries, accountOptions]);
 
   const amountClass = (line) => {
     if (!submitAttempted) return "border-gray-300";
@@ -796,45 +1216,69 @@ export default function AccountingFinance() {
 
 
 
+  const journalRowsForEntry = (entry) => {
+    const debits = (entry?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
+    const credits = (entry?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
+    const rows = [];
+    let dateShown = false;
+
+    const addLine = ({ side, line, amount }) => {
+      const acc = line.accountName || line.accountCode || "Account";
+      const extra = [String(line.partyName || "").trim(), String(line.itemName || "").trim()].filter(Boolean).join(" | ");
+      rows.push({
+        date: entry.date,
+        showDate: !dateShown,
+        side,
+        details: side === "credit" ? `To ${acc}` : acc,
+        extra,
+        debit: side === "debit" ? amount : "",
+        credit: side === "credit" ? amount : "",
+      });
+      dateShown = true;
+    };
+
+    debits.forEach((l) => addLine({ side: "debit", line: l, amount: round2(n0(l.debit)).toFixed(2) }));
+    credits.forEach((l) => addLine({ side: "credit", line: l, amount: round2(n0(l.credit)).toFixed(2) }));
+
+    const narration = withBeing(String(entry.description || entry.narration || "").trim());
+    if (narration) {
+      rows.push({
+        date: entry.date,
+        showDate: false,
+        side: "narration",
+        details: `(${narration})`,
+        extra: "",
+        debit: "",
+        credit: "",
+      });
+    }
+    return rows;
+  };
+
   const printEntry = (entry) => {
     if (!entry) return;
     const dateYear = formatYear(entry.date);
     const dateMonthDay = formatMonthDay(entry.date);
-    const linesHtml = (entry.lines || [])
-      .map((l) => {
-        const debit = round2(n0(l.debit));
-        const credit = round2(n0(l.credit));
-        const isDebit = debit > 0;
-        const details = isDebit
-          ? `${l.accountName || l.accountCode || "Account"} Dr`
-          : `${l.accountName || l.accountCode || "Account"}`;
+
+    const rows = journalRowsForEntry(entry);
+    const linesHtml = rows
+      .map((r) => {
+        const isCredit = r.side === "credit";
+        const isNarration = r.side === "narration";
+        const detailsHtml = r.extra ? `${r.details}<div class="extra">${r.extra}</div>` : r.details;
         return `
-          <tr class="entry-row">
+          <tr class="${isNarration ? "narration-row" : "entry-row"}">
             <td class="date-cell">
-              <div>${dateYear}</div>
-              <div>${dateMonthDay}</div>
+              ${r.showDate ? `<div>${dateYear}</div><div>${dateMonthDay}</div>` : ""}
             </td>
-            <td class="details-cell ${isDebit ? "debit" : "credit"}">${details}</td>
+            <td class="details-cell ${isNarration ? "narration" : isCredit ? "credit" : "debit"}">${detailsHtml}</td>
             <td class="lf-cell"></td>
-            <td class="amt-cell">${isDebit ? debit.toFixed(2) : ""}</td>
-            <td class="amt-cell">${!isDebit ? credit.toFixed(2) : ""}</td>
+            <td class="amt-cell">${r.debit}</td>
+            <td class="amt-cell">${r.credit}</td>
           </tr>
         `;
       })
       .join("");
-
-    const narration = withBeing(String(entry.description || entry.narration || "").trim());
-    const narrationRow = narration
-      ? `
-        <tr class="narration-row">
-          <td class="date-cell"></td>
-          <td class="details-cell narration">(${narration})</td>
-          <td class="lf-cell"></td>
-          <td class="amt-cell"></td>
-          <td class="amt-cell"></td>
-        </tr>
-      `
-      : "";
 
     const printHtml = `
       <!DOCTYPE html>
@@ -855,6 +1299,7 @@ export default function AccountingFinance() {
             .details-cell.credit { padding-left: 18px; }
             .details-cell.debit { padding-left: 4px; }
             .details-cell.narration { padding-left: 8px; font-style: italic; }
+            .details-cell .extra { margin-top: 2px; font-size: 10px; color: #333; }
             .lf-cell { width: 60px; text-align: center; }
             .amt-cell { width: 90px; text-align: right; }
             .entry-row .date-cell > div { line-height: 1.2; }
@@ -870,15 +1315,14 @@ export default function AccountingFinance() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Details</th>
-                <th>L.F.</th>
+                <th>References</th>
+                <th>J.R.</th>
                 <th>Amount (Dr.)</th>
                 <th>Amount (Cr.)</th>
               </tr>
             </thead>
             <tbody>
               ${linesHtml}
-              ${narrationRow}
             </tbody>
           </table>
         </body>
@@ -922,34 +1366,22 @@ export default function AccountingFinance() {
       if (!entry) throw new Error("Voucher not found.");
       const doc = new jsPDF();
       doc.setFontSize(12);
-      doc.text(`Journal Voucher: ${entry.voucherNo || "-"}`, 14, 14);
+      doc.text(`Journal: ${entry.voucherNo || "-"}`, 14, 14);
       doc.setFontSize(10);
       doc.text(`Company: ${entry.companyName || "-"}`, 14, 20);
       doc.text(`Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`, 14, 26);
 
-      const body = [];
-      (entry.lines || []).forEach((l) => {
-        const debit = round2(n0(l.debit));
-        const credit = round2(n0(l.credit));
-        const isDebit = debit > 0;
-        const details = isDebit
-          ? `${l.accountName || l.accountCode || "Account"} Dr`
-          : `${l.accountName || l.accountCode || "Account"}`;
-        body.push([
-          `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}`,
-          details,
-          "",
-          isDebit ? debit.toFixed(2) : "",
-          !isDebit ? credit.toFixed(2) : "",
-        ]);
-      });
-      const narration = withBeing(String(entry.description || entry.narration || "").trim());
-      if (narration) {
-        body.push(["", `(${narration})`, "", "", ""]);
-      }
+      const rows = journalRowsForEntry(entry);
+      const body = rows.map((r) => [
+        r.showDate ? `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}` : "",
+        r.extra ? `${r.details}\n${r.extra}` : r.details,
+        "",
+        r.debit,
+        r.credit,
+      ]);
 
       autoTable(doc, {
-        head: [["Date", "Details", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
+        head: [["Date", "References", "J.R.", "Amount (Dr.)", "Amount (Cr.)"]],
         body,
         startY: 32,
         styles: { fontSize: 9 },
@@ -968,25 +1400,14 @@ export default function AccountingFinance() {
       setLoading(true);
       const entry = await fetchVoucher(id);
       if (!entry) throw new Error("Voucher not found.");
-      const rows = [];
-      (entry.lines || []).forEach((l) => {
-        const debit = round2(n0(l.debit));
-        const credit = round2(n0(l.credit));
-        const isDebit = debit > 0;
-        rows.push({
-          Date: `${formatYear(entry.date)} ${formatMonthDay(entry.date)}`,
-          Details: isDebit
-            ? `${l.accountName || l.accountCode || "Account"} Dr`
-            : `${l.accountName || l.accountCode || "Account"}`,
-          "L.F.": "",
-          "Amount (Dr.)": isDebit ? debit.toFixed(2) : "",
-          "Amount (Cr.)": !isDebit ? credit.toFixed(2) : "",
-        });
-      });
-      const narration = withBeing(String(entry.description || entry.narration || "").trim());
-      if (narration) {
-        rows.push({ Date: "", Details: `(${narration})`, "L.F.": "", "Amount (Dr.)": "", "Amount (Cr.)": "" });
-      }
+      const rows = journalRowsForEntry(entry).map((r) => ({
+        Date: r.showDate ? `${formatYear(entry.date)} ${formatMonthDay(entry.date)}` : "",
+        References: r.details,
+        Extra: r.extra || "",
+        "J.R.": "",
+        "Amount (Dr.)": r.debit,
+        "Amount (Cr.)": r.credit,
+      }));
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Journal");
@@ -1259,15 +1680,259 @@ export default function AccountingFinance() {
         </div>
       )}
 
+      {activeTab === "coa" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <DataTable
+              title="Chart of Accounts"
+              columns={[
+                { key: "code", label: "Code" },
+                { key: "name", label: "Account Name" },
+                { key: "type", label: "Type", filterOptions: ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS"] },
+                { key: "subType", label: "Category" },
+                {
+                  key: "journalSide",
+                  label: "Side",
+                  render: (v) => {
+                    const s = String(v || "BOTH").toUpperCase();
+                    if (s === "DEBIT") return "Debit only";
+                    if (s === "CREDIT") return "Credit only";
+                    return "Both";
+                  },
+                },
+                { key: "isActive", label: "Active", render: (v) => (v === false ? "No" : "Yes") },
+                {
+                  key: "actions",
+                  label: "Actions",
+                  sortable: false,
+                  render: (_v, row) => (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditAccount(row)}
+                        className="px-2 py-1 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => cycleJournalSide(row)}
+                        className="px-2 py-1 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                        title="Toggle Side (Both → Debit → Credit)"
+                      >
+                        Side
+                      </button>
+                      {row?.isActive === false ? (
+                        <button
+                          type="button"
+                          onClick={() => activateAccount(row._id)}
+                          className="px-2 py-1 rounded border border-emerald-200 text-xs text-emerald-800 hover:bg-emerald-50"
+                        >
+                          Activate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => deactivateAccount(row._id)}
+                          className="px-2 py-1 rounded border border-red-200 text-xs text-red-700 hover:bg-red-50"
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+              data={accounts}
+              toolbarActions={
+                <button
+                  type="button"
+                  onClick={openNewAccount}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Plus size={16} /> New Account
+                </button>
+              }
+              showPrint={false}
+            />
+          </div>
+
+          {accountDialog.open && (
+            <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+              <div className="w-full max-w-xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-gray-900">
+                    {accountDialog.mode === "edit" ? "Edit Account" : "New Account"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAccountDialog((d) => ({ ...d, open: false }))}
+                    className="p-2 rounded hover:bg-gray-100"
+                    title="Close"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Type</label>
+                    <select
+                      value={accountDialog.form.type}
+                      onChange={(e) => {
+                        const type = e.target.value;
+                        const sub = (ACCOUNT_SUBTYPES[type] || ["OTHER"])[0];
+                        setAccountDialog((d) => ({ ...d, form: { ...d.form, type, subType: sub } }));
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      {["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS"].map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Category</label>
+                    <select
+                      value={accountDialog.form.subType || ""}
+                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, subType: e.target.value } }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      {(ACCOUNT_SUBTYPES[accountDialog.form.type] || ["OTHER"]).map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Show In Journal</label>
+                    <select
+                      value={accountDialog.form.journalSide || "BOTH"}
+                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, journalSide: e.target.value } }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      <option value="BOTH">Debit &amp; Credit</option>
+                      <option value="DEBIT">Debit only</option>
+                      <option value="CREDIT">Credit only</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Code</label>
+                    <div className="flex gap-2">
+                      <input
+                        value={accountDialog.form.code || ""}
+                        onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, code: e.target.value } }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                        placeholder="e.g. 1100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const type = accountDialog.form.type;
+                          const code = nextAccountCode(type);
+                          setAccountDialog((d) => ({ ...d, form: { ...d.form, code } }));
+                        }}
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                        title="Auto-generate"
+                      >
+                        Auto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Account Name</label>
+                    <input
+                      value={accountDialog.form.name || ""}
+                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, name: e.target.value } }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                      placeholder="e.g. Raw Paddy Inventory"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs text-gray-600 mb-1">Parent Account (optional)</label>
+                    <select
+                      value={accountDialog.form.parentAccountId || ""}
+                      onChange={(e) =>
+                        setAccountDialog((d) => ({ ...d, form: { ...d.form, parentAccountId: e.target.value } }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      <option value="">(None)</option>
+                      {(accounts || []).map((a) => (
+                        <option key={a._id} value={a._id}>
+                          {a.code} - {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="md:col-span-2 flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={!!accountDialog.form.isControl}
+                        onChange={(e) =>
+                          setAccountDialog((d) => ({ ...d, form: { ...d.form, isControl: e.target.checked } }))
+                        }
+                      />
+                      Control account
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={accountDialog.form.isActive !== false}
+                        onChange={(e) =>
+                          setAccountDialog((d) => ({ ...d, form: { ...d.form, isActive: e.target.checked } }))
+                        }
+                      />
+                      Active
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAccountDialog((d) => ({ ...d, open: false }))}
+                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveAccount}
+                    disabled={loading}
+                    className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === "journal-entry" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm font-semibold text-gray-900">New Voucher</div>
-              <div className="text-xs text-gray-500">
-                Totals: Debit <span className="font-semibold">{totals.totalDebit}</span> | Credit{" "}
-                <span className="font-semibold">{totals.totalCredit}</span>{" "}
-                {!totals.balanced && <span className="ml-2 text-red-600 font-semibold">Unbalanced</span>}
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">
+                  Totals: Debit <span className="font-semibold">{totals.totalDebit}</span> | Credit{" "}
+                  <span className="font-semibold">{totals.totalCredit}</span>{" "}
+                  {!totals.balanced && <span className="ml-2 text-red-600 font-semibold">Unbalanced</span>}
+                </div>
+                {/* Add Entry button moved to bottom actions */}
               </div>
             </div>
 
@@ -1277,10 +1942,309 @@ export default function AccountingFinance() {
               </div>
             )}
 
-            <div className="grid md:grid-cols-1 gap-3"></div>
+            <div className="space-y-4">
+              {(entries || []).map((e, entryIdx) => {
+                const t = entryTotalsById.get(e.entryId) || { totalDebit: 0, totalCredit: 0, balanced: false };
+                const v = submitAttempted ? validation.errorsByEntry.get(e.entryId) : null;
+                const fieldErr = v?.fields || {};
+                const lineErrMap = v?.lines || new Map();
+                const lineErr = (rowId) => lineErrMap.get(String(rowId || "")) || {};
+                return (
+                  <div key={e.entryId} className="rounded-xl border border-gray-200 p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-gray-900">Entry {entryIdx + 1}</div>
+                      <div className="text-xs text-gray-600">
+                        Dr <span className="font-semibold">{t.totalDebit}</span> | Cr{" "}
+                        <span className="font-semibold">{t.totalCredit}</span>{" "}
+                        {!t.balanced && <span className="ml-2 text-red-600 font-semibold">Unbalanced</span>}
+                      </div>
+                      {!editingVoucherId && entries.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => deleteEntry(e.entryId)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-red-200 text-xs text-red-700 hover:bg-red-50"
+                          title="Delete entry"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      )}
+                    </div>
 
+                    {submitAttempted && fieldErr.balance && (
+                      <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                        {fieldErr.balance}
+                      </div>
+                    )}
+
+                    <div className="grid md:grid-cols-5 gap-3 items-end">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Date</label>
+                        <input
+                          type="date"
+                          value={e.date || ""}
+                          onChange={(ev) => patchEntry(e.entryId, { date: ev.target.value })}
+                          className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                            submitAttempted && fieldErr.date ? "border-red-300 bg-red-50" : "border-gray-300"
+                          }`}
+                        />
+                        {submitAttempted && fieldErr.date && <div className="mt-1 text-xs text-red-600">{fieldErr.date}</div>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Customer</label>
+                        <select
+                          value={e.customerId || ""}
+                          onChange={(ev) => {
+                            const id = ev.target.value;
+                            const match = (customerOptions || []).find((c) => String(c._id) === String(id));
+                            patchEntry(e.entryId, { customerId: id, customerName: match?.name || "" });
+                          }}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                        >
+                          <option value="">(Optional)</option>
+                          {(customerOptions || []).map((c) => (
+                            <option key={c._id || c.name} value={c._id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs text-gray-600 mb-1">Company</label>
+                        <select
+                          value={e.companyId || ""}
+                          onChange={(ev) => setEntryCompany(e.entryId, ev.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                            submitAttempted && fieldErr.companyId ? "border-red-300 bg-red-50" : "border-gray-300"
+                          }`}
+                        >
+                          <option value="">Select company</option>
+                          {companyOptions.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        {submitAttempted && fieldErr.companyId && (
+                          <div className="mt-1 text-xs text-red-600">{fieldErr.companyId}</div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Product</label>
+                        <GroupedProductDropdown
+                          valueId={e.productTypeId || ""}
+                          valueLabel={String(e.productName || "").trim() || "(Optional)"}
+                          groups={productTypesByBrand.groups}
+                          preferredBrandKey={String(e.companyName || "").trim()}
+                          onSelect={({ id }) => {
+                            const match = (productTypes || []).find((p) => String(p._id) === String(id));
+                            const name = match
+                              ? [String(match.brand || "").trim(), String(match.name || "").trim()].filter(Boolean).join(" - ")
+                              : "";
+                            patchEntry(e.entryId, { productTypeId: id, productName: name });
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                      <table className="min-w-[860px] w-full text-sm">
+                        <thead className="bg-emerald-50 text-emerald-900">
+                          <tr>
+                            <th className="text-left font-semibold px-3 py-2 w-[260px]">Debit Account</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[140px]">Debit Amount</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[260px]">Credit Account</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[140px]">Credit Amount</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[60px]"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {(e.lines || []).map((l) => {
+                            const debitDisabled = l.entryType === "credit";
+                            const creditDisabled = l.entryType === "debit";
+                            const le = lineErr(l.rowId);
+                            return (
+                              <tr key={l.rowId} className="hover:bg-gray-50">
+                                <td className="px-3 py-2">
+                                  {debitDisabled ? (
+                                    <div className="text-gray-400">-</div>
+                                  ) : (
+                                    <div>
+                                      <select
+                                        value={l.debitAccountId || ""}
+                                        onChange={(ev) => patchLine(e.entryId, l.rowId, { debitAccountId: ev.target.value })}
+                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                          submitAttempted && le.debitAccountId ? "border-red-300 bg-red-50" : "border-gray-300"
+                                        }`}
+                                      >
+                                        <option value="">Select debit account</option>
+                                        {debitAccountOptions.map((a) => (
+                                          <option key={a.id} value={a.id}>
+                                            {a.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {submitAttempted && le.debitAccountId && (
+                                        <div className="mt-1 text-xs text-red-600">{le.debitAccountId}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {debitDisabled ? (
+                                    <div className="text-gray-400">-</div>
+                                  ) : (
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          inputMode="decimal"
+                                          value={l.debitAmount || ""}
+                                          onChange={(ev) =>
+                                            patchLine(e.entryId, l.rowId, { debitAmount: ev.target.value.replace(/[^\d.]/g, "") })
+                                          }
+                                          className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                            submitAttempted && le.debitAmount ? "border-red-300 bg-red-50" : "border-gray-300"
+                                          }`}
+                                          placeholder="0"
+                                        />
+                                      <button
+                                        type="button"
+                                        onClick={() => insertLineAfter(e.entryId, l.rowId, "debit")}
+                                        className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                                        title="Add debit row"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                      {submitAttempted && le.debitAmount && (
+                                        <div className="mt-1 text-xs text-red-600">{le.debitAmount}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {creditDisabled ? (
+                                    <div className="text-gray-400">-</div>
+                                  ) : (
+                                    <div>
+                                      <select
+                                        value={l.creditAccountId || ""}
+                                        onChange={(ev) => patchLine(e.entryId, l.rowId, { creditAccountId: ev.target.value })}
+                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                          submitAttempted && le.creditAccountId ? "border-red-300 bg-red-50" : "border-gray-300"
+                                        }`}
+                                      >
+                                        <option value="">Select credit account</option>
+                                        {creditAccountOptions.map((a) => (
+                                          <option key={a.id} value={a.id}>
+                                            {a.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {submitAttempted && le.creditAccountId && (
+                                        <div className="mt-1 text-xs text-red-600">{le.creditAccountId}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {creditDisabled ? (
+                                    <div className="text-gray-400">-</div>
+                                  ) : (
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          inputMode="decimal"
+                                          value={l.creditAmount || ""}
+                                          onChange={(ev) =>
+                                            patchLine(e.entryId, l.rowId, { creditAmount: ev.target.value.replace(/[^\d.]/g, "") })
+                                          }
+                                          className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                            submitAttempted && le.creditAmount ? "border-red-300 bg-red-50" : "border-gray-300"
+                                          }`}
+                                          placeholder="0"
+                                        />
+                                      <button
+                                        type="button"
+                                        onClick={() => insertLineAfter(e.entryId, l.rowId, "credit")}
+                                        className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                                        title="Add credit row"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                      {submitAttempted && le.creditAmount && (
+                                        <div className="mt-1 text-xs text-red-600">{le.creditAmount}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {l.isBase ? (
+                                    <div className="text-gray-400 text-xs">-</div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteLine(e.entryId, l.rowId)}
+                                      className="p-2 rounded hover:bg-red-50 text-red-600"
+                                      title="Delete row"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Narration</label>
+                      <input
+                        value={e.narration || ""}
+                        onChange={(ev) => patchEntry(e.entryId, { narration: ev.target.value })}
+                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                          submitAttempted && fieldErr.narration ? "border-red-300 bg-red-50" : "border-gray-300"
+                        }`}
+                        placeholder="Narration"
+                      />
+                      {submitAttempted && fieldErr.narration && (
+                        <div className="mt-1 text-xs text-red-600">{fieldErr.narration}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="flex justify-end gap-2">
+                {!editingVoucherId && (
+                  <button
+                    type="button"
+                    onClick={addEntry}
+                    disabled={loading}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <Plus size={16} /> Add Entry
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => saveVoucher({ andNew: false, autoPrint: false })}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <Save size={16} /> {editingVoucherId ? "Update" : "Save All"}
+                </button>
+              </div>
+            </div>
+
+            {false && (
             <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[720px] w-full text-sm">
+              <table className="min-w-[860px] w-full text-sm">
                 <thead className="bg-emerald-50 text-emerald-900">
                   <tr>
                     <th className="text-left font-semibold px-3 py-2 w-[120px]">Date</th>
@@ -1295,6 +2259,8 @@ export default function AccountingFinance() {
                   {groupedLines.map((group) => {
                     const groupNarration =
                       group.items.find((x) => String(x.narration || "").trim())?.narration || "";
+                    const groupCustomerId = group.items.find((x) => String(x.customerId || "").trim())?.customerId || "";
+                    const groupProductTypeId = group.items.find((x) => String(x.productTypeId || "").trim())?.productTypeId || "";
                     const groupHasAmt = group.items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
                     const missingNarration = groupHasAmt && !String(groupNarration || "").trim();
                     const firstGroupId = groupedLines[0]?.groupId;
@@ -1611,29 +2577,120 @@ export default function AccountingFinance() {
                             </td>
                           </tr>
                           {idx === group.items.length - 1 && (
-                            <tr className="bg-gray-50/40">
-                              <td className="px-3 py-2 pb-4 relative" colSpan={5}>
-                                <input
-                                  value={groupNarration}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    setLines((prev) =>
-                                      prev.map((x) => (x.groupId === group.groupId ? { ...x, narration: v } : x))
-                                    );
-                                  }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm ${narrationClass(
-                                    missingNarration
-                                  )}`}
-                                  placeholder="Narration"
-                                />
-                                {false && showNarrationError && (
-                                  <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                    Narration required
+                            <>
+                              <tr className="bg-gray-50/40">
+                                <td className="px-3 py-2 pb-4" colSpan={5}>
+                                  <div className="grid md:grid-cols-3 gap-3 items-end">
+                                    <div>
+                                      <label className="block text-[11px] text-gray-600 mb-1">Company</label>
+                                      <select
+                                        value={header.companyId || filterCompanyId || ""}
+                                        onChange={(e) => setCompany(e.target.value)}
+                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
+                                          submitAttempted && !(header.companyId || filterCompanyId)
+                                            ? "border-red-300 bg-red-50"
+                                            : "border-gray-300"
+                                        }`}
+                                      >
+                                        <option value="">Select company</option>
+                                        {companyOptions.map((c) => (
+                                          <option key={c.id} value={c.id}>
+                                            {c.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {submitAttempted && !(header.companyId || filterCompanyId) && (
+                                        <div className="mt-1 text-xs text-red-600">Company is required.</div>
+                                      )}
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] text-gray-600 mb-1">Customer (optional)</label>
+                                      <select
+                                        value={groupCustomerId || ""}
+                                        onChange={(e) => {
+                                          const id = e.target.value;
+                                          const match = (customerOptions || []).find((c) => String(c._id) === String(id));
+                                          setLines((prev) =>
+                                            prev.map((x) =>
+                                              x.groupId === group.groupId
+                                                ? { ...x, customerId: id, customerName: match?.name || "" }
+                                                : x
+                                            )
+                                          );
+                                        }}
+                                        className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
+                                      >
+                                        <option value="">(Optional)</option>
+                                        {(customerOptions || []).map((c) => (
+                                          <option key={c._id || c.name} value={c._id}>
+                                            {c.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] text-gray-600 mb-1">Product (optional)</label>
+                                      <select
+                                        value={groupProductTypeId || ""}
+                                        onChange={(e) => {
+                                          const id = e.target.value;
+                                          const match = (productTypes || []).find((p) => String(p._id) === String(id));
+                                          const name = match
+                                            ? [String(match.brand || "").trim(), String(match.name || "").trim()]
+                                                .filter(Boolean)
+                                                .join(" - ")
+                                            : "";
+                                          setLines((prev) =>
+                                            prev.map((x) =>
+                                              x.groupId === group.groupId
+                                                ? { ...x, productTypeId: id, productName: name }
+                                                : x
+                                            )
+                                          );
+                                        }}
+                                        className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
+                                      >
+                                        <option value="">(Optional)</option>
+                                        {(productTypes || []).map((p) => (
+                                          <option key={p._id} value={p._id}>
+                                            {[String(p.brand || "").trim(), String(p.name || "").trim()]
+                                              .filter(Boolean)
+                                              .join(" - ")}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
                                   </div>
-                                )}
-                              </td>
-                              <td className="px-3 py-2"></td>
-                            </tr>
+                                </td>
+                                <td className="px-3 py-2"></td>
+                              </tr>
+
+                              <tr className="bg-gray-50/40">
+                                <td className="px-3 py-2 pb-4 relative" colSpan={5}>
+                                  <input
+                                    value={groupNarration}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setLines((prev) =>
+                                        prev.map((x) => (x.groupId === group.groupId ? { ...x, narration: v } : x))
+                                      );
+                                    }}
+                                    className={`w-full px-2 py-1.5 rounded border text-sm ${narrationClass(
+                                      missingNarration
+                                    )}`}
+                                    placeholder="Narration"
+                                  />
+                                  {false && showNarrationError && (
+                                    <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
+                                      Narration required
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2"></td>
+                              </tr>
+                            </>
                           )}
                         </React.Fragment>
                       );
@@ -1643,30 +2700,29 @@ export default function AccountingFinance() {
                 <tfoot className="bg-gray-50">
                   <tr>
                     <td className="px-3 py-2 font-semibold">Totals</td>
+                    <td className="px-3 py-2"></td>
                     <td className="px-3 py-2 font-semibold">{totals.totalDebit}</td>
+                    <td className="px-3 py-2"></td>
                     <td className="px-3 py-2 font-semibold">{totals.totalCredit}</td>
-                    <td className="px-3 py-2" colSpan={3}>
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => saveVoucher({ andNew: false })}
-                            disabled={loading}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            <Save size={16} /> Save
-                          </button>
-                        </div>
-                      </div>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => saveVoucher({ andNew: false })}
+                        disabled={loading}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <Save size={16} /> Save
+                      </button>
                     </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+            )}
 
-            {submitAttempted && !hasEmptyFieldErrors && hasAnyAmount && !totals.balanced && (
+            {submitAttempted && hasValidationErrors && (
               <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2">
-                Total debit must equal total credit.
+                Please fix highlighted fields.
               </div>
             )}
           </div>
@@ -2041,21 +3097,6 @@ export default function AccountingFinance() {
                 {accountOptions.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-3">
-              <label className="block text-xs text-gray-600 mb-1">Party (optional filter)</label>
-              <select
-                value={filterPartyId}
-                onChange={(e) => setFilterPartyId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              >
-                <option value="">All parties</option>
-                {partyOptions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
                   </option>
                 ))}
               </select>

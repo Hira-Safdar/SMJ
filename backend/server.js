@@ -23,8 +23,6 @@ const companyRoutes = require("./routes/companyRoutes");
 app.use("/api/companies", companyRoutes);
 const customerRoutes = require("./routes/customerRoutes");
 app.use("/api/customers", customerRoutes);
-const wholesellerRoutes = require("./routes/wholesellerRoutes");
-app.use("/api/wholesellers", wholesellerRoutes);
 const productTypeRoutes = require("./routes/productTypeRoutes");
 app.use("/api/product-types", productTypeRoutes);
 const expenseCategoryRoutes = require("./routes/expenseCategoryRoutes");

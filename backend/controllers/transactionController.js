@@ -4,7 +4,6 @@ const Transaction = require("../models/transactionModel");
 const GatePass = require("../models/gatePassModel");
 const Company = require("../models/companyModel");
 const Customer = require("../models/customerModel");
-const Wholeseller = require("../models/wholesellerModel");
 const ProductType = require("../models/productTypeModel");
 const SystemSettings = require("../models/systemSettingsModel");
 const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
@@ -16,9 +15,8 @@ function escapeRegex(s) {
 }
 
 async function resolveSaleParty(payload) {
-  const saleKind = payload.saleKind === "CUSTOM" ? "CUSTOM" : "SMJ";
-  const Model = saleKind === "CUSTOM" ? Customer : Wholeseller;
-  const partyType = saleKind === "CUSTOM" ? "CUSTOMER" : "WHOLESELLER";
+  const Model = Customer;
+  const partyType = "CUSTOMER";
 
   // Frontend historically used "companyId"; for SALE we treat it as partyRefId.
   const id = payload.companyId;
@@ -296,7 +294,7 @@ exports.createTransaction = async (req, res) => {
 
     // Company / Party resolution:
     // - PURCHASE: optional Company reference (legacy behavior)
-    // - SALE: resolve Customer/Wholeseller based on saleKind; do NOT require Company.
+    // - SALE: resolve Customer based on party; do NOT require Company.
     let company = null;
     let party = null;
     if (payload.type === "SALE") {
@@ -702,7 +700,7 @@ exports.updateTransaction = async (req, res) => {
 
     // Company / Party update:
     // - PURCHASE keeps legacy companyId
-    // - SALE uses Customer/Wholeseller and ignores Company
+    // - SALE uses Customer and ignores Company
     let company = null;
     let party = null;
     const companyId = payload.companyId || existing.companyId || null;

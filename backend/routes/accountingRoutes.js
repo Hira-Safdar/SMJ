@@ -17,6 +17,8 @@ router.put("/accounts/:id", acc.updateAccount);
 router.delete("/accounts/:id", acc.deleteAccount);
 router.get("/entities", acc.getEntities);
 router.post("/entities", acc.createEntity);
+router.put("/entities/:id", acc.updateEntity);
+router.delete("/entities/:id", acc.deleteEntity);
 
 router.get("/parties", acc.getParties);
 router.post("/parties", acc.createParty);
@@ -27,6 +29,10 @@ router.get("/products", acc.getProducts);
 router.post("/products", acc.createProduct);
 router.put("/products/:id", acc.updateProduct);
 router.delete("/products/:id", acc.deleteProduct);
+
+// Master sync
+router.post("/sync/parties", acc.syncPartiesFromMasters);
+router.post("/sync/products", acc.syncProductsFromProductTypes);
 
 router.get("/templates", acc.getFilterTemplates);
 router.post("/templates", acc.createFilterTemplate);

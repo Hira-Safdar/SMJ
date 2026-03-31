@@ -109,9 +109,9 @@ const postJournalEntry = async ({
       accountId: l.accountId,
       debit: l.debit,
       credit: l.credit,
-      partyId: l.partyId || "",
+      partyId: l.partyId || null,
       partyName: l.partyName || "",
-      itemId: l.itemId || "",
+      itemId: l.itemId || null,
       itemName: l.itemName || "",
       remarks: l.remarks || "",
     }))
@@ -149,9 +149,9 @@ const reverseBySource = async ({ sourceModule, sourceRefType, sourceRefId, reaso
         accountId: l.accountId,
         debit: round2(l.credit),
         credit: round2(l.debit),
-        partyId: l.partyId || "",
+        partyId: l.partyId || null,
         partyName: l.partyName || "",
-        itemId: l.itemId || "",
+        itemId: l.itemId || null,
         itemName: l.itemName || "",
         remarks: `Reversal`,
       }))

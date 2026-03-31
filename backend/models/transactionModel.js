@@ -109,7 +109,7 @@ const TransactionSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // SALE parties are stored separately from Company (customers/wholesellers).
+    // SALE parties are stored separately from Company (customers).
     // We keep companyId/companyName for backward compatibility and PURCHASE flows.
     partyType: {
       type: String,

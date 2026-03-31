@@ -74,7 +74,6 @@ const MENU = [
       { name: "Company List", path: "/reports?tab=companies" },
       { name: "Product List", path: "/reports?tab=products" },
       { name: "Customer List", path: "/reports?tab=customers" },
-      { name: "Wholeseller List", path: "/reports?tab=wholesellers" },
     ],
   },
   {

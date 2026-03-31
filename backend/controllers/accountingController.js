@@ -7,11 +7,41 @@ const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
 const { getDateRangeFromQuery } = require("../utils/dateRange");
 const { ensureDefaultAccounts, postJournalEntry } = require("../services/accountingJournalService");
+const { syncPartiesFromMasters, syncProductsFromProductTypes } = require("../services/accountingSyncService");
 
 const parseRange = (req) => getDateRangeFromQuery(req.query);
 const toNum = (v) => Number(v || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
 const escRe = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+async function ensureActiveAccountsForLines(lines, errorPrefix = "Invalid account selection.") {
+  const ids = [...new Set((lines || []).map((l) => String(l?.accountId || "")).filter(Boolean))];
+  if (!ids.length) return;
+  const rows = await Account.find({ _id: { $in: ids } }).select("_id isActive journalSide").lean();
+  const map = new Map(rows.map((a) => [String(a._id), a]));
+
+  const bad = [];
+  for (const l of lines || []) {
+    const id = String(l?.accountId || "");
+    if (!id) continue;
+    const a = map.get(id);
+    if (!a || a.isActive !== true) {
+      bad.push(id);
+      continue;
+    }
+    const side = String(a.journalSide || "BOTH").toUpperCase();
+    const debit = toNum(l?.debit);
+    const credit = toNum(l?.credit);
+    if (debit > 0 && side === "CREDIT") bad.push(id);
+    if (credit > 0 && side === "DEBIT") bad.push(id);
+  }
+
+  if (bad.length) {
+    const err = new Error(errorPrefix);
+    err.statusCode = 400;
+    throw err;
+  }
+}
 
 function parseListParam(value) {
   if (value == null) return [];
@@ -67,7 +97,9 @@ async function getAccountMapForLines(lines) {
 
 exports.getEntities = async (_req, res) => {
   try {
-    const rows = await AccountingEntity.find({ isActive: true }).sort({ name: 1 }).lean();
+    const includeInactive = String(_req.query?.includeInactive || "").toLowerCase();
+    const filter = includeInactive === "1" || includeInactive === "true" ? {} : { isActive: true };
+    const rows = await AccountingEntity.find(filter).sort({ name: 1 }).lean();
     res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load companies." });
@@ -85,13 +117,41 @@ exports.createEntity = async (req, res) => {
   }
 };
 
+exports.updateEntity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const name = String(req.body?.name || "").trim();
+    const isActive = req.body?.isActive;
+    const patch = {};
+    if (name) patch.name = name;
+    if (isActive != null) patch.isActive = !!isActive;
+    const doc = await AccountingEntity.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Company not found." });
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || "Unable to update company." });
+  }
+};
+
+exports.deleteEntity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doc = await AccountingEntity.findByIdAndUpdate(id, { $set: { isActive: false } }, { new: true }).lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Company not found." });
+    res.json({ success: true, message: "Company deleted." });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || "Unable to delete company." });
+  }
+};
+
 // -------------------- PARTIES (CUSTOMER/SUPPLIER) --------------------
 
 exports.getParties = async (req, res) => {
   try {
     const q = String(req.query.q || "").trim();
     const partyType = String(req.query.partyType || "").trim();
-    const filter = { isActive: true };
+    const includeInactive = String(req.query.includeInactive || "").toLowerCase();
+    const filter = includeInactive === "1" || includeInactive === "true" ? {} : { isActive: true };
     if (partyType) filter.partyType = partyType;
     if (q) filter.name = new RegExp(escRe(q), "i");
     const rows = await AccountingParty.find(filter).sort({ name: 1 }).lean();
@@ -124,6 +184,14 @@ exports.updateParty = async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
+    const current = await AccountingParty.findById(id).lean();
+    if (!current) return res.status(404).json({ success: false, message: "Party not found." });
+    if (current.sourceType && current.sourceType !== "MANUAL") {
+      return res.status(400).json({
+        success: false,
+        message: "Synced parties cannot be edited. Update the Customer instead.",
+      });
+    }
     const patch = {};
     if (body.name != null) patch.name = String(body.name || "").trim();
     if (body.partyType != null) patch.partyType = body.partyType;
@@ -142,6 +210,11 @@ exports.updateParty = async (req, res) => {
 exports.deleteParty = async (req, res) => {
   try {
     const { id } = req.params;
+    const current = await AccountingParty.findById(id).lean();
+    if (!current) return res.status(404).json({ success: false, message: "Party not found." });
+    if (current.sourceType && current.sourceType !== "MANUAL") {
+      return res.status(400).json({ success: false, message: "Synced parties cannot be deleted." });
+    }
     const doc = await AccountingParty.findByIdAndUpdate(id, { $set: { isActive: false } }, { new: true }).lean();
     if (!doc) return res.status(404).json({ success: false, message: "Party not found." });
     res.json({ success: true, message: "Party deleted." });
@@ -155,7 +228,8 @@ exports.deleteParty = async (req, res) => {
 exports.getProducts = async (req, res) => {
   try {
     const q = String(req.query.q || "").trim();
-    const filter = { isActive: true };
+    const includeInactive = String(req.query.includeInactive || "").toLowerCase();
+    const filter = includeInactive === "1" || includeInactive === "true" ? {} : { isActive: true };
     if (q) filter.name = new RegExp(escRe(q), "i");
     const rows = await AccountingProduct.find(filter).sort({ name: 1 }).lean();
     res.json({ success: true, data: rows });
@@ -185,6 +259,14 @@ exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
+    const current = await AccountingProduct.findById(id).lean();
+    if (!current) return res.status(404).json({ success: false, message: "Product not found." });
+    if (current.sourceProductTypeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Synced products cannot be edited. Update Product Types instead.",
+      });
+    }
     const patch = {};
     if (body.name != null) patch.name = String(body.name || "").trim();
     if (body.unit != null) patch.unit = String(body.unit || "").trim();
@@ -201,11 +283,36 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
+    const current = await AccountingProduct.findById(id).lean();
+    if (!current) return res.status(404).json({ success: false, message: "Product not found." });
+    if (current.sourceProductTypeId) {
+      return res.status(400).json({ success: false, message: "Synced products cannot be deleted." });
+    }
     const doc = await AccountingProduct.findByIdAndUpdate(id, { $set: { isActive: false } }, { new: true }).lean();
     if (!doc) return res.status(404).json({ success: false, message: "Product not found." });
     res.json({ success: true, message: "Product deleted." });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to delete product." });
+  }
+};
+
+// -------------------- MASTER SYNC (CUSTOMERS/PRODUCT TYPES) --------------------
+
+exports.syncPartiesFromMasters = async (_req, res) => {
+  try {
+    const result = await syncPartiesFromMasters();
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || "Failed to sync parties." });
+  }
+};
+
+exports.syncProductsFromProductTypes = async (_req, res) => {
+  try {
+    const result = await syncProductsFromProductTypes();
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || "Failed to sync products." });
   }
 };
 
@@ -327,12 +434,48 @@ exports.getLedger = async (req, res) => {
       ...(party ? { partyName: new RegExp(escRe(party), "i") } : {}),
       ...(item ? { itemName: new RegExp(escRe(item), "i") } : {}),
     });
+
+    let allLinesForRefs = null;
+    let refByEntryId = new Map();
+    const useRefs = accountIds.length === 1;
+    if (useRefs) {
+      allLinesForRefs = await getLinesForEntries(entries.map((e) => e._id));
+      const allAccountMap = await getAccountMapForLines(allLinesForRefs);
+      const selectedId = String(accountIds[0]);
+      const bucket = new Map(); // entryId -> { debitRefs:[], creditRefs:[] }
+      allLinesForRefs.forEach((l) => {
+        const jeId = String(l.journalEntryId);
+        if (String(l.accountId) === selectedId) return;
+        const acc = allAccountMap.get(String(l.accountId));
+        if (!acc) return;
+        const row = bucket.get(jeId) || { debitRefs: new Set(), creditRefs: new Set() };
+        if (toNum(l.debit) > 0) row.debitRefs.add(acc.name);
+        if (toNum(l.credit) > 0) row.creditRefs.add(acc.name);
+        bucket.set(jeId, row);
+      });
+      refByEntryId = new Map(
+        Array.from(bucket.entries()).map(([k, v]) => [
+          k,
+          {
+            debitRefs: Array.from(v.debitRefs.values()),
+            creditRefs: Array.from(v.creditRefs.values()),
+          },
+        ])
+      );
+    }
+
     const accountMap = await getAccountMapForLines(lines);
 
     const rows = lines
       .map((l) => {
         const je = entryMap.get(String(l.journalEntryId));
         const acc = accountMap.get(String(l.accountId));
+        const refs = useRefs ? refByEntryId.get(String(l.journalEntryId)) : null;
+        const references = useRefs
+          ? toNum(l.debit) > 0
+            ? (refs?.creditRefs || []).join(", ")
+            : (refs?.debitRefs || []).join(", ")
+          : "";
         return {
           journalEntryId: String(l.journalEntryId),
           journalLineId: String(l._id),
@@ -341,6 +484,7 @@ exports.getLedger = async (req, res) => {
           description: je?.description || je?.narration || "",
           accountId: String(l.accountId),
           account: acc?.name || "Account",
+          references,
           debit: round2(l.debit),
           credit: round2(l.credit),
           partyId: l.partyId ? String(l.partyId) : "",
@@ -429,7 +573,9 @@ exports.getProfitLoss = async (req, res) => {
     const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+    const partyNames = parseListParam(req.query.partyName || req.query.partyNames || req.query.party);
     const productIds = parseListParam(req.query.productId || req.query.productIds || req.query.itemId || req.query.itemIds);
+    const itemNames = parseListParam(req.query.itemName || req.query.itemNames || req.query.item);
     const tags = parseListParam(req.query.tag || req.query.tags);
 
     const entries = await getEntriesInRange({ start, end, companyId, voucherType, status: "POSTED" });
@@ -438,6 +584,8 @@ exports.getProfitLoss = async (req, res) => {
       ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
       ...(productIds.length ? { itemId: { $in: productIds } } : {}),
       ...(tags.length ? { tags: { $in: tags } } : {}),
+      ...(partyNames.length ? { partyName: { $in: partyNames } } : {}),
+      ...(itemNames.length ? { itemName: { $in: itemNames } } : {}),
     });
     const accountMap = await getAccountMapForLines(lines);
 
@@ -497,7 +645,9 @@ exports.getBalanceSheet = async (req, res) => {
     const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+    const partyNames = parseListParam(req.query.partyName || req.query.partyNames || req.query.party);
     const productIds = parseListParam(req.query.productId || req.query.productIds || req.query.itemId || req.query.itemIds);
+    const itemNames = parseListParam(req.query.itemName || req.query.itemNames || req.query.item);
     const tags = parseListParam(req.query.tag || req.query.tags);
 
     const entryFilter = { date: { $lte: end }, status: "POSTED" };
@@ -509,6 +659,8 @@ exports.getBalanceSheet = async (req, res) => {
       ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
       ...(productIds.length ? { itemId: { $in: productIds } } : {}),
       ...(tags.length ? { tags: { $in: tags } } : {}),
+      ...(partyNames.length ? { partyName: { $in: partyNames } } : {}),
+      ...(itemNames.length ? { itemName: { $in: itemNames } } : {}),
     });
     const accountMap = await getAccountMapForLines(lines);
 
@@ -699,6 +851,7 @@ exports.createAccount = async (req, res) => {
       parentAccountId: payload.parentAccountId || null,
       isControl: !!payload.isControl,
       isActive: payload.isActive !== false,
+      journalSide: payload.journalSide || "BOTH",
       tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [],
     });
     res.status(201).json({ success: true, data: doc });
@@ -719,6 +872,7 @@ exports.updateAccount = async (req, res) => {
     if (payload.parentAccountId != null) patch.parentAccountId = payload.parentAccountId || null;
     if (payload.isControl != null) patch.isControl = !!payload.isControl;
     if (payload.isActive != null) patch.isActive = !!payload.isActive;
+    if (payload.journalSide != null) patch.journalSide = payload.journalSide || "BOTH";
     if (payload.tags != null) patch.tags = Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [];
     const doc = await Account.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
     if (!doc) return res.status(404).json({ success: false, message: "Account not found." });
@@ -883,7 +1037,86 @@ exports.createVoucher = async (req, res) => {
   try {
     await ensureDefaultAccounts();
     const body = req.body || {};
+
+    // Multi-entry (Save All) mode: create separate vouchers per entry group
+    if (Array.isArray(body.entries) && body.entries.length) {
+      const vouchers = [];
+      for (let i = 0; i < body.entries.length; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const eBody = body.entries[i] || {};
+        const lines = Array.isArray(eBody.lines) ? eBody.lines : [];
+        const hasLineInput = (lines || []).some((l) => l?.accountId && (toNum(l?.debit) > 0 || toNum(l?.credit) > 0));
+        if (!hasLineInput) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await ensureActiveAccountsForLines(lines, `Inactive/invalid account selected (entry #${i + 1}).`);
+
+        const companyId = String(eBody.companyId || "").trim();
+        let companyName = String(eBody.companyName || "").trim();
+        if (!companyId && !companyName) {
+          return res.status(400).json({ success: false, message: `Company is required (entry #${i + 1}).` });
+        }
+        if (!companyName && companyId) {
+          // eslint-disable-next-line no-await-in-loop
+          const match = await AccountingEntity.findById(companyId).lean();
+          companyName = match?.name || companyId;
+        }
+
+        const narration = String(eBody.narration || eBody.description || "").trim();
+        if (!narration) {
+          return res.status(400).json({ success: false, message: `Narration is required (entry #${i + 1}).` });
+        }
+        const partyName = String(eBody.customerName || "").trim();
+        const itemName = String(eBody.productName || "").trim();
+        const normLines = (lines || []).map((l) => ({
+          ...l,
+          partyName: String(l.partyName || partyName || "").trim(),
+          itemName: String(l.itemName || itemName || "").trim(),
+          remarks: String(narration || l.remarks || "").trim(),
+        }));
+
+        // eslint-disable-next-line no-await-in-loop
+        const entry = await postJournalEntry({
+          date: eBody.date || new Date(),
+          voucherType: eBody.voucherType || body.voucherType || "JOURNAL",
+          bookType: eBody.bookType || body.bookType || "JOURNAL",
+          companyId: companyId || "",
+          companyName,
+          referenceNo: String(eBody.referenceNo || body.referenceNo || "").trim(),
+          description: narration,
+          narration,
+          createdBy: eBody.createdBy || body.createdBy || "user",
+          sourceModule: "MANUAL",
+          sourceRefType: "VOUCHER",
+          sourceRefId: `${Date.now()}-${i + 1}`,
+          lines: normLines,
+        });
+
+        if (entry?._id) vouchers.push(entry);
+      }
+
+      if (!vouchers.length) return res.status(400).json({ success: false, message: "No valid lines to post." });
+
+      const data = {
+        created: vouchers.length,
+        vouchers: vouchers.map((v) => ({
+          _id: v._id,
+          voucherNo: v.voucherNo,
+          date: v.date,
+          voucherType: v.voucherType,
+          bookType: v.bookType,
+          companyId: v.companyId,
+          companyName: v.companyName,
+          description: v.description || v.narration || "",
+          status: v.status || "POSTED",
+        })),
+      };
+      res.status(201).json({ success: true, data });
+      return;
+    }
+
+    // Single-entry (legacy) mode
     const lines = Array.isArray(body.lines) ? body.lines : [];
+    await ensureActiveAccountsForLines(lines, "Inactive/invalid account selected.");
     const companyId = String(body.companyId || "").trim();
     let companyName = String(body.companyName || "").trim();
     if (!companyId && !companyName) {
@@ -893,6 +1126,11 @@ exports.createVoucher = async (req, res) => {
       const match = await AccountingEntity.findById(companyId).lean();
       companyName = match?.name || companyId;
     }
+    const narration = String(body.narration || body.description || "").trim();
+    if (!narration) {
+      return res.status(400).json({ success: false, message: "Narration is required." });
+    }
+
     const entry = await postJournalEntry({
       date: body.date || new Date(),
       voucherType: body.voucherType || "JOURNAL",
@@ -900,8 +1138,8 @@ exports.createVoucher = async (req, res) => {
       companyId: companyId || "",
       companyName,
       referenceNo: String(body.referenceNo || "").trim(),
-      description: String(body.description || "").trim(),
-      narration: String(body.narration || "").trim(),
+      description: narration,
+      narration,
       createdBy: body.createdBy || "user",
       sourceModule: "MANUAL",
       sourceRefType: "VOUCHER",
@@ -912,7 +1150,8 @@ exports.createVoucher = async (req, res) => {
     const data = await loadEntryWithLines(entry);
     res.status(201).json({ success: true, data });
   } catch (err) {
-    res.status(400).json({ success: false, message: err.message || "Unable to create voucher." });
+    const code = err?.statusCode || 400;
+    res.status(code).json({ success: false, message: err.message || "Unable to create voucher." });
   }
 };
 
@@ -948,10 +1187,17 @@ exports.updateVoucher = async (req, res) => {
       }))
       .filter((l) => l.accountId && (toNum(l.debit) > 0 || toNum(l.credit) > 0));
 
+    await ensureActiveAccountsForLines(norm, "Inactive/invalid account selected.");
+
     const totalDebit = round2(norm.reduce((s, l) => s + toNum(l.debit), 0));
     const totalCredit = round2(norm.reduce((s, l) => s + toNum(l.credit), 0));
     if (totalDebit <= 0 || totalDebit !== totalCredit) {
       return res.status(400).json({ success: false, message: "Total debit must equal total credit." });
+    }
+
+    const narration = String(body.narration ?? body.description ?? entry.narration ?? entry.description ?? "").trim();
+    if (!narration) {
+      return res.status(400).json({ success: false, message: "Narration is required." });
     }
 
     entry.date = body.date ? new Date(body.date) : entry.date;
@@ -960,8 +1206,8 @@ exports.updateVoucher = async (req, res) => {
     entry.companyId = companyId;
     entry.companyName = companyName;
     entry.referenceNo = String(body.referenceNo ?? entry.referenceNo ?? "").trim();
-    entry.description = String(body.description ?? entry.description ?? "").trim();
-    entry.narration = String(body.narration ?? entry.narration ?? "").trim();
+    entry.description = narration;
+    entry.narration = narration;
     await entry.save();
 
     await JournalLine.deleteMany({ journalEntryId: entry._id });
@@ -1092,9 +1338,9 @@ exports.reverseJournalEntry = async (req, res) => {
         accountId: l.accountId,
         debit: round2(l.credit),
         credit: round2(l.debit),
-        partyId: l.partyId || "",
+        partyId: l.partyId || null,
         partyName: l.partyName || "",
-        itemId: l.itemId || "",
+        itemId: l.itemId || null,
         itemName: l.itemName || "",
         remarks: "Reversal",
       }))
