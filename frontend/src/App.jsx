@@ -22,7 +22,22 @@ export default function App() {
           <Route path="/gatepasses" element={<GatePass />} />
           <Route path="/production" element={<Production />} />
           <Route path="/accounting-finance" element={<AccountingFinance />} />
-          <Route path="/reports" element={<Reports />} />
+          <Route
+            path="/reports"
+            element={
+              <Reports
+                allowedTabs={[
+                  "stock",
+                  "stock-movement",
+                  "production-summary",
+                  "by-product",
+                  "production",
+                  "companies",
+                  "customers",
+                ]}
+              />
+            }
+          />
           <Route path="/masterdata" element={<MasterData />} />
         </Routes>
         <AIChatbot />

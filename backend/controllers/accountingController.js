@@ -365,54 +365,6 @@ exports.deleteFilterTemplate = async (req, res) => {
 
 // -------------------- REPORTS (MANUAL JOURNALS ONLY) --------------------
 
-exports.getDaybook = async (req, res) => {
-  try {
-    const { start, end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
-    const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
-    const bookType = parseListParam(req.query.bookType || req.query.bookTypes);
-    const companyName = String(req.query.companyName || "").trim();
-
-    const entries = await getEntriesInRange({ start, end, companyId, voucherType, bookType, status: "POSTED" });
-    const entryIds = entries.map((e) => e._id);
-    const lines = await getLinesForEntries(entryIds);
-
-    const totalsByEntry = new Map();
-    lines.forEach((l) => {
-      const k = String(l.journalEntryId);
-      const row = totalsByEntry.get(k) || { debit: 0, credit: 0 };
-      row.debit += toNum(l.debit);
-      row.credit += toNum(l.credit);
-      totalsByEntry.set(k, row);
-    });
-
-    const rows = entries
-      .filter((e) => (companyName ? new RegExp(escRe(companyName), "i").test(e.companyName || "") : true))
-      .map((e) => {
-      const t = totalsByEntry.get(String(e._id)) || { debit: 0, credit: 0 };
-      return {
-        journalEntryId: String(e._id),
-        date: e.date,
-        voucherNo: e.voucherNo,
-        type: e.voucherType || "JOURNAL",
-        bookType: e.bookType || "JOURNAL",
-        companyId: e.companyId || "",
-        companyName: e.companyName || "",
-        referenceNo: e.referenceNo || "",
-        description: e.description || e.narration || "",
-        debit: round2(t.debit),
-        credit: round2(t.credit),
-        amount: round2(Math.max(t.debit, t.credit)),
-        status: e.status || "POSTED",
-      };
-    });
-
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load daybook." });
-  }
-};
-
 exports.getLedger = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
@@ -962,7 +914,10 @@ exports.getVouchers = async (req, res) => {
     const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
-    const partyName = String(req.query.partyName || "").trim();
+    const partyNames = parseListParam(req.query.partyName || req.query.partyNames);
+    const partyName = partyNames.length ? "" : String(req.query.partyName || "").trim();
+    const itemIds = parseListParam(req.query.itemId || req.query.itemIds || req.query.productId || req.query.productIds);
+    const itemName = String(req.query.itemName || "").trim();
     const voucherNo = String(req.query.voucherNo || "").trim();
 
     const entryFilter = { date: { $gte: start, $lte: end } };
@@ -1253,14 +1208,17 @@ exports.getJournalEntries = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
-    const voucherType = String(req.query.voucherType || "").trim();
+    const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
     const companyName = String(req.query.companyName || "").trim();
     const voucherNo = String(req.query.voucherNo || "").trim();
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
-    const partyName = String(req.query.partyName || "").trim();
+    const partyNames = parseListParam(req.query.partyName || req.query.partyNames);
+    const partyName = partyNames.length ? "" : String(req.query.partyName || "").trim();
+    const itemIds = parseListParam(req.query.itemId || req.query.itemIds || req.query.productId || req.query.productIds);
+    const itemName = String(req.query.itemName || "").trim();
 
-    const entries = await getEntriesInRange({
+    let entries = await getEntriesInRange({
       start,
       end,
       companyId,
@@ -1268,16 +1226,46 @@ exports.getJournalEntries = async (req, res) => {
       bookType: bookTypes,
       status: null,
     });
+    const hasFilters =
+      !!companyId ||
+      !!companyName ||
+      !!voucherNo ||
+      (Array.isArray(voucherType) && voucherType.length) ||
+      (Array.isArray(bookTypes) && bookTypes.length) ||
+      partyIds.length ||
+      partyNames.length ||
+      !!partyName ||
+      itemIds.length ||
+      !!itemName;
+    // Fallback: if empty and only voucherType might be narrowing, retry without voucherType.
+    if (!entries.length && Array.isArray(voucherType) && voucherType.length) {
+      entries = await getEntriesInRange({
+        start,
+        end,
+        companyId,
+        voucherType: [],
+        bookType: bookTypes,
+        status: null,
+      });
+    }
+    // Fallback only when no filters are applied.
+    if (!entries.length && !hasFilters) {
+      entries = await JournalEntry.find({}).sort({ date: -1, createdAt: -1 }).lean();
+    }
     entries.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    const partyNameRegex =
+      partyNames.length ? new RegExp(partyNames.map((n) => escRe(n)).join("|"), "i") : partyName ? new RegExp(escRe(partyName), "i") : null;
     const lineFilter = {
       ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
-      ...(partyName ? { partyName: new RegExp(escRe(partyName), "i") } : {}),
+      ...(partyNameRegex ? { partyName: partyNameRegex } : {}),
+      ...(itemIds.length ? { itemId: { $in: itemIds } } : {}),
+      ...(itemName ? { itemName: new RegExp(escRe(itemName), "i") } : {}),
     };
     const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
     const accountMap = await getAccountMapForLines(lines);
 
-    const filteredEntries = partyIds.length
+    const filteredEntries = (partyIds.length || partyNameRegex || itemIds.length || itemName)
       ? entries.filter((e) => lines.some((l) => String(l.journalEntryId) === String(e._id)))
       : entries;
 

@@ -17,6 +17,8 @@ import {
   Activity,
   Filter,
   Download,
+  X,
+  Printer,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api from "../services/api";
@@ -25,13 +27,13 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const REPORT_TABS = [
-  { key: "daybook", label: "Day Book", icon: <BookOpen size={16} /> },
   { key: "ledger", label: "Ledger", icon: <BookCopy size={16} /> },
   { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
   { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
   { key: "balance", label: "Balance Sheet", icon: <Landmark size={16} /> },
   { key: "receivables", label: "Accounts Receivable", icon: <HandCoins size={16} /> },
   { key: "payables", label: "Accounts Payable", icon: <HandCoins size={16} /> },
+  { key: "daybook", label: "Day Book", icon: <BookOpen size={16} /> },
 
   { key: "stock", label: "Current Stock", icon: <Package size={16} /> },
   { key: "stock-movement", label: "Stock Movement", icon: <Activity size={16} /> },
@@ -41,6 +43,26 @@ const REPORT_TABS = [
 
   { key: "companies", label: "Company List", icon: <Building2 size={16} /> },
   { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
+];
+
+const REPORT_TAB_MAP = new Map(REPORT_TABS.map((t) => [t.key, t]));
+const REPORT_GROUPS = [
+  {
+    label: "Accounting",
+    tabs: ["ledger", "trial", "pl", "balance", "receivables", "payables", "daybook"],
+  },
+  {
+    label: "Stock",
+    tabs: ["stock", "stock-movement"],
+  },
+  {
+    label: "Production",
+    tabs: ["production-summary", "by-product", "production"],
+  },
+  {
+    label: "Masters",
+    tabs: ["companies", "customers"],
+  },
 ];
 
 const RANGE_OPTIONS = [
@@ -55,6 +77,19 @@ const RANGE_OPTIONS = [
 const num = (v) => Math.round(Number(v || 0));
 const fmt = (v) => `Rs ${num(v)}`;
 const fmtDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
+const formatMonthDay = (iso) => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleDateString("en-US", { month: "long", day: "2-digit" });
+};
+const formatYear = (iso) => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.getFullYear();
+};
+const withBeing = (text) => {
+  const t = String(text || "").trim();
+  if (!t) return "";
+  return t;
+};
 const MONTHS = [
   "January",
   "February",
@@ -101,7 +136,7 @@ function defaultDeductions() {
   ];
 }
 
-export default function Reports() {
+export default function Reports({ embedded = false, initialTab = "", allowedTabs = null, hideFilters = false }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("stock");
   const [range, setRange] = useState("month");
@@ -120,6 +155,7 @@ export default function Reports() {
   const [accVoucherTypes, setAccVoucherTypes] = useState([]);
   const [accAccountIds, setAccAccountIds] = useState([]);
   const [accCustomerNames, setAccCustomerNames] = useState([]);
+  const [accProductName, setAccProductName] = useState("");
 
   const [filterTemplates, setFilterTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -134,15 +170,51 @@ export default function Reports() {
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [settings, setSettings] = useState({});
 
   const filterInputClass =
     "border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
   const filterLabelClass = "block text-xs font-medium text-gray-600 mb-1";
 
+  const visibleTabs = useMemo(() => {
+    if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
+    return REPORT_TABS.filter((t) => allowedTabs.includes(t.key));
+  }, [allowedTabs]);
+
+  const visibleTabMap = useMemo(() => new Map(visibleTabs.map((t) => [t.key, t])), [visibleTabs]);
+
+  const visibleGroups = useMemo(() => {
+    return REPORT_GROUPS.map((g) => ({
+      ...g,
+      tabs: g.tabs.filter((k) => visibleTabMap.has(k)),
+    })).filter((g) => g.tabs.length);
+  }, [visibleTabMap]);
+
   useEffect(() => {
+    if (embedded) {
+      if (initialTab && visibleTabMap.has(initialTab)) {
+        setActiveTab(initialTab);
+      } else if (visibleTabs.length) {
+        setActiveTab(visibleTabs[0].key);
+      }
+      return;
+    }
     const tab = searchParams.get("tab");
-    if (tab && REPORT_TABS.some((t) => t.key === tab)) setActiveTab(tab);
-  }, [searchParams]);
+    if (tab && visibleTabMap.has(tab)) setActiveTab(tab);
+  }, [searchParams, embedded, initialTab, visibleTabs, visibleTabMap]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/settings");
+        const data = res.data?.data || res.data || {};
+        const general = data.general || data.generalSettings || data;
+        setSettings(general || {});
+      } catch {
+        // silent if settings not available
+      }
+    })();
+  }, []);
 
   const params = useMemo(() => {
     const p = { range };
@@ -158,7 +230,6 @@ export default function Reports() {
       "balance",
       "receivables",
       "payables",
-      "daybook",
       "ledger",
     ].includes(activeTab);
 
@@ -167,6 +238,7 @@ export default function Reports() {
       if (accVoucherTypes.length) p.voucherTypes = accVoucherTypes.join(",");
       if (accAccountIds.length) p.accountIds = accAccountIds.join(",");
       if (accCustomerNames.length) p.partyNames = accCustomerNames.join(",");
+      if (accProductName) p.itemName = accProductName;
     }
 
     const isInventoryReport = ["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab);
@@ -185,6 +257,7 @@ export default function Reports() {
     accVoucherTypes,
     accAccountIds,
     accCustomerNames,
+    accProductName,
     invCompanyIds,
     invProductTypeIds,
   ]);
@@ -372,16 +445,6 @@ export default function Reports() {
         );
         return;
       }
-      if (activeTab === "daybook") {
-        const res = await api.get("/accounting/daybook", params);
-        setRows(
-          (res.data?.data || []).map((r, idx) => ({
-            id: r.journalEntryId || `${idx}-${r.voucherNo}`,
-            ...r,
-          }))
-        );
-        return;
-      }
       if (activeTab === "ledger") {
         const res = await api.get("/accounting/ledger", params);
         setRows(
@@ -537,6 +600,138 @@ export default function Reports() {
       closeDrill();
     }
   }
+
+  const journalRowsForEntry = (entry) => {
+    const debits = (entry?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
+    const credits = (entry?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
+    const rows = [];
+    let dateShown = false;
+
+    const addLine = ({ side, line, amount }) => {
+      const acc = line.accountName || line.accountCode || "Account";
+      const extra = [String(line.partyName || "").trim(), String(line.itemName || "").trim()].filter(Boolean).join(" | ");
+      rows.push({
+        date: entry.date,
+        showDate: !dateShown,
+        side,
+        details: side === "credit" ? `To ${acc}` : acc,
+        extra,
+        debit: side === "debit" ? amount : "",
+        credit: side === "credit" ? amount : "",
+      });
+      dateShown = true;
+    };
+
+    debits.forEach((l) => addLine({ side: "debit", line: l, amount: round2(n0(l.debit)).toFixed(2) }));
+    credits.forEach((l) => addLine({ side: "credit", line: l, amount: round2(n0(l.credit)).toFixed(2) }));
+
+    const narration = withBeing(String(entry.description || entry.narration || "").trim());
+    if (narration) {
+      rows.push({
+        date: entry.date,
+        showDate: false,
+        side: "narration",
+        details: `(${narration})`,
+        extra: "",
+        debit: "",
+        credit: "",
+      });
+    }
+    return rows;
+  };
+
+  const renderJournalEntryHtml = (entry) => {
+    const dateYear = formatYear(entry.date);
+    const dateMonthDay = formatMonthDay(entry.date);
+    const rows = journalRowsForEntry(entry);
+    const linesHtml = rows
+      .map((r) => {
+        const isCredit = r.side === "credit";
+        const isNarration = r.side === "narration";
+        const detailsHtml = r.extra ? `${r.details}<div class="extra">${r.extra}</div>` : r.details;
+        return `
+          <tr class="${isNarration ? "narration-row" : "entry-row"}">
+            <td class="date-cell">
+              ${r.showDate ? `<div>${dateYear}</div><div>${dateMonthDay}</div>` : ""}
+            </td>
+            <td class="details-cell ${isNarration ? "narration" : isCredit ? "credit" : "debit"}">${detailsHtml}</td>
+            <td class="lf-cell"></td>
+            <td class="amt-cell">${r.debit}</td>
+            <td class="amt-cell">${r.credit}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="entry-block">
+        <div class="header">
+          <div class="title">${selectedCompanyName || "Business"}</div>
+          <div class="meta">Voucher: ${entry.voucherNo || "-"}</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>References</th>
+              <th>J.R.</th>
+              <th>Amount (Dr.)</th>
+              <th>Amount (Cr.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linesHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  };
+
+  const renderCombinedJournalHtml = (entries) => {
+    const rows = (entries || []).flatMap((e) => journalRowsForEntry(e));
+    const linesHtml = rows
+      .map((r) => {
+        const isCredit = r.side === "credit";
+        const isNarration = r.side === "narration";
+        const detailsHtml = r.extra ? `${r.details}<div class="extra">${r.extra}</div>` : r.details;
+        return `
+          <tr class="${isNarration ? "narration-row" : "entry-row"}">
+            <td class="date-cell">
+              ${r.showDate ? `<div>${formatYear(r.date)}</div><div>${formatMonthDay(r.date)}</div>` : ""}
+            </td>
+            <td class="details-cell ${isNarration ? "narration" : isCredit ? "credit" : "debit"}">${detailsHtml}</td>
+            <td class="lf-cell"></td>
+            <td class="amt-cell">${r.debit}</td>
+            <td class="amt-cell">${r.credit}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="entry-block">
+        <div class="header">
+          <div class="title">${selectedCompanyName || "Business"}</div>
+          <div class="meta">Journal</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>References</th>
+              <th>J.R.</th>
+              <th>Amount (Dr.)</th>
+              <th>Amount (Cr.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linesHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  };
+
 
   async function openStockMovementDrill({ companyId, productTypeId, title: t }) {
     try {
@@ -796,7 +991,127 @@ export default function Reports() {
     ];
   }, [activeTab, openLedgerDrill, openVoucherDrill, openStockMovementDrill]);
 
-  const title = REPORT_TABS.find((t) => t.key === activeTab)?.label || "Report";
+  const title = visibleTabs.find((t) => t.key === activeTab)?.label || "Report";
+  const emptyMessage = `No ${title.toLowerCase()} found.`;
+
+  const fetchVoucher = async (id) => {
+    const res = await api.get(`/accounting/vouchers/${id}`);
+    return res.data?.data;
+  };
+
+  const printSingleVoucher = async (id) => {
+    try {
+      setLoading(true);
+      const entry = await fetchVoucher(id);
+      if (!entry) throw new Error("Voucher not found.");
+      const content = renderJournalEntryHtml(entry);
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Journal Print</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: "Times New Roman", serif; color: #111; padding: 24px; }
+              .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+              .title { font-size: 18px; font-weight: 700; text-transform: uppercase; }
+              .meta { font-size: 12px; color: #333; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+              th, td { border: 1px solid #222; padding: 6px 8px; vertical-align: top; font-size: 12px; }
+              th { text-align: center; font-weight: 700; }
+              .date-cell { width: 90px; text-align: center; }
+              .details-cell { width: 55%; }
+              .details-cell.credit { padding-left: 18px; }
+              .details-cell.debit { padding-left: 4px; }
+              .details-cell.narration { padding-left: 8px; font-style: italic; }
+              .details-cell .extra { margin-top: 2px; font-size: 10px; color: #333; }
+              .lf-cell { width: 60px; text-align: center; }
+              .amt-cell { width: 90px; text-align: right; }
+              .entry-row .date-cell > div { line-height: 1.2; }
+              .narration-row td { border-top: 0; }
+            </style>
+          </head>
+          <body>
+            ${content}
+          </body>
+        </html>
+      `;
+      const w = window.open("", "_blank", "width=900,height=700");
+      if (!w) {
+        toast.error("Popup blocked. Please allow popups to print.");
+        return;
+      }
+      w.document.open();
+      w.document.write(printHtml);
+      w.document.close();
+      w.focus();
+      w.print();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to print voucher.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadSingleVoucherPdf = async (id) => {
+    try {
+      setLoading(true);
+      const entry = await fetchVoucher(id);
+      if (!entry) throw new Error("Voucher not found.");
+      const doc = new jsPDF();
+      doc.setFontSize(12);
+      doc.text(selectedCompanyName || "Business", 14, 14);
+      doc.setFontSize(10);
+      doc.text(`Voucher: ${entry.voucherNo || "-"}`, 14, 20);
+      doc.text(`Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`, 14, 26);
+
+      const rows = journalRowsForEntry(entry);
+      const body = rows.map((r) => [
+        r.showDate ? `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}` : "",
+        r.extra ? `${r.details}\n${r.extra}` : r.details,
+        "",
+        r.debit,
+        r.credit,
+      ]);
+
+      autoTable(doc, {
+        head: [["Date", "References", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
+        body,
+        startY: 32,
+        styles: { fontSize: 9 },
+        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
+      });
+      doc.save(`${entry.voucherNo || "journal"}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to download PDF.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadSingleVoucherExcel = async (id) => {
+    try {
+      setLoading(true);
+      const entry = await fetchVoucher(id);
+      if (!entry) throw new Error("Voucher not found.");
+      const rows = journalRowsForEntry(entry).map((r) => ({
+        Date: r.showDate ? `${formatYear(entry.date)} ${formatMonthDay(entry.date)}` : "",
+        References: r.details,
+        Extra: r.extra || "",
+        "L.F.": "",
+        "Amount (Dr.)": r.debit,
+        "Amount (Cr.)": r.credit,
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Journal");
+      XLSX.writeFile(wb, `${entry.voucherNo || "journal"}.xlsx`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to download Excel.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const reportRowClass = (row) => {
     if (!row) return "";
@@ -821,6 +1136,7 @@ export default function Reports() {
     if (Array.isArray(f.voucherTypes)) setAccVoucherTypes(f.voucherTypes);
     if (Array.isArray(f.accountIds)) setAccAccountIds(f.accountIds);
     if (Array.isArray(f.partyNames)) setAccCustomerNames(f.partyNames);
+    if (f.itemName != null) setAccProductName(String(f.itemName || ""));
 
     // Inventory filters
     if (Array.isArray(f.invCompanyIds)) setInvCompanyIds(f.invCompanyIds);
@@ -839,9 +1155,11 @@ export default function Reports() {
   }, [range, endDate, particularDate]);
 
   const selectedCompanyName = useMemo(() => {
+    const settingsName = String(settings.companyName || settings.shortName || "").trim();
+    if (settingsName) return settingsName;
     const c = (accCompanies || []).find((x) => String(x._id) === String(accCompanyId));
-    return c?.name || "Name of Business";
-  }, [accCompanies, accCompanyId]);
+    return c?.name || "Business";
+  }, [accCompanies, accCompanyId, settings.companyName, settings.shortName]);
 
   const fmtAmt = (v) => {
     const n = Number(v || 0);
@@ -1032,6 +1350,7 @@ export default function Reports() {
           voucherTypes: accVoucherTypes,
           accountIds: accAccountIds,
           partyNames: accCustomerNames,
+          itemName: accProductName,
           accCompanyId,
           invCompanyIds,
           invProductTypeIds,
@@ -1056,48 +1375,59 @@ export default function Reports() {
 
   return (
     <div className="space-y-4">
-      <div className="border-b border-emerald-200">
-        <div className="flex flex-wrap gap-2">
-          {REPORT_TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(tab.key);
-                    setSearchParams({ tab: tab.key });
-                  }}
-                  className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-t-lg border-b-2 transition whitespace-nowrap
-                  ${
-                    isActive
-                      ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
-                      : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
-                  }`}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+      {!embedded && (
+      <div className="border-b border-emerald-200 pb-2">
+        {visibleGroups.map((group) => (
+          <div key={group.label} className="mb-2">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">{group.label}</div>
+            <div className="flex flex-wrap gap-2">
+              {group.tabs.map((key) => {
+                const tab = visibleTabMap.get(key);
+                if (!tab) return null;
+                const isActive = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      setSearchParams({ tab: tab.key });
+                    }}
+                    className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-t-lg border-b-2 transition whitespace-nowrap
+                    ${
+                      isActive
+                        ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
+                        : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
+                    }`}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      )}
+
+      {!hideFilters && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-gray-700">Report Filters</div>
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
+              filtersOpen ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <Filter size={16} />
+            {filtersOpen ? "Hide Filters" : "Show Filters"}
+          </button>
         </div>
-      </div>
+      )}
 
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-gray-700">Report Filters</div>
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((v) => !v)}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
-            filtersOpen ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
-          }`}
-        >
-          <Filter size={16} />
-          {filtersOpen ? "Hide Filters" : "Show Filters"}
-        </button>
-      </div>
-
-      {filtersOpen && (
+      {!hideFilters && filtersOpen && (
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <div className="text-sm">
@@ -1150,7 +1480,7 @@ export default function Reports() {
               </>
             )}
 
-            {["trial", "pl", "balance", "receivables", "payables", "daybook", "ledger"].includes(activeTab) && (
+            {["trial", "pl", "balance", "receivables", "payables", "ledger"].includes(activeTab) && (
               <>
                 <div className="text-sm">
                   <span className={filterLabelClass}>Company</span>
@@ -1247,6 +1577,16 @@ export default function Reports() {
                     ))}
                   </select>
                 </div>
+
+                <div className="text-sm">
+                  <span className={filterLabelClass}>Product</span>
+                  <input
+                    value={accProductName}
+                    onChange={(e) => setAccProductName(e.target.value)}
+                    placeholder="Type product name"
+                    className={`${filterInputClass} w-full`}
+                  />
+                </div>
               </>
             )}
 
@@ -1324,13 +1664,13 @@ export default function Reports() {
         {loading ? (
           <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
         ) : (
-          <DataTable
-            title={title}
-            columns={columns}
-            data={rows}
-            idKey="id"
-            searchPlaceholder={`Search ${title.toLowerCase()}...`}
-            emptyMessage={`No ${title.toLowerCase()} found.`}
+            <DataTable
+              title={title}
+              columns={columns}
+              data={rows}
+              idKey="id"
+              searchPlaceholder={`Search ${title.toLowerCase()}...`}
+              emptyMessage={emptyMessage}
             rowClassName={reportRowClass}
             showExport={!["trial", "pl", "balance"].includes(activeTab)}
             showPrint={!["trial", "pl", "balance"].includes(activeTab)}

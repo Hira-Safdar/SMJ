@@ -3,8 +3,14 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   BookOpen,
-  FileText,
-  List,
+  BookCopy,
+  PenSquare,
+  Landmark,
+  Scale,
+  TrendingUp,
+  Building2,
+  HandCoins,
+  Wallet,
   Plus,
   Save,
   X,
@@ -18,14 +24,21 @@ import {
 } from "lucide-react";
 import api from "../services/api";
 import DataTable from "../components/ui/DataTable";
+import Reports from "./Reports";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const TABS = [
   { key: "coa", label: "Chart of Accounts", icon: <BookOpen size={16} /> },
-  { key: "journal-entry", label: "Journal Entry", icon: <FileText size={16} /> },
-  { key: "vouchers", label: "Voucher List", icon: <List size={16} /> },
+  { key: "journal-entry", label: "Journal Entry", icon: <PenSquare size={16} /> },
+  { key: "journal-report", label: "Journal", icon: <BookCopy size={16} /> },
+  { key: "ledger", label: "Ledger", icon: <Landmark size={16} /> },
+  { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
+  { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
+  { key: "balance", label: "Balance Sheet", icon: <Building2 size={16} /> },
+  { key: "receivables", label: "Receivables", icon: <HandCoins size={16} /> },
+  { key: "payables", label: "Payables", icon: <Wallet size={16} /> },
 ];
 
 const VOUCHER_TYPES = ["JOURNAL", "PAYMENT", "RECEIPT"];
@@ -82,6 +95,7 @@ const blankEntry = ({ like } = {}) => {
     date: new Date().toISOString().slice(0, 10),
     companyId: "",
     companyName: "",
+    voucherType: like?.voucherType || "JOURNAL",
     customerId: "",
     customerName: "",
     productTypeId: "",
@@ -273,6 +287,7 @@ export default function AccountingFinance() {
   const [rangeEnd, setRangeEnd] = useState("");
   const [journalMonth, setJournalMonth] = useState("");
   const [showJournalFilters, setShowJournalFilters] = useState(false);
+  const [showVoucherFilters, setShowVoucherFilters] = useState(false);
   const [filterCompanyName, setFilterCompanyName] = useState("");
   const [filterBookType, setFilterBookType] = useState("ALL");
   const [filterVoucherNo, setFilterVoucherNo] = useState("");
@@ -280,6 +295,7 @@ export default function AccountingFinance() {
   const [filterVoucherType, setFilterVoucherType] = useState("");
   const [filterAccountId, setFilterAccountId] = useState("");
   const [filterCustomerName, setFilterCustomerName] = useState("");
+  const [filterProductId, setFilterProductId] = useState("");
   const [vouchers, setVouchers] = useState([]);
 
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: "", voucherNo: "" });
@@ -287,6 +303,16 @@ export default function AccountingFinance() {
   const [selectedGeneratedIds, setSelectedGeneratedIds] = useState(new Set());
   const [submitErrors, setSubmitErrors] = useState([]);
   const [firstValidationError, setFirstValidationError] = useState(null);
+  const [journalGenerateOpen, setJournalGenerateOpen] = useState(false);
+  const [journalFilterOpen, setJournalFilterOpen] = useState(false);
+  const [journalGenerateName, setJournalGenerateName] = useState("");
+  const [journalNameTouched, setJournalNameTouched] = useState(false);
+  const [generatedJournalList, setGeneratedJournalList] = useState([]);
+  const [activeGeneratedJournalId, setActiveGeneratedJournalId] = useState("");
+  const [journalGenerateRange, setJournalGenerateRange] = useState("month");
+  const [journalGenerateDate, setJournalGenerateDate] = useState("");
+  const [journalGenerateStart, setJournalGenerateStart] = useState("");
+  const [journalGenerateEnd, setJournalGenerateEnd] = useState("");
 
   const [accountDialog, setAccountDialog] = useState({
     open: false,
@@ -303,20 +329,11 @@ export default function AccountingFinance() {
       journalSide: "BOTH",
     },
   });
+  const [accountSaveError, setAccountSaveError] = useState("");
+  const [accountFieldErrors, setAccountFieldErrors] = useState({ code: "", name: "" });
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    const reportRedirect = {
-      ledger: "ledger",
-      "trial-balance": "trial",
-      "profit-loss": "pl",
-      "balance-sheet": "balance",
-      daybook: "daybook",
-    };
-    if (tab && reportRedirect[tab]) {
-      navigate(`/reports?tab=${reportRedirect[tab]}`, { replace: true });
-      return;
-    }
     if (tab && !TABS.some((t) => t.key === tab)) {
       setActiveTab("coa");
       return;
@@ -493,6 +510,8 @@ export default function AccountingFinance() {
   };
 
   const openNewAccount = () => {
+    setAccountSaveError("");
+    setAccountFieldErrors({ code: "", name: "" });
     setAccountDialog({
       open: true,
       mode: "create",
@@ -511,6 +530,8 @@ export default function AccountingFinance() {
   };
 
   const openEditAccount = (row) => {
+    setAccountSaveError("");
+    setAccountFieldErrors({ code: "", name: "" });
     setAccountDialog({
       open: true,
       mode: "edit",
@@ -532,9 +553,14 @@ export default function AccountingFinance() {
     const f = accountDialog.form || {};
     const code = String(f.code || "").trim();
     const name = String(f.name || "").trim();
-    if (!code) return toast.error("Account code is required.");
-    if (!name) return toast.error("Account name is required.");
+    const nextErrors = {
+      code: code ? "" : "Account code is required.",
+      name: name ? "" : "Account name is required.",
+    };
+    setAccountFieldErrors(nextErrors);
+    if (nextErrors.code || nextErrors.name) return;
     try {
+      setAccountSaveError("");
       setLoading(true);
       if (accountDialog.mode === "edit" && accountDialog.id) {
         await api.put(`/accounting/accounts/${accountDialog.id}`, {
@@ -564,7 +590,9 @@ export default function AccountingFinance() {
       setAccountDialog((d) => ({ ...d, open: false }));
       await loadDropdowns();
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to save account.");
+      const msg = err?.response?.data?.message || err?.message || "Failed to save account.";
+      setAccountSaveError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -616,15 +644,16 @@ export default function AccountingFinance() {
   };
 
   const loadVouchers = async () => {
+    const hasCustomRange = !!rangeStart || !!rangeEnd;
+    const todayIso = new Date().toISOString().slice(0, 10);
     const params = {
-      startDate: rangeStart || undefined,
-      endDate: rangeEnd || undefined,
+      startDate: hasCustomRange ? rangeStart || undefined : "1970-01-01",
+      endDate: hasCustomRange ? rangeEnd || undefined : todayIso,
       companyId: filterCompanyId || undefined,
-      companyName: filterCompanyName || undefined,
       voucherType: filterVoucherType || undefined,
       accountId: filterAccountId || undefined,
       partyName: filterCustomerName || undefined,
-      bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
+      itemId: filterProductId || undefined,
       range: "custom",
     };
     const res = await api.get("/accounting/vouchers", { params });
@@ -640,10 +669,28 @@ export default function AccountingFinance() {
       partyName: filterCustomerName || undefined,
       bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
       voucherNo: filterVoucherNo || undefined,
-      voucherType: "JOURNAL",
       range: "custom",
     };
     const res = await api.get("/accounting/journal", { params });
+    setGeneratedJournals(res.data?.data || []);
+    setSelectedGeneratedIds(new Set());
+  };
+
+  const loadGeneratedJournalsWithOverride = async (override = {}) => {
+    const res = await api.get("/accounting/journal", {
+      params: {
+        startDate: rangeStart || undefined,
+        endDate: rangeEnd || undefined,
+        companyId: filterCompanyId || undefined,
+        companyName: filterCompanyName || undefined,
+        partyName: filterCustomerName || undefined,
+        itemId: filterProductId || undefined,
+        bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
+        voucherNo: filterVoucherNo || undefined,
+        range: "custom",
+        ...override,
+      },
+    });
     setGeneratedJournals(res.data?.data || []);
     setSelectedGeneratedIds(new Set());
   };
@@ -668,6 +715,16 @@ export default function AccountingFinance() {
     })();
   }, []);
 
+  // Reset voucher filters on full page refresh
+  useEffect(() => {
+    setRangeStart("");
+    setRangeEnd("");
+    setFilterCompanyId("");
+    setFilterCompanyName("");
+    setFilterProductId("");
+    setFilterAccountId("");
+  }, []);
+
   useEffect(() => {
     const onProductRefresh = () => {
       loadGatepassCompanies().catch(() => {});
@@ -677,7 +734,7 @@ export default function AccountingFinance() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "vouchers") return;
+    if (activeTab !== "journal-entry") return;
     (async () => {
       try {
         setLoading(true);
@@ -692,7 +749,7 @@ export default function AccountingFinance() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== "journal-entry") return;
+    if (activeTab !== "journal-entry" && activeTab !== "journal-report") return;
     (async () => {
       try {
         setLoading(true);
@@ -823,10 +880,6 @@ export default function AccountingFinance() {
           if (creditAmt > 0 && !String(l.creditAccountId || "").trim()) setLineErr(l.rowId, "creditAccountId", "Required");
           if (String(l.creditAccountId || "").trim() && creditAmt <= 0) setLineErr(l.rowId, "creditAmount", "Required");
         }
-        if (debitAmt > 0 && creditAmt > 0) {
-          setLineErr(l.rowId, "debitAmount", "Only one side per row.");
-          setLineErr(l.rowId, "creditAmount", "Only one side per row.");
-        }
       });
 
       const td = round2((e.lines || []).reduce((s, l) => s + n0(l.debitAmount), 0));
@@ -908,11 +961,11 @@ export default function AccountingFinance() {
       (entry?.companyId ? String(entry.companyId) : "");
     return {
       date: entry?.date || new Date().toISOString().slice(0, 10),
-      voucherType: "JOURNAL",
+      voucherType: entry?.voucherType || "JOURNAL",
       companyId: entry?.companyId || "",
       companyName,
       description: String(entry?.narration || "").trim(),
-      bookType: "JOURNAL",
+      bookType: entry?.voucherType || "JOURNAL",
       lines: lineItems,
     };
   };
@@ -948,8 +1001,8 @@ export default function AccountingFinance() {
         }
         const payloadEntries = activeEntries.map((e) => ({
           date: e.date,
-          voucherType: "JOURNAL",
-          bookType: "JOURNAL",
+          voucherType: e.voucherType || "JOURNAL",
+          bookType: e.voucherType || "JOURNAL",
           companyId: e.companyId,
           companyName: e.companyName,
           customerId: e.customerId,
@@ -1015,6 +1068,7 @@ export default function AccountingFinance() {
         ...blankEntry(),
         entryId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         date: v.date ? new Date(v.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        voucherType: v.voucherType || "JOURNAL",
         companyId: v.companyId || "",
         companyName: v.companyName || "",
         customerName: firstParty || "",
@@ -1077,7 +1131,7 @@ export default function AccountingFinance() {
       await api.delete(`/accounting/vouchers/${deleteDialog.id}`);
       toast.success("Voucher deleted.");
       setDeleteDialog({ open: false, id: "", voucherNo: "" });
-      if (activeTab === "vouchers") await loadVouchers();
+      if (activeTab === "journal-entry") await loadVouchers();
       if (activeTab === "journal-entry") await loadGeneratedJournals();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete voucher.");
@@ -1101,6 +1155,275 @@ export default function AccountingFinance() {
     const pad = (n) => String(n).padStart(2, "0");
     setRangeStart(`${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`);
     setRangeEnd(`${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`);
+  };
+
+  const buildReportRowsFromJournals = (journals = []) => {
+    const rows = [];
+    const sorted = [...journals].sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime());
+    sorted.forEach((j) => {
+      const date = j?.date;
+      const narration = String(j?.description || j?.narration || "").trim();
+      const debits = (j?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
+      const credits = (j?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
+      let dateShown = false;
+      const groupRows = [];
+
+      debits.forEach((l) => {
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "debit",
+          account: String(l.accountName || l.accountCode || "Account"),
+          amount: round2(n0(l.debit)),
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
+      });
+
+      credits.forEach((l) => {
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "credit",
+          account: String(l.accountName || l.accountCode || "Account"),
+          amount: round2(n0(l.credit)),
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
+      });
+
+      if (narration) {
+        groupRows.push({
+          date,
+          showDate: false,
+          side: "narration",
+          account: "",
+          amount: 0,
+          narration,
+          isNarrationRow: true,
+        });
+      }
+
+      groupRows.forEach((r, idx) => {
+        rows.push({
+          ...r,
+          isFirstInGroup: idx === 0,
+          isLastInGroup: idx === groupRows.length - 1,
+        });
+      });
+    });
+    return rows;
+  };
+
+  const fetchGeneratedJournals = async (override = {}) => {
+    const params = {
+      startDate: rangeStart || undefined,
+      endDate: rangeEnd || undefined,
+      companyId: filterCompanyId || undefined,
+      companyName: filterCompanyName || undefined,
+      partyName: filterCustomerName || undefined,
+      itemId: filterProductId || undefined,
+      bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
+      voucherNo: filterVoucherNo || undefined,
+      range: "custom",
+      ...override,
+    };
+    const res = await api.get("/accounting/journal", { params });
+    return res.data?.data || [];
+  };
+
+  const applyJournalGenerateFilters = () => {
+    const range = journalGenerateRange;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    let nextStart = "";
+    let nextEnd = "";
+    if (range === "day" || range === "particular") {
+      const base = journalGenerateDate ? new Date(journalGenerateDate) : now;
+      const y = base.getFullYear();
+      const m = pad(base.getMonth() + 1);
+      const d = pad(base.getDate());
+      nextStart = `${y}-${m}-${d}`;
+      nextEnd = `${y}-${m}-${d}`;
+    } else if (range === "month") {
+      const base = journalGenerateDate ? new Date(`${journalGenerateDate}-01`) : now;
+      const y = base.getFullYear();
+      const m = base.getMonth();
+      const start = new Date(y, m, 1);
+      const end = new Date(y, m + 1, 0);
+      nextStart = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+      nextEnd = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+    } else if (range === "year") {
+      const y = Number(journalGenerateDate) || now.getFullYear();
+      nextStart = `${y}-01-01`;
+      nextEnd = `${y}-12-31`;
+    } else if (range === "custom") {
+      nextStart = journalGenerateStart || "";
+      nextEnd = journalGenerateEnd || "";
+    }
+    const finalName = String(journalGenerateName || "").trim() || getSuggestedJournalName();
+    setGeneratedJournalList((prev) => {
+      const next = [...prev];
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      next.unshift({
+        id,
+        name: finalName,
+        startDate: nextStart,
+        endDate: nextEnd,
+        companyId: filterCompanyId || "",
+        companyName: filterCompanyName || "",
+        partyName: filterCustomerName || "",
+        itemId: filterProductId || "",
+      });
+      setActiveGeneratedJournalId(id);
+      return next;
+    });
+    setRangeStart(nextStart);
+    setRangeEnd(nextEnd);
+    setJournalGenerateOpen(false);
+    loadGeneratedJournalsWithOverride({
+      startDate: nextStart || undefined,
+      endDate: nextEnd || undefined,
+      companyId: filterCompanyId || undefined,
+      companyName: filterCompanyName || undefined,
+      partyName: filterCustomerName || undefined,
+      itemId: filterProductId || undefined,
+    }).catch(() => {});
+  };
+
+  const applyJournalFiltersOnly = () => {
+    const range = journalGenerateRange;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    let nextStart = "";
+    let nextEnd = "";
+    if (range === "day" || range === "particular") {
+      const base = journalGenerateDate ? new Date(journalGenerateDate) : now;
+      const y = base.getFullYear();
+      const m = pad(base.getMonth() + 1);
+      const d = pad(base.getDate());
+      nextStart = `${y}-${m}-${d}`;
+      nextEnd = `${y}-${m}-${d}`;
+    } else if (range === "month") {
+      const base = journalGenerateDate ? new Date(`${journalGenerateDate}-01`) : now;
+      const y = base.getFullYear();
+      const m = base.getMonth();
+      const start = new Date(y, m, 1);
+      const end = new Date(y, m + 1, 0);
+      nextStart = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+      nextEnd = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+    } else if (range === "year") {
+      const y = Number(journalGenerateDate) || now.getFullYear();
+      nextStart = `${y}-01-01`;
+      nextEnd = `${y}-12-31`;
+    } else if (range === "custom") {
+      nextStart = journalGenerateStart || "";
+      nextEnd = journalGenerateEnd || "";
+    }
+    setRangeStart(nextStart);
+    setRangeEnd(nextEnd);
+    setActiveGeneratedJournalId("");
+    loadGeneratedJournalsWithOverride({
+      startDate: nextStart || undefined,
+      endDate: nextEnd || undefined,
+      companyId: filterCompanyId || undefined,
+      companyName: filterCompanyName || undefined,
+      partyName: filterCustomerName || undefined,
+      itemId: filterProductId || undefined,
+    }).catch(() => {});
+  };
+
+  const handleViewGeneratedJournal = async (j) => {
+    if (!j) return;
+    setActiveGeneratedJournalId(j.id);
+    setRangeStart(j.startDate || "");
+    setRangeEnd(j.endDate || "");
+    setFilterCompanyId(j.companyId || "");
+    setFilterCompanyName(j.companyName || "");
+    setFilterCustomerName(j.partyName || "");
+    setFilterProductId(j.itemId || "");
+    await loadGeneratedJournalsWithOverride({
+      startDate: j.startDate || undefined,
+      endDate: j.endDate || undefined,
+      companyId: j.companyId || undefined,
+      companyName: j.companyName || undefined,
+      partyName: j.partyName || undefined,
+      itemId: j.itemId || undefined,
+    });
+  };
+
+  const handleDownloadGeneratedJournal = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const data = await fetchGeneratedJournals({
+        startDate: j.startDate || undefined,
+        endDate: j.endDate || undefined,
+        companyId: j.companyId || undefined,
+        companyName: j.companyName || undefined,
+        partyName: j.partyName || undefined,
+        itemId: j.itemId || undefined,
+      });
+      const rows = buildReportRowsFromJournals(data);
+      const body = rows.map((r) => {
+        const dateText = r.showDate ? `${formatYear(r.date)}\n${formatMonthDay(r.date)}` : "";
+        const details = r.isNarrationRow ? `(${withBeing(r.narration)})` : r.account || "";
+        const debit = r.side === "debit" ? `Rs. ${String(r.amount)}` : "";
+        const credit = r.side === "credit" ? `Rs. ${String(r.amount)}` : "";
+        return [dateText, details, "", debit, credit];
+      });
+      const doc = new jsPDF();
+      doc.setFontSize(12);
+      doc.text(String(j.name || "Journal"), 14, 14);
+      autoTable(doc, {
+        startY: 20,
+        head: [["Date", "Details", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
+        body,
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [240, 253, 250], textColor: [6, 95, 70] },
+        columnStyles: { 0: { cellWidth: 22 }, 2: { cellWidth: 10 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 } },
+      });
+      doc.save(`${String(j.name || "journal").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to download journal.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getSuggestedJournalName = (opts = {}) => {
+    const now = new Date();
+    const range = opts.range || journalGenerateRange;
+    const dateVal = opts.date || journalGenerateDate;
+    const start = opts.start || journalGenerateStart;
+    const end = opts.end || journalGenerateEnd;
+    const company = (opts.companyName || filterCompanyName || "").trim();
+    const customer = (opts.customerName || filterCustomerName || "").trim();
+    const product = (opts.productName || "").trim();
+
+    let rangeLabel = "";
+    if (range === "day" || range === "particular") {
+      const d = dateVal ? new Date(dateVal) : now;
+      rangeLabel = d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "2-digit" });
+    } else if (range === "month") {
+      const d = dateVal ? new Date(`${dateVal}-01`) : now;
+      rangeLabel = d.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    } else if (range === "year") {
+      const y = Number(dateVal) || now.getFullYear();
+      rangeLabel = String(y);
+    } else if (range === "custom") {
+      rangeLabel = [start, end].filter(Boolean).join(" to ");
+    } else {
+      rangeLabel = now.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    }
+
+    const parts = ["Journal", rangeLabel].filter(Boolean);
+    if (company) parts.push(company);
+    if (customer) parts.push(customer);
+    if (product) parts.push(product);
+    return parts.join(" - ");
   };
 
   const handleFilterCompany = (value) => {
@@ -1195,6 +1518,115 @@ export default function AccountingFinance() {
     });
     return rows;
   }, [entries, accountOptions]);
+
+  const reportPreviewEntries = useMemo(() => {
+    const rows = [];
+    const selected = activeGeneratedJournalId
+      ? generatedJournalList.find((x) => x.id === activeGeneratedJournalId)
+      : null;
+    const productMatch = (productTypes || []).find((p) => String(p._id) === String(filterProductId || ""));
+    const productName = productMatch
+      ? [String(productMatch.brand || "").trim(), String(productMatch.name || "").trim()].filter(Boolean).join(" - ")
+      : "";
+    const filterBase = selected || {
+      startDate: rangeStart || "",
+      endDate: rangeEnd || "",
+      companyId: filterCompanyId || "",
+      companyName: filterCompanyName || "",
+      partyName: filterCustomerName || "",
+      itemId: filterProductId || "",
+      productName,
+    };
+    const hasFilter = (j) => {
+      if (!filterBase) return true;
+      const d = j?.date ? new Date(j.date) : null;
+      const inRange =
+        (!filterBase.startDate || (d && d >= new Date(filterBase.startDate))) &&
+        (!filterBase.endDate || (d && d <= new Date(`${filterBase.endDate}T23:59:59.999`)));
+      const companyFilter = String(filterBase.companyName || filterBase.companyId || "").toLowerCase();
+      const byCompany =
+        !companyFilter ||
+        String(j?.companyId || "").toLowerCase() === companyFilter ||
+        String(j?.companyName || "").toLowerCase() === companyFilter;
+      const lines = j?.lines || [];
+      const partyFilter = String(filterBase.partyName || "").toLowerCase();
+      const byParty = !partyFilter || lines.some((l) => String(l.partyName || "").toLowerCase().includes(partyFilter));
+      const byItemId = !filterBase.itemId || lines.some((l) => String(l.itemId || "") === String(filterBase.itemId || ""));
+      const itemNameFilter = String(filterBase.productName || "").toLowerCase();
+      const byItemName =
+        !itemNameFilter || lines.some((l) => String(l.itemName || "").toLowerCase().includes(itemNameFilter));
+      return inRange && byCompany && byParty && byItemId && byItemName;
+    };
+    const journals = [...(generatedJournals || [])]
+      .filter(hasFilter)
+      .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime());
+    journals.forEach((j) => {
+      const date = j?.date;
+      const narration = String(j?.description || j?.narration || "").trim();
+      const debits = (j?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
+      const credits = (j?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
+      let dateShown = false;
+      const groupRows = [];
+
+      debits.forEach((l) => {
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "debit",
+          account: String(l.accountName || l.accountCode || "Account"),
+          amount: round2(n0(l.debit)),
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
+      });
+
+      credits.forEach((l) => {
+        groupRows.push({
+          date,
+          showDate: !dateShown,
+          side: "credit",
+          account: String(l.accountName || l.accountCode || "Account"),
+          amount: round2(n0(l.credit)),
+          narration,
+          isNarrationRow: false,
+        });
+        dateShown = true;
+      });
+
+      if (narration) {
+        groupRows.push({
+          date,
+          showDate: false,
+          side: "narration",
+          account: "",
+          amount: 0,
+          narration,
+          isNarrationRow: true,
+        });
+      }
+
+      groupRows.forEach((r, idx) => {
+        rows.push({
+          ...r,
+          isFirstInGroup: idx === 0,
+          isLastInGroup: idx === groupRows.length - 1,
+        });
+      });
+    });
+    return rows;
+  }, [
+    generatedJournals,
+    activeGeneratedJournalId,
+    generatedJournalList,
+    filterCompanyId,
+    filterCompanyName,
+    filterCustomerName,
+    filterProductId,
+    rangeStart,
+    rangeEnd,
+    productTypes,
+  ]);
 
   const amountClass = (line) => {
     if (!submitAttempted) return "border-gray-300";
@@ -1647,37 +2079,209 @@ export default function AccountingFinance() {
         </div>
       )}
 
-      {activeTab === "ledger" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-sm text-gray-700">
-            Ledger is generated from journal entries. We will render account-wise ledger here based on the journal
-            lines you enter in the Journal tab.
+      {activeTab === "journal-report" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJournalFilterOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Filters"
+                >
+                  <Filter size={16} /> Filters
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedJournalName();
+                    setJournalGenerateName(suggested);
+                    setJournalNameTouched(false);
+                    setJournalGenerateOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Printer size={16} /> Generate
+                </button>
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 overflow-x-hidden">
+              <table className="w-full text-sm border border-gray-200 table-fixed">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[260px] border border-gray-200">Details</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">L.F.</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount (Dr.)</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount (Cr.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportPreviewEntries.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No journals found for the selected filters.
+                      </td>
+                    </tr>
+                  )}
+                  {reportPreviewEntries.map((entry, idx) => (
+                    <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
+                      {entry.isNarrationRow ? (
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            ({withBeing(entry.narration)})
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.showDate && (
+                              <>
+                                <div className="text-xs text-gray-700">{formatYear(entry.date)}</div>
+                                <div className="text-xs text-gray-700">{formatMonthDay(entry.date)}</div>
+                              </>
+                            )}
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            <div
+                              className={`flex items-center justify-between gap-2 ${
+                                entry.side === "credit" ? "pl-4 text-gray-700" : ""
+                              }`}
+                            >
+                              <span className="truncate">{entry.account}</span>
+                              {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
+                            </div>
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="text-sm font-semibold text-gray-900">Generated Journals</div>
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead className="bg-emerald-50 text-emerald-900">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                    <th className="text-left font-semibold px-3 py-2">Journal Name</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {generatedJournalList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No generated journals yet.
+                      </td>
+                    </tr>
+                  )}
+                  {generatedJournalList.map((j, idx) => (
+                    <tr key={j.id}>
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2">{j.name}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleViewGeneratedJournal(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="View"
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadGeneratedJournal(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Download"
+                          >
+                            <Download size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setGeneratedJournalList((prev) => prev.filter((x) => x.id !== j.id))
+                            }
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
       )}
-
-      {activeTab === "trial-balance" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-sm text-gray-700">
-            Trial Balance will summarize debit and credit totals from the ledger.
-          </div>
-        </div>
-      )}
-
-      {activeTab === "profit-loss" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-sm text-gray-700">
-            Profit &amp; Loss will be derived from income and expense accounts in the ledger.
-          </div>
-        </div>
-      )}
-
-      {activeTab === "balance-sheet" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="text-sm text-gray-700">
-            Balance Sheet will be derived from assets, liabilities, and equity accounts.
-          </div>
-        </div>
+{["ledger", "trial", "pl", "balance", "receivables", "payables"].includes(activeTab) && (
+        <Reports
+          embedded
+          initialTab={activeTab}
+          allowedTabs={["ledger", "trial", "pl", "balance", "receivables", "payables"]}
+        />
       )}
 
       {activeTab === "coa" && (
@@ -1827,8 +2431,18 @@ export default function AccountingFinance() {
                     <div className="flex gap-2">
                       <input
                         value={accountDialog.form.code || ""}
-                        onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, code: e.target.value } }))}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                        readOnly={accountDialog.mode === "create"}
+                        onChange={(e) => {
+                          if (accountDialog.mode === "create") return;
+                          setAccountDialog((d) => ({ ...d, form: { ...d.form, code: e.target.value } }));
+                        }}
+                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                          accountDialog.mode === "create"
+                            ? "bg-gray-100 text-gray-600 border-gray-200"
+                            : accountFieldErrors.code
+                            ? "border-red-300 bg-red-50"
+                            : "border-gray-300"
+                        }`}
                         placeholder="e.g. 1100"
                       />
                       <button
@@ -1844,6 +2458,7 @@ export default function AccountingFinance() {
                         Auto
                       </button>
                     </div>
+                    {accountFieldErrors.code && <div className="mt-1 text-xs text-red-600">{accountFieldErrors.code}</div>}
                   </div>
 
                   <div>
@@ -1851,9 +2466,12 @@ export default function AccountingFinance() {
                     <input
                       value={accountDialog.form.name || ""}
                       onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, name: e.target.value } }))}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                        accountFieldErrors.name ? "border-red-300 bg-red-50" : "border-gray-300"
+                      }`}
                       placeholder="e.g. Raw Paddy Inventory"
                     />
+                    {accountFieldErrors.name && <div className="mt-1 text-xs text-red-600">{accountFieldErrors.name}</div>}
                   </div>
 
                   <div className="md:col-span-2">
@@ -1899,6 +2517,11 @@ export default function AccountingFinance() {
                 </div>
 
                 <div className="flex justify-end gap-2">
+                  {accountSaveError && (
+                    <div className="mr-auto text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                      {accountSaveError}
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setAccountDialog((d) => ({ ...d, open: false }))}
@@ -1923,7 +2546,8 @@ export default function AccountingFinance() {
 
       {activeTab === "journal-entry" && (
         <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+          <div className="grid md:grid-cols-5 gap-4 items-start">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4 md:col-span-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm font-semibold text-gray-900">New Voucher</div>
               <div className="flex items-center gap-2">
@@ -1976,7 +2600,7 @@ export default function AccountingFinance() {
                       </div>
                     )}
 
-                    <div className="grid md:grid-cols-5 gap-3 items-end">
+                    <div className="grid md:grid-cols-6 gap-3 items-start">
                       <div>
                         <label className="block text-xs text-gray-600 mb-1">Date</label>
                         <input
@@ -1987,7 +2611,9 @@ export default function AccountingFinance() {
                             submitAttempted && fieldErr.date ? "border-red-300 bg-red-50" : "border-gray-300"
                           }`}
                         />
-                        {submitAttempted && fieldErr.date && <div className="mt-1 text-xs text-red-600">{fieldErr.date}</div>}
+                        <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                          {submitAttempted && fieldErr.date ? fieldErr.date : ""}
+                        </div>
                       </div>
 
                       <div>
@@ -2008,6 +2634,7 @@ export default function AccountingFinance() {
                             </option>
                           ))}
                         </select>
+                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
                       </div>
 
                       <div className="md:col-span-2">
@@ -2026,9 +2653,9 @@ export default function AccountingFinance() {
                             </option>
                           ))}
                         </select>
-                        {submitAttempted && fieldErr.companyId && (
-                          <div className="mt-1 text-xs text-red-600">{fieldErr.companyId}</div>
-                        )}
+                        <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                          {submitAttempted && fieldErr.companyId ? fieldErr.companyId : ""}
+                        </div>
                       </div>
 
                       <div>
@@ -2046,18 +2673,34 @@ export default function AccountingFinance() {
                             patchEntry(e.entryId, { productTypeId: id, productName: name });
                           }}
                         />
+                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
+                        <select
+                          value={e.voucherType || "JOURNAL"}
+                          onChange={(ev) => patchEntry(e.entryId, { voucherType: ev.target.value })}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                        >
+                          {VOUCHER_TYPES.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-gray-200 overflow-x-auto">
-                      <table className="min-w-[860px] w-full text-sm">
+                    <div className="rounded-xl border border-gray-200 overflow-x-hidden">
+                      <table className="w-full text-sm table-fixed">
                         <thead className="bg-emerald-50 text-emerald-900">
                           <tr>
-                            <th className="text-left font-semibold px-3 py-2 w-[260px]">Debit Account</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[140px]">Debit Amount</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[260px]">Credit Account</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[140px]">Credit Amount</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[60px]"></th>
+                            <th className="text-left font-semibold px-3 py-2 w-[200px]">Debit Account</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[110px]">Debit Amount</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[200px]">Credit Account</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[110px]">Credit Amount</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[45px]"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -2086,9 +2729,9 @@ export default function AccountingFinance() {
                                           </option>
                                         ))}
                                       </select>
-                                      {submitAttempted && le.debitAccountId && (
-                                        <div className="mt-1 text-xs text-red-600">{le.debitAccountId}</div>
-                                      )}
+                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                                        {submitAttempted && le.debitAccountId ? le.debitAccountId : ""}
+                                      </div>
                                     </div>
                                   )}
                                 </td>
@@ -2118,9 +2761,9 @@ export default function AccountingFinance() {
                                         +
                                       </button>
                                     </div>
-                                      {submitAttempted && le.debitAmount && (
-                                        <div className="mt-1 text-xs text-red-600">{le.debitAmount}</div>
-                                      )}
+                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                                        {submitAttempted && le.debitAmount ? le.debitAmount : ""}
+                                      </div>
                                     </div>
                                   )}
                                 </td>
@@ -2143,9 +2786,9 @@ export default function AccountingFinance() {
                                           </option>
                                         ))}
                                       </select>
-                                      {submitAttempted && le.creditAccountId && (
-                                        <div className="mt-1 text-xs text-red-600">{le.creditAccountId}</div>
-                                      )}
+                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                                        {submitAttempted && le.creditAccountId ? le.creditAccountId : ""}
+                                      </div>
                                     </div>
                                   )}
                                 </td>
@@ -2175,9 +2818,9 @@ export default function AccountingFinance() {
                                         +
                                       </button>
                                     </div>
-                                      {submitAttempted && le.creditAmount && (
-                                        <div className="mt-1 text-xs text-red-600">{le.creditAmount}</div>
-                                      )}
+                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                                        {submitAttempted && le.creditAmount ? le.creditAmount : ""}
+                                      </div>
                                     </div>
                                   )}
                                 </td>
@@ -2212,9 +2855,9 @@ export default function AccountingFinance() {
                         }`}
                         placeholder="Narration"
                       />
-                      {submitAttempted && fieldErr.narration && (
-                        <div className="mt-1 text-xs text-red-600">{fieldErr.narration}</div>
-                      )}
+                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                        {submitAttempted && fieldErr.narration ? fieldErr.narration : ""}
+                      </div>
                     </div>
                   </div>
                 );
@@ -2727,33 +3370,20 @@ export default function AccountingFinance() {
             )}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 md:col-span-2">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowJournalFilters((p) => !p)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${
-                    showJournalFilters
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Filter size={16} /> Filters
-                </button>
-              </div>
             </div>
 
-            <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[720px] w-full text-sm border border-gray-200">
+            <div className="rounded-xl border border-gray-200 overflow-x-hidden">
+              <table className="w-full text-sm border border-gray-200 table-fixed">
                 <thead className="bg-gray-50 text-gray-800">
                   <tr>
-                    <th className="text-left font-semibold px-3 py-2 w-[110px] border border-gray-200">Date</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Date</th>
                     <th className="text-left font-semibold px-3 py-2 border border-gray-200">Details</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[80px] border border-gray-200">L.F.</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px] border border-gray-200">Amount (Dr.)</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px] border border-gray-200">Amount (Cr.)</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[50px] border border-gray-200">L.F.</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Amount (Dr.)</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Amount (Cr.)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2850,299 +3480,179 @@ export default function AccountingFinance() {
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => saveVoucher({ andNew: true, autoPrint: true })}
-                disabled={loading || !totals.balanced}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
-              >
-                <Printer size={16} /> Generate
-              </button>
-            </div>
+          </div>
+
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-gray-900">Generated Journals</div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={selectedGeneratedIds.size === 0}
-                  onClick={() => handleBulkDownloadPdf()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <Download size={16} /> PDF
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedGeneratedIds.size === 0}
-                  onClick={() => handleBulkDownloadExcel()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <Download size={16} /> Excel
-                </button>
+            {showVoucherFilters && (
+              <div className="grid md:grid-cols-6 gap-3 items-end">
+                <div className="md:col-span-1">
+                  <label className="block text-xs text-gray-600 mb-1">Start</label>
+                  <input
+                    type="date"
+                    value={rangeStart}
+                    onChange={(e) => setRangeStart(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  />
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-xs text-gray-600 mb-1">End</label>
+                  <input
+                    type="date"
+                    value={rangeEnd}
+                    onChange={(e) => setRangeEnd(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs text-gray-600 mb-1">Company</label>
+                  <select
+                    value={filterCompanyId || filterCompanyName}
+                    onChange={(e) => handleFilterCompany(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All companies</option>
+                    {companyOptions.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-xs text-gray-600 mb-1">Product</label>
+                  <select
+                    value={filterProductId}
+                    onChange={(e) => setFilterProductId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All products</option>
+                    {(productTypes || []).map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {String(p.brand || "").trim()} {String(p.name || "").trim()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
+                  <select
+                    value={filterVoucherType}
+                    onChange={(e) => setFilterVoucherType(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All</option>
+                    {VOUCHER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadVouchers().catch(() => {})}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                  >
+                    <RefreshCcw size={16} /> Apply
+                  </button>
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-xs text-gray-600 mb-1">Account (optional filter)</label>
+                  <select
+                    value={filterAccountId}
+                    onChange={(e) => setFilterAccountId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All accounts</option>
+                    {accountOptions.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[980px] w-full text-sm">
-                <thead className="bg-emerald-50 text-emerald-900">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2 w-[40px]"></th>
-                    <th className="text-left font-semibold px-3 py-2 w-[110px]">Date</th>
-                    <th className="text-left font-semibold px-3 py-2">Details</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[80px]">L.F.</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Amount (Dr.)</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Amount (Cr.)</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[260px]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {generatedJournals.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-3 py-4 text-sm text-gray-500 text-center">
-                        No generated journals yet.
-                      </td>
-                    </tr>
-                  )}
-                  {generatedJournals.map((j) => {
-                    const lines = (j.lines || []).map((l) => ({
-                      account: l.accountName || l.accountCode || "Account",
-                      debit: round2(n0(l.debit)),
-                      credit: round2(n0(l.credit)),
-                    }));
-                    const narration = withBeing(String(j.description || j.narration || "").trim());
-                    return (
-                      <React.Fragment key={j._id}>
-                        <tr className="bg-gray-50">
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedGeneratedIds.has(j._id)}
-                              onChange={(e) => {
-                                setSelectedGeneratedIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(j._id);
-                                  else next.delete(j._id);
-                                  return next;
-                                });
-                              }}
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-xs text-gray-600">
-                            {j.date ? new Date(j.date).toLocaleDateString() : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-sm font-semibold text-gray-900">
-                            Voucher: {j.voucherNo || "-"} | {j.companyName || "-"}
-                          </td>
-                          <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => editVoucher(j._id)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                              >
-                                <Pencil size={14} /> Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => askDeleteVoucher(j._id, j.voucherNo)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-red-200 text-xs text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 size={14} /> Delete
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handlePrintVoucher(j._id)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                              >
-                                <Printer size={14} /> Print
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadPdf(j._id)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                              >
-                                <Download size={14} /> PDF
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadExcel(j._id)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                              >
-                                <Download size={14} /> Excel
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {lines.map((l, idx) => {
-                          const isDebit = l.debit > 0;
-                          return (
-                            <tr key={`${j._id}-${idx}`}>
-                              <td className="px-3 py-2"></td>
-                              <td className="px-3 py-2">
-                                {idx === 0 && (
-                                  <>
-                                    <div className="text-xs text-gray-700">{formatYear(j.date)}</div>
-                                    <div className="text-xs text-gray-700">{formatMonthDay(j.date)}</div>
-                                  </>
-                                )}
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className={`flex items-center ${isDebit ? "justify-between" : "pl-4"} gap-2`}>
-                                  <span>{l.account}</span>
-                                  {isDebit && <span className="text-xs font-semibold">Dr</span>}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2"></td>
-                              <td className="px-3 py-2 text-right">{isDebit ? l.debit.toFixed(2) : ""}</td>
-                              <td className="px-3 py-2 text-right">{!isDebit ? l.credit.toFixed(2) : ""}</td>
-                              <td className="px-3 py-2"></td>
-                            </tr>
-                          );
-                        })}
-                        {narration && (
-                          <tr>
-                            <td className="px-3 py-2"></td>
-                            <td className="px-3 py-2"></td>
-                            <td className="px-3 py-2 italic text-gray-600">({narration})</td>
-                            <td className="px-3 py-2"></td>
-                            <td className="px-3 py-2"></td>
-                            <td className="px-3 py-2"></td>
-                            <td className="px-3 py-2"></td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            )}
+
+            <DataTable
+              title="Vouchers"
+              columns={[
+                { key: "voucherNo", label: "Voucher No" },
+                { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
+                { key: "voucherType", label: "Type" },
+                { key: "companyName", label: "Company" },
+                { key: "amount", label: "Amount" },
+                { key: "status", label: "Status" },
+                {
+                  key: "actions",
+                  label: "Actions",
+                  sortable: false,
+                  render: (_v, row) => (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editVoucher(row._id)}
+                        className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        title="Edit"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePrintVoucher(row._id)}
+                        className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        title="Print"
+                      >
+                        <Printer size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => askDeleteVoucher(row._id, row.voucherNo)}
+                        className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+              data={vouchers}
+              rowClassName={(row) => (row.status === "REVERSED" ? "opacity-60" : "")}
+              showFilters={false}
+              showClearFilters={false}
+              toolbarActions={
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowVoucherFilters((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Filter size={16} /> {showVoucherFilters ? "Hide Filters" : "Filters"}
+                  </button>
+                </div>
+              }
+              exportColumns={[
+                { key: "voucherNo", label: "Voucher No" },
+                { key: "date", label: "Date" },
+                { key: "voucherType", label: "Type" },
+                { key: "companyName", label: "Company" },
+                { key: "description", label: "Description" },
+                { key: "amount", label: "Amount" },
+                { key: "status", label: "Status" },
+              ]}
+              exportData={(rows) =>
+                rows.map((r) => ({
+                  ...r,
+                  date: r.date ? new Date(r.date).toISOString().slice(0, 10) : "",
+                }))
+              }
+            />
           </div>
-        </div>
-      )}
-
-      {activeTab === "vouchers" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-          <div className="grid md:grid-cols-6 gap-3 items-end">
-            <div className="md:col-span-1">
-              <label className="block text-xs text-gray-600 mb-1">Start</label>
-              <input
-                type="date"
-                value={rangeStart}
-                onChange={(e) => setRangeStart(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              />
-            </div>
-            <div className="md:col-span-1">
-              <label className="block text-xs text-gray-600 mb-1">End</label>
-              <input
-                type="date"
-                value={rangeEnd}
-                onChange={(e) => setRangeEnd(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs text-gray-600 mb-1">Company</label>
-              <select
-                value={filterCompanyId || filterCompanyName}
-                onChange={(e) => handleFilterCompany(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              >
-                <option value="">All companies</option>
-                {companyOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-1">
-              <label className="block text-xs text-gray-600 mb-1">Type</label>
-              <select
-                value={filterVoucherType}
-                onChange={(e) => setFilterVoucherType(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              >
-                <option value="">All</option>
-                {VOUCHER_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-1 flex gap-2">
-              <button
-                type="button"
-                onClick={() => loadVouchers().catch(() => {})}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-              >
-                <RefreshCcw size={16} /> Apply
-              </button>
-            </div>
-
-            <div className="md:col-span-3">
-              <label className="block text-xs text-gray-600 mb-1">Account (optional filter)</label>
-              <select
-                value={filterAccountId}
-                onChange={(e) => setFilterAccountId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-              >
-                <option value="">All accounts</option>
-                {accountOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <DataTable
-            title="Vouchers"
-            columns={[
-              { key: "voucherNo", label: "Voucher No" },
-              { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
-              { key: "voucherType", label: "Type" },
-              { key: "companyName", label: "Company" },
-              { key: "amount", label: "Amount" },
-              { key: "status", label: "Status" },
-            ]}
-            data={vouchers}
-            rowClassName={(row) => (row.status === "REVERSED" ? "opacity-60" : "")}
-            toolbarActions={
-              <button
-                type="button"
-                onClick={() => {
-                  resetEntry();
-                  setActiveTab("journal-entry");
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <Plus size={16} /> New Voucher
-              </button>
-            }
-            exportColumns={[
-              { key: "voucherNo", label: "Voucher No" },
-              { key: "date", label: "Date" },
-              { key: "voucherType", label: "Type" },
-              { key: "companyName", label: "Company" },
-              { key: "description", label: "Description" },
-              { key: "amount", label: "Amount" },
-              { key: "status", label: "Status" },
-            ]}
-            exportData={(rows) =>
-              rows.map((r) => ({
-                ...r,
-                date: r.date ? new Date(r.date).toISOString().slice(0, 10) : "",
-              }))
-            }
-          />
 
         </div>
       )}
@@ -3183,8 +3693,261 @@ export default function AccountingFinance() {
               </button>
             </div>
           </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <Reports embedded initialTab="daybook" allowedTabs={["daybook"]} hideFilters />
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setJournalGenerateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+            >
+              <Printer size={16} /> Generate
+            </button>
+          </div>
+        </div>
+      )}
+
+      {journalGenerateOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Generate Journal</div>
+              <button
+                type="button"
+                onClick={() => setJournalGenerateOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Journal Name</label>
+              <input
+                value={journalGenerateName}
+                onChange={(e) => {
+                  setJournalGenerateName(e.target.value);
+                  setJournalNameTouched(true);
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                placeholder="e.g. April 2026 Journal"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setJournalGenerateOpen(false)}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyJournalGenerateFilters}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {journalFilterOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Journal Filters</div>
+              <button
+                type="button"
+                onClick={() => setJournalFilterOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid md:grid-cols-4 gap-3 items-end">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Range</label>
+                <select
+                  value={journalGenerateRange}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setJournalGenerateRange(v);
+                    if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ range: v }));
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                >
+                  <option value="day">Day (Today)</option>
+                  <option value="particular">Particular Date</option>
+                  <option value="month">Month</option>
+                  <option value="year">Year</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+              </div>
+
+              {(journalGenerateRange === "day" || journalGenerateRange === "particular") && (
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={journalGenerateDate}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalGenerateDate(v);
+                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v }));
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  />
+                </div>
+              )}
+
+              {journalGenerateRange === "custom" && (
+                <>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Start</label>
+                    <input
+                      type="date"
+                      value={journalGenerateStart}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setJournalGenerateStart(v);
+                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ start: v, end: journalGenerateEnd }));
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">End</label>
+                    <input
+                      type="date"
+                      value={journalGenerateEnd}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setJournalGenerateEnd(v);
+                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ start: journalGenerateStart, end: v }));
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+
+              {journalGenerateRange === "month" && (
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Month</label>
+                  <input
+                    type="month"
+                    value={journalGenerateDate}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalGenerateDate(v);
+                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "month" }));
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  />
+                </div>
+              )}
+
+              {journalGenerateRange === "year" && (
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Year</label>
+                  <input
+                    type="number"
+                    min="1970"
+                    max="2100"
+                    value={journalGenerateDate}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalGenerateDate(v);
+                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "year" }));
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    placeholder="2026"
+                  />
+                </div>
+              )}
+
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-600 mb-1">Company</label>
+                <select
+                  value={filterCompanyId || filterCompanyName}
+                  onChange={(e) => handleFilterCompany(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                >
+                  <option value="">All companies</option>
+                  {companyOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-600 mb-1">Customer</label>
+                <select
+                  value={filterCustomerName}
+                  onChange={(e) => setFilterCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                >
+                  <option value="">All customers</option>
+                  {customerOptions.map((c) => (
+                    <option key={c._id || c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-600 mb-1">Product</label>
+                <select
+                  value={filterProductId}
+                  onChange={(e) => setFilterProductId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                >
+                  <option value="">All products</option>
+                  {(productTypes || []).map((p) => (
+                    <option key={p._id} value={p._id}>
+                      {String(p.brand || "").trim()} {String(p.name || "").trim()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setJournalFilterOpen(false)}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setJournalFilterOpen(false);
+                  applyJournalFiltersOnly();
+                  if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName());
+                }}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
+

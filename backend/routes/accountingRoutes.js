@@ -3,7 +3,6 @@ const acc = require("../controllers/accountingController");
 
 const router = express.Router();
 
-router.get("/daybook", acc.getDaybook);
 router.get("/ledger", acc.getLedger);
 router.get("/trial-balance", acc.getTrialBalance);
 router.get("/pl", acc.getProfitLoss);
