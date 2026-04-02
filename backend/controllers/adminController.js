@@ -2,12 +2,10 @@ const SystemSettings = require("../models/systemSettingsModel");
 const Company = require("../models/companyModel");
 const ProductType = require("../models/productTypeModel");
 const ExpenseCategory = require("../models/expenseCategoryModel");
-const ManagerialStock = require("../models/managerialStockModel");
 const Transaction = require("../models/transactionModel");
 const GatePass = require("../models/gatePassModel");
 const ProductionBatch = require("../models/productionBatchModel");
 const StockLedger = require("../models/stockLedgerModel");
-const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
 const ExpenseEntry = require("../models/expenseEntryModel");
 const AIChat = require("../models/AIChat");
 const JournalLine = require("../models/journalLineModel");
@@ -16,12 +14,10 @@ const MODEL_MAP = {
   companies: Company,
   productTypes: ProductType,
   expenseCategories: ExpenseCategory,
-  managerialStocks: ManagerialStock,
   transactions: Transaction,
   gatePasses: GatePass,
   productionBatches: ProductionBatch,
   stockLedgers: StockLedger,
-  managerialStockLedgers: ManagerialStockLedger,
   expenseEntries: ExpenseEntry,
   journalLines: JournalLine,
   aiChats: AIChat,

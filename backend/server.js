@@ -38,8 +38,6 @@ const transactionRoutes = require("./routes/transactionRoutes");
 app.use("/api/transactions", transactionRoutes);
 const gatePassesRoutes = require("./routes/gatePassesRoutes");
 app.use("/api/gatepasses", gatePassesRoutes);
-const managerialStockRoutes = require("./routes/managerialStockRoutes");
-app.use("/api/managerial-stock", managerialStockRoutes);
 const aiRoutes = require("./routes/aiRoutes");
 app.use("/api/ai", aiRoutes);
 const adminRoutes = require("./routes/adminRoutes");

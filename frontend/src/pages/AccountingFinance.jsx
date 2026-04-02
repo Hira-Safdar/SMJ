@@ -3581,7 +3581,7 @@ export default function AccountingFinance() {
               </div>
             </div>
 
-            {false && (
+            {/*
             <div className="rounded-xl border border-gray-200 overflow-x-auto">
               <table className="min-w-[860px] w-full text-sm">
                 <thead className="bg-emerald-50 text-emerald-900">
@@ -4057,7 +4057,7 @@ export default function AccountingFinance() {
                 </tfoot>
               </table>
             </div>
-            )}
+            */}
 
             {submitAttempted && hasValidationErrors && (
               <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2">

@@ -6,8 +6,6 @@ const Company = require("../models/companyModel");
 const Customer = require("../models/customerModel");
 const ProductType = require("../models/productTypeModel");
 const SystemSettings = require("../models/systemSettingsModel");
-const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
-const ManagerialStock = require("../models/managerialStockModel");
 const StockLedger = require("../models/stockLedgerModel");
 
 function escapeRegex(s) {
@@ -54,22 +52,6 @@ async function resolveSaleParty(payload) {
     partyRefId: created._id,
     partyName: created.name,
   };
-}
-
-async function ensureManagerialItem(item) {
-  const name = item.itemName ? String(item.itemName).trim() : "";
-  if (!name) return null;
-  const existing = await ManagerialStock.findOne({
-    name: { $regex: new RegExp(`^${name}$`, "i") },
-  });
-  if (existing) return existing;
-  return await ManagerialStock.create({
-    name,
-    category: item.category || "Other",
-    unit: item.unit || "Nos",
-    condition: item.condition || "Good",
-    description: "",
-  });
 }
 
 /**
@@ -134,28 +116,6 @@ function computeItemAmounts(itemsRaw) {
 
   for (const raw of itemsRaw) {
     const isPaddy = raw.isPaddy === true;
-    const isManagerial =
-      !isPaddy &&
-      (raw.isManagerial === true || (!!raw.itemName && !raw.productTypeId));
-
-    if (isManagerial) {
-      const quantity = Number(raw.quantity || raw.numBags || 0);
-      const rate = Number(raw.rate) || 0;
-      let amount = quantity * rate;
-      amount = +amount.toFixed(2);
-      totalAmount += amount;
-
-      items.push({
-        managerialItemId: raw.managerialItemId || null,
-        itemName: raw.itemName ? String(raw.itemName).trim() : "",
-        quantity,
-        isManagerial: true,
-        rate,
-        rateType: "per_unit",
-        amount,
-      });
-      continue;
-    }
 
     const numBags = Number(raw.numBags) || 0;
     const perBagWeightKg = Number(raw.perBagWeightKg) || 0;
@@ -251,16 +211,7 @@ function validatePayload(body) {
   for (let i = 0; i < body.items.length; i++) {
     const it = body.items[i];
     const isPaddy = purchaseKind === "PADDY" && body.type === "PURCHASE";
-    const isManagerial = !isPaddy && (it.isManagerial === true || (!!it.itemName && !it.productTypeId));
-    if (isManagerial) {
-      if (!it.itemName) return `Item ${i + 1}: "itemName" is required.`;
-      if (it.quantity === undefined || it.quantity === null || it.quantity === "") {
-        return `Item ${i + 1}: "quantity" is required.`;
-      }
-      if (it.rate === undefined || it.rate === null || it.rate === "") {
-        return `Item ${i + 1}: "rate" is required.`;
-      }
-    } else if (isPaddy) {
+    if (isPaddy) {
       if (it.netWeightKg === undefined || it.netWeightKg === null || it.netWeightKg === "") {
         return `Item ${i + 1}: "netWeightKg" is required.`;
       }
@@ -349,19 +300,6 @@ exports.createTransaction = async (req, res) => {
       }
     }
 
-    // Ensure managerial master items exist for purchase entries
-    if (payload.type === "PURCHASE") {
-      for (const item of items) {
-        if (purchaseKind === "PADDY") continue;
-        if (!item.isManagerial || item.managerialItemId) continue;
-        // eslint-disable-next-line no-await-in-loop
-        const created = await ensureManagerialItem(item);
-        if (created) {
-          item.managerialItemId = created._id;
-        }
-      }
-    }
-
     // Generate unique invoice number
     const invoiceNo = await generateInvoiceNo(payload.type);
 
@@ -415,28 +353,6 @@ exports.createTransaction = async (req, res) => {
     });
 
     const saved = await doc.save();
-
-    if (payload.type === "PURCHASE") {
-      const managerialOps = items
-        .filter((i) => i.isManagerial && i.itemName)
-        .map((i) => {
-          const name = String(i.itemName || "").trim();
-          return {
-          date: new Date(payload.date),
-          type: "ORDER",
-          itemName: name || "Item",
-          quantity: Number(i.quantity || 0),
-          unit: "Nos",
-          sourceType: "Purchase Order",
-          refNo: saved.invoiceNo || "-",
-          transactionId: saved._id,
-        };
-        })
-        .filter((i) => i.quantity > 0);
-      if (managerialOps.length) {
-        await ManagerialStockLedger.insertMany(managerialOps);
-      }
-    }
 
     if (payload.type === "PURCHASE" && purchaseKind === "PADDY") {
       const settings = await SystemSettings.findOne({}).lean();
@@ -801,24 +717,7 @@ exports.updateTransaction = async (req, res) => {
     const saved = await existing.save();
 
     if (existing.type === "PURCHASE") {
-      await ManagerialStockLedger.deleteMany({ transactionId: existing._id });
       await StockLedger.deleteMany({ transactionId: existing._id });
-      const managerialOps = items
-        .filter((i) => i.isManagerial && i.itemName)
-        .map((i) => ({
-          date: new Date(payload.date),
-          type: "ORDER",
-          itemName: i.itemName,
-          quantity: Number(i.quantity || 0),
-          unit: "Nos",
-          sourceType: "Purchase Order",
-          refNo: existing.invoiceNo || "-",
-          transactionId: existing._id,
-        }))
-        .filter((i) => i.quantity > 0);
-      if (managerialOps.length) {
-        await ManagerialStockLedger.insertMany(managerialOps);
-      }
       if (purchaseKind === "PADDY") {
         const settings = await SystemSettings.findOne({}).lean();
         const ownBrand =
@@ -899,7 +798,6 @@ exports.deleteTransaction = async (req, res) => {
         .json({ success: false, message: "Transaction not found" });
     }
 
-    await ManagerialStockLedger.deleteMany({ transactionId: deleted._id });
     await StockLedger.deleteMany({ transactionId: deleted._id });
     return res.json({ success: true, message: "Transaction deleted." });
   } catch (err) {

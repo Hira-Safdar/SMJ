@@ -5,7 +5,6 @@ const ProductionBatch = require("../models/productionBatchModel");
 const Transaction = require("../models/transactionModel");
 const GatePass = require("../models/gatePassModel");
 const SystemSettings = require("../models/systemSettingsModel");
-const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
 const StockLedger = require("../models/stockLedgerModel");
 
 const paidAmount = (t) => {
@@ -206,7 +205,7 @@ const getDashboardStats = async (req, res) => {
     );
     const recentActivities = activityRows.slice(0, RECENT_LIMIT);
 
-    const [completedBatches, salesAll, purchasesAll, managerialLedger] =
+    const [completedBatches, salesAll, purchasesAll] =
       await Promise.all([
         ProductionBatch.find({ status: "COMPLETED" })
           .select("outputs")
@@ -216,9 +215,6 @@ const getDashboardStats = async (req, res) => {
           .lean(),
         Transaction.find({ type: "PURCHASE" })
           .select("items")
-          .lean(),
-        ManagerialStockLedger.find({})
-          .select("type quantity itemName category")
           .lean(),
       ]);
 
@@ -312,25 +308,7 @@ const getDashboardStats = async (req, res) => {
       if (!net) return sum;
       return sum + (l.type === "OUT" ? -net : net);
     }, 0);
-    const managerialStockQty = managerialLedger.reduce((sum, l) => {
-      const qty = Number(l.quantity || 0);
-      if (!qty) return sum;
-      return sum + (l.type === "OUT" ? -qty : qty);
-    }, 0);
     const productionBreakdown = Array.from(productionByProductMap.entries())
-      .map(([name, value]) => ({ name, value: Math.max(0, value) }))
-      .filter((row) => row.value > 0)
-      .sort((a, b) => b.value - a.value);
-
-    const managerialMap = new Map();
-    managerialLedger.forEach((l) => {
-      const name = l.itemName || l.category || "Item";
-      const qty = Number(l.quantity || 0);
-      if (!qty) return;
-      const delta = l.type === "OUT" ? -qty : qty;
-      managerialMap.set(name, (managerialMap.get(name) || 0) + delta);
-    });
-    const managerialBreakdown = Array.from(managerialMap.entries())
       .map(([name, value]) => ({ name, value: Math.max(0, value) }))
       .filter((row) => row.value > 0)
       .sort((a, b) => b.value - a.value);
@@ -359,12 +337,10 @@ const getDashboardStats = async (req, res) => {
         recentActivities,
         stockSummary: {
           productionKg: Math.max(0, Number(productionStockKg.toFixed(3))),
-          managerialQty: Math.max(0, Number(managerialStockQty.toFixed(3))),
           paddyKg: Math.max(0, Number(paddyKg.toFixed(3))),
         },
         stockSummaryBreakdown: {
           production: productionBreakdown,
-          managerial: managerialBreakdown,
         },
       },
     });

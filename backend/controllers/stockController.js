@@ -4,7 +4,6 @@ const Transaction = require("../models/transactionModel");
 const Company = require("../models/companyModel");
 const ProductType = require("../models/productTypeModel");
 const StockLedger = require("../models/stockLedgerModel");
-const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
 const SystemSettings = require("../models/systemSettingsModel");
 
 function makeKey(companyId, companyName, productTypeId, productTypeName) {
@@ -204,7 +203,7 @@ exports.getCurrentStock = async (req, res) => {
       const tDateTime = t.updatedAt || t.createdAt;
 
       for (const it of items) {
-        if (it.isManagerial || !it.productTypeId) continue;
+        if (!it.productTypeId) continue;
         const productTypeId = it.productTypeId?.toString();
         const productTypeName = it.productTypeName || "";
         const brandName = getBrandName(productTypeId, "");
@@ -331,7 +330,6 @@ exports.clearLedgers = async (req, res) => {
     if (!ok) return;
 
     await StockLedger.deleteMany({});
-    await ManagerialStockLedger.deleteMany({});
     await ProductionBatch.deleteMany({});
     await Transaction.deleteMany({});
     return res.json({

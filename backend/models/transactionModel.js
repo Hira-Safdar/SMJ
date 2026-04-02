@@ -23,23 +23,6 @@ const TransactionItemSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
-    managerialItemId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ManagerialStock",
-      default: null,
-    },
-    itemName: {
-      type: String,
-      trim: true,
-    },
-    quantity: {
-      type: Number,
-      min: 0,
-    },
-    isManagerial: {
-      type: Boolean,
-      default: false,
-    },
     isPaddy: {
       type: Boolean,
       default: false,

@@ -16,8 +16,6 @@ export default function ConfirmDialog({
   variant = "danger", // "danger" | "warning" | "info"
   loading = false,
 }) {
-  if (!open) return null;
-
   const variantStyles = {
     danger: "bg-red-500 hover:bg-red-600 focus:ring-red-500/50",
     warning: "bg-amber-500 hover:bg-amber-600 focus:ring-amber-500/50",
@@ -52,6 +50,8 @@ export default function ConfirmDialog({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, loading, onClose, onConfirm]);
+
+  if (!open) return null;
 
   return (
     <div

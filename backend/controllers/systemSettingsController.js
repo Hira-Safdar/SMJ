@@ -11,8 +11,6 @@ const ProductionBatch = require("../models/productionBatchModel");
 const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const Transaction = require("../models/transactionModel");
-const ManagerialStock = require("../models/managerialStockModel");
-const ManagerialStockLedger = require("../models/managerialStockLedgerModel");
 const ExpenseEntry = require("../models/expenseEntryModel");
 const AIChat = require("../models/AIChat");
 const SystemAction = require("../models/systemActionModel");
@@ -24,7 +22,6 @@ const COLLECTIONS = [
   { key: "companies", model: Company },
   { key: "productTypes", model: ProductType },
   { key: "expenseCategories", model: ExpenseCategory },
-  { key: "managerialStocks", model: ManagerialStock },
   // Accounting
   { key: "accounts", model: Account },
   { key: "journalEntries", model: JournalEntry },
@@ -33,7 +30,6 @@ const COLLECTIONS = [
   { key: "gatePasses", model: GatePass },
   { key: "productionBatches", model: ProductionBatch },
   { key: "stockLedgers", model: StockLedger },
-  { key: "managerialStockLedgers", model: ManagerialStockLedger },
   { key: "expenseEntries", model: ExpenseEntry },
   { key: "aiChats", model: AIChat },
   { key: "systemActions", model: SystemAction },
@@ -78,8 +74,6 @@ exports.saveSettings = async (req, res) => {
       payload.additionalStockSettingsEnabled !== undefined ||
       payload.stockStatusExtremeLowKg !== undefined ||
       payload.stockStatusLowKg !== undefined ||
-      payload.managerialStockStatusExtremeLowQty !== undefined ||
-      payload.managerialStockStatusLowQty !== undefined ||
       newAdminPin !== null;
     if (needsPin) {
       const settings = await SystemSettings.findOne({}).select("adminPin").lean();
