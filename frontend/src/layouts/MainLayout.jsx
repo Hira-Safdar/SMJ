@@ -2,20 +2,43 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
+import { Building2, Mail, ShieldCheck } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../services/api";
 import Pin4Input from "../components/Pin4Input";
 
 export default function MainLayout({ children }) {
+  const OTP_RESEND_SECONDS = 45;
   const [isOpen, setIsOpen] = useState(false);
   const toggleSidebar = () => setIsOpen((prev) => !prev);
   const location = useLocation();
   const navigate = useNavigate();
   const mainRef = useRef(null);
-  const [settings, setSettings] = useState({ loginPassword: "", adminPin: "", email: "", companyName: "", shortName: "" });
+  const [settings, setSettings] = useState({
+    loginPassword: "",
+    adminPin: "",
+    email: "",
+    companyName: "",
+    shortName: "",
+    address: "",
+    phone: "",
+    logoUrl: "",
+  });
   const [authLocked, setAuthLocked] = useState(false);
   const [loginPin, setLoginPin] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [forgotDialog, setForgotDialog] = useState({
+    open: false,
+    channel: "email",
+    otp: "",
+    newPin: "",
+    confirmPin: "",
+    expiresIn: 0,
+    sending: false,
+    resetting: false,
+    error: "",
+  });
+  const [forgotResendIn, setForgotResendIn] = useState(0);
   const [draftPrompt, setDraftPrompt] = useState({
     open: false,
     storageKey: "",
@@ -140,6 +163,13 @@ export default function MainLayout({ children }) {
     }
   };
 
+  const maskEmail = (email) => {
+    if (!email || !email.includes("@")) return "***@***.***";
+    const [user, domain] = String(email).split("@");
+    const maskedUser = user.length <= 2 ? `${user[0] || "*"}***` : `${user[0]}***${user[user.length - 1]}`;
+    return `${maskedUser}@${domain}`;
+  };
+
   useEffect(() => {
     const loggedIn = localStorage.getItem("smj_logged_in") === "true";
     setAuthLocked(!loggedIn);
@@ -200,6 +230,7 @@ export default function MainLayout({ children }) {
       }
       if (e.key === "Escape") {
         window.dispatchEvent(new Event("smj-esc"));
+        if (forgotDialog.open) resetForgotDialog();
       }
     };
     window.addEventListener("smj-logout", onLogout);
@@ -210,7 +241,7 @@ export default function MainLayout({ children }) {
       window.removeEventListener("smj-settings-updated", onSettingsUpdate);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [navigate]);
+  }, [navigate, forgotDialog.open]);
 
   const handleLogin = (pinOverride) => {
     const expectedPin = String(settings.loginPassword || settings.adminPin || "0000")
@@ -234,6 +265,47 @@ export default function MainLayout({ children }) {
       setLoginError("PIN is incorrect");
       toast.error("Invalid PIN");
     }
+  };
+
+  const canSendEmailOtp = !!String(settings.email || "").trim();
+  useEffect(() => {
+    if (!forgotResendIn) return undefined;
+    const timer = window.setInterval(() => {
+      setForgotResendIn((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [forgotResendIn]);
+
+  useEffect(() => {
+    if (!forgotDialog.expiresIn) return undefined;
+    const timer = window.setInterval(() => {
+      setForgotDialog((prev) => ({
+        ...prev,
+        expiresIn: prev.expiresIn > 0 ? prev.expiresIn - 1 : 0,
+      }));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [forgotDialog.expiresIn]);
+
+  const resetForgotDialog = () => {
+    setForgotDialog({
+      open: false,
+      channel: "email",
+      otp: "",
+      newPin: "",
+      confirmPin: "",
+      expiresIn: 0,
+      sending: false,
+      resetting: false,
+      error: "",
+    });
+    setForgotResendIn(0);
+  };
+
+  const formatCountdown = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   };
 
   // ----------------- SWIPE FOR MOBILE -----------------
@@ -384,13 +456,31 @@ export default function MainLayout({ children }) {
       </div>
 
       {authLocked && (
-        <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5">
-            <h3 className="text-lg font-semibold text-gray-900">Login required</h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Enter your 4-digit PIN to continue.
-            </p>
-            <div className="mt-4 space-y-3">
+        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
+            <div className="border-b border-gray-100 px-5 py-5">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 overflow-hidden">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="SMJ logo" className="h-9 w-9 object-contain" />
+                  ) : (
+                    <Building2 size={20} />
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-emerald-700">Login</div>
+                  <h3 className="mt-1 text-xl font-semibold text-gray-900">
+                    {settings.companyName || settings.shortName || "SMJ"}
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Enter your 4-digit PIN to continue to the workspace.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5">
+              <div className="space-y-3">
               <Pin4Input
                 value={loginPin}
                 onChange={(v) => {
@@ -404,16 +494,221 @@ export default function MainLayout({ children }) {
                 <div className="text-xs text-red-600 text-center">{loginError}</div>
               )}
               {!settings.loginPassword && (
-                <p className="text-xs text-amber-600">
+                <p className="text-xs text-amber-600 text-center">
                   No login PIN set. Default PIN: 0000.
                 </p>
               )}
+                <div className="grid grid-cols-[1fr_auto] gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleLogin()}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-700"
+                  >
+                    <ShieldCheck size={16} />
+                    Enter Workspace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForgotDialog({
+                        open: true,
+                        channel: "email",
+                        otp: "",
+                        newPin: "",
+                        confirmPin: "",
+                        expiresIn: 0,
+                        sending: false,
+                        resetting: false,
+                        error: "",
+                      })
+                    }
+                    className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
+                  >
+                    Forgot PIN
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {forgotDialog.open && (
+        <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-700">Forgot PIN</div>
+                <h3 className="mt-1 text-lg font-semibold text-gray-900">Reset login PIN</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  We will send a code to your saved email, then you can set a new 4-digit PIN.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
+                <Mail size={14} />
+                Email
+              </div>
+              <div className="mt-1 text-sm text-gray-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+            </div>
+
+            {forgotDialog.expiresIn > 0 && (
+              <div className="mt-3 text-xs text-gray-500">
+                Code expires in <span className="font-medium text-gray-700">{formatCountdown(forgotDialog.expiresIn)}</span>
+              </div>
+            )}
+
+            <div className="mt-4">
+              <Pin4Input
+                value={forgotDialog.otp}
+                onChange={(v) =>
+                  setForgotDialog((prev) => ({
+                    ...prev,
+                    otp: v.slice(0, 4),
+                    error: "",
+                  }))
+                }
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength="4"
+                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                placeholder="New PIN"
+                value={forgotDialog.newPin}
+                onChange={(e) =>
+                  setForgotDialog((prev) => ({
+                    ...prev,
+                    newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                    error: "",
+                  }))
+                }
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength="4"
+                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                placeholder="Confirm PIN"
+                value={forgotDialog.confirmPin}
+                onChange={(e) =>
+                  setForgotDialog((prev) => ({
+                    ...prev,
+                    confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                    error: "",
+                  }))
+                }
+              />
+            </div>
+
+            {forgotDialog.error && (
+              <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {forgotDialog.error}
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => handleLogin()}
-                className="w-full bg-emerald-600 text-white py-2 rounded hover:bg-emerald-700"
+                onClick={resetForgotDialog}
+                className="rounded-2xl border border-gray-300 px-4 py-2.5 text-sm text-gray-700"
               >
-                Enter
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setForgotDialog((prev) => ({ ...prev, sending: true, error: "" }));
+                  try {
+                    const res = await api.post("/settings/otp/send");
+                    if (res.data?.success) {
+                      toast.success("OTP sent to email");
+                      setForgotResendIn(OTP_RESEND_SECONDS);
+                      const expiresAt = new Date(res.data?.data?.expiresAt || Date.now() + 5 * 60 * 1000).getTime();
+                      const expiresIn = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+                      setForgotDialog((prev) => ({ ...prev, sending: false, expiresIn }));
+                    } else {
+                      setForgotDialog((prev) => ({ ...prev, sending: false, error: res.data?.message || "Failed to send OTP" }));
+                    }
+                  } catch (err) {
+                    setForgotDialog((prev) => ({
+                      ...prev,
+                      sending: false,
+                      error: err.response?.data?.message || "Failed to send OTP",
+                    }));
+                  }
+                }}
+                disabled={
+                  forgotDialog.sending ||
+                  forgotResendIn > 0 ||
+                  !canSendEmailOtp
+                }
+                className="rounded-2xl border border-emerald-200 px-4 py-2.5 text-sm font-medium text-emerald-700 disabled:opacity-60"
+              >
+                {forgotDialog.sending
+                  ? "Sending..."
+                  : forgotResendIn > 0
+                  ? `Resend in ${formatCountdown(forgotResendIn)}`
+                  : "Send OTP"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (forgotDialog.otp.length !== 4) {
+                    setForgotDialog((prev) => ({ ...prev, error: "Enter 4-digit OTP" }));
+                    return;
+                  }
+                  if (forgotDialog.newPin.length !== 4) {
+                    setForgotDialog((prev) => ({ ...prev, error: "Enter a new 4-digit PIN" }));
+                    return;
+                  }
+                  if (forgotDialog.newPin !== forgotDialog.confirmPin) {
+                    setForgotDialog((prev) => ({ ...prev, error: "PIN confirmation does not match" }));
+                    return;
+                  }
+                  setForgotDialog((prev) => ({ ...prev, resetting: true, error: "" }));
+                  try {
+                    const res = await api.post("/settings/otp/reset-pin", {
+                      otp: forgotDialog.otp,
+                      newPin: forgotDialog.newPin,
+                    });
+                    if (res.data?.success) {
+                      setSettings((prev) => ({
+                        ...prev,
+                        adminPin: forgotDialog.newPin,
+                        loginPassword: forgotDialog.newPin,
+                      }));
+                      localStorage.setItem("smj_logged_in", "true");
+                      setAuthLocked(false);
+                      setLoginPin("");
+                      setLoginError("");
+                      resetForgotDialog();
+                      window.dispatchEvent(new Event("smj-settings-updated"));
+                      toast.success("PIN reset successful");
+                    } else {
+                      setForgotDialog((prev) => ({
+                        ...prev,
+                        resetting: false,
+                        error: res.data?.message || "PIN reset failed",
+                      }));
+                    }
+                  } catch (err) {
+                    setForgotDialog((prev) => ({
+                      ...prev,
+                      resetting: false,
+                      error: err.response?.data?.message || "PIN reset failed",
+                    }));
+                  }
+                }}
+                disabled={forgotDialog.resetting}
+                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {forgotDialog.resetting ? "Resetting..." : "Reset PIN"}
               </button>
             </div>
           </div>

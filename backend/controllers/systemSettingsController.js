@@ -12,17 +12,28 @@ const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const Transaction = require("../models/transactionModel");
 const ExpenseEntry = require("../models/expenseEntryModel");
-const AIChat = require("../models/AIChat");
 const SystemAction = require("../models/systemActionModel");
+const Customer = require("../models/customerModel");
 const Account = require("../models/accountModel");
+const AccountingEntity = require("../models/accountingEntityModel");
+const AccountingParty = require("../models/accountingPartyModel");
+const AccountingProduct = require("../models/accountingProductModel");
+const AccountingFilterTemplate = require("../models/accountingFilterTemplateModel");
+const AccountingGeneratedJournal = require("../models/accountingGeneratedJournalModel");
 const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
 
 const COLLECTIONS = [
   { key: "companies", model: Company },
+  { key: "customers", model: Customer },
   { key: "productTypes", model: ProductType },
   { key: "expenseCategories", model: ExpenseCategory },
   // Accounting
+  { key: "accountingEntities", model: AccountingEntity },
+  { key: "accountingParties", model: AccountingParty },
+  { key: "accountingProducts", model: AccountingProduct },
+  { key: "accountingFilterTemplates", model: AccountingFilterTemplate },
+  { key: "accountingGeneratedJournals", model: AccountingGeneratedJournal },
   { key: "accounts", model: Account },
   { key: "journalEntries", model: JournalEntry },
   { key: "journalLines", model: JournalLine },
@@ -31,9 +42,424 @@ const COLLECTIONS = [
   { key: "productionBatches", model: ProductionBatch },
   { key: "stockLedgers", model: StockLedger },
   { key: "expenseEntries", model: ExpenseEntry },
-  { key: "aiChats", model: AIChat },
   { key: "systemActions", model: SystemAction },
 ];
+
+const BACKUP_VERSION = 3;
+const BACKUP_FOLDER = path.join(__dirname, "../backups");
+const SETTINGS_ARRAY_COUNT_EXCLUSIONS = new Set(["backupHistory"]);
+let backupSchedulerHandle = null;
+let backupSchedulerStartHandle = null;
+let backupSchedulerBusy = false;
+
+const MODULES = [
+  {
+    key: "settings",
+    name: "System Settings",
+    description: "General settings, branding, login, PINs and dropdown options.",
+    collections: ["settings"],
+  },
+  {
+    key: "masters",
+    name: "Master Data",
+    description: "Companies, customers, product types and expense categories.",
+    collections: ["companies", "customers", "productTypes", "expenseCategories"],
+  },
+  {
+    key: "accounting",
+    name: "Accounting",
+    description: "Chart of accounts, vouchers, journals and accounting masters.",
+    collections: [
+      "accountingEntities",
+      "accountingParties",
+      "accountingProducts",
+      "accountingFilterTemplates",
+      "accountingGeneratedJournals",
+      "accounts",
+      "journalEntries",
+      "journalLines",
+    ],
+  },
+  {
+    key: "transactions",
+    name: "Transactions",
+    description: "Purchase and sale invoices with payment details.",
+    collections: ["transactions"],
+  },
+  {
+    key: "gatepasses",
+    name: "Gate Passes",
+    description: "Gate pass IN and OUT movement history.",
+    collections: ["gatePasses"],
+  },
+  {
+    key: "production",
+    name: "Production",
+    description: "Production batches and process outputs.",
+    collections: ["productionBatches"],
+  },
+  {
+    key: "stock",
+    name: "Stock Ledger",
+    description: "Live stock movement and ledger balances.",
+    collections: ["stockLedgers"],
+  },
+  {
+    key: "expenses",
+    name: "Expenses",
+    description: "Expense entries captured across the system.",
+    collections: ["expenseEntries"],
+  },
+  {
+    key: "intelligence",
+    name: "Audit Logs",
+    description: "System action history and audit activity.",
+    collections: ["systemActions"],
+  },
+];
+
+const cleanupFile = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (_) {
+    // Best-effort cleanup for uploaded restore files.
+  }
+};
+
+const ensureBackupFolder = () => {
+  if (!fs.existsSync(BACKUP_FOLDER)) {
+    fs.mkdirSync(BACKUP_FOLDER, { recursive: true });
+  }
+};
+
+const countSettingsEntries = (settings) => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return 0;
+  let total = 1;
+  const uniqueDropdownValues = new Set();
+  Object.entries(settings).forEach(([key, value]) => {
+    if (SETTINGS_ARRAY_COUNT_EXCLUSIONS.has(key)) return;
+    if (!Array.isArray(value)) return;
+    value.forEach((item) => {
+      const normalized = String(item || "").trim().toLowerCase();
+      if (!normalized) return;
+      uniqueDropdownValues.add(normalized);
+    });
+  });
+  return total + uniqueDropdownValues.size;
+};
+
+const countPayloadRecords = (payload, collectionKeys = []) => {
+  let total = 0;
+  const includeSettings = !collectionKeys.length || collectionKeys.includes("settings");
+  if (includeSettings) total += countSettingsEntries(payload.settings);
+  const targetKeys = collectionKeys.length
+    ? collectionKeys.filter((key) => key !== "settings")
+    : COLLECTIONS.map((c) => c.key);
+  targetKeys.forEach((key) => {
+    total += Array.isArray(payload[key]) ? payload[key].length : 0;
+  });
+  return total;
+};
+
+const getNowInTimezoneParts = (timezone = "Asia/Karachi") => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const map = Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
+  return {
+    dateKey: `${map.year}-${map.month}-${map.day}`,
+    timeKey: `${map.hour}:${map.minute}`,
+  };
+};
+
+const getDateKeyInTimezone = (date, timezone = "Asia/Karachi") =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+
+const writeBackupSnapshotToDisk = ({ payload, fileName }) => {
+  ensureBackupFolder();
+  const targetPath = path.join(BACKUP_FOLDER, fileName);
+  fs.writeFileSync(targetPath, JSON.stringify(payload, null, 2), "utf8");
+  return targetPath;
+};
+
+const validateBackupPayload = (data) => {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Invalid backup file.");
+  }
+
+  if (data.settings != null && (typeof data.settings !== "object" || Array.isArray(data.settings))) {
+    throw new Error("Invalid settings payload in backup.");
+  }
+
+  for (const c of COLLECTIONS) {
+    const value = data[c.key];
+    if (value != null && !Array.isArray(value)) {
+      throw new Error(`Invalid ${c.key} payload in backup.`);
+    }
+  }
+};
+
+const getSingletonSettings = async () =>
+  (await SystemSettings.find({}).sort({ createdAt: 1 }).limit(1).lean().then((rows) => rows[0] || null)) || null;
+
+const getCollectionByKey = (key) => COLLECTIONS.find((c) => c.key === key) || null;
+
+const getModuleByKey = (key) => MODULES.find((m) => m.key === key) || null;
+
+const dropSettingsDropdownArrays = (settings) => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return settings;
+  const clone = { ...settings };
+  Object.entries(clone).forEach(([key, value]) => {
+    if (SETTINGS_ARRAY_COUNT_EXCLUSIONS.has(key)) return;
+    if (Array.isArray(value)) clone[key] = [];
+  });
+  return clone;
+};
+
+const buildBackupPayload = async ({ moduleKey = "", includeMeta = true, includeDropdowns = true } = {}) => {
+  const now = new Date();
+  const selectedModule = moduleKey ? getModuleByKey(moduleKey) : null;
+  if (moduleKey && !selectedModule) {
+    const err = new Error("Invalid backup module.");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const targetCollectionKeys = selectedModule
+    ? selectedModule.collections.filter((key) => key !== "settings")
+    : COLLECTIONS.map((c) => c.key);
+
+  const payload = {
+    backupVersion: BACKUP_VERSION,
+    exportedAt: now,
+    scope: selectedModule ? "module" : "full",
+    moduleKey: selectedModule?.key || "",
+    moduleName: selectedModule?.name || "",
+  };
+
+  if (!selectedModule || selectedModule.collections.includes("settings")) {
+    const settings = await getSingletonSettings();
+    payload.settings = includeDropdowns ? settings : dropSettingsDropdownArrays(settings);
+  }
+
+  payload.includeDropdowns = !!includeDropdowns;
+
+  for (const collectionKey of targetCollectionKeys) {
+    const collection = getCollectionByKey(collectionKey);
+    if (!collection) continue;
+    try {
+      payload[collection.key] = await collection.model.find({}).lean();
+    } catch (_) {
+      payload[collection.key] = [];
+    }
+  }
+
+  if (includeMeta) {
+    payload.meta = {
+      generatedAt: now,
+      modules: MODULES.map((m) => ({
+        key: m.key,
+        name: m.name,
+        collections: m.collections,
+      })),
+    };
+  }
+
+  return payload;
+};
+
+const restoreCollections = async (data, collectionKeys) => {
+  if (collectionKeys.includes("settings")) {
+    await SystemSettings.deleteMany({});
+    if (data.settings) {
+      await SystemSettings.create(data.settings);
+    }
+  }
+
+  const ordered = collectionKeys.filter((key) => key !== "settings");
+
+  for (const key of [...ordered].reverse()) {
+    const collection = getCollectionByKey(key);
+    if (!collection) continue;
+    try {
+      await collection.model.deleteMany({});
+    } catch (e) {
+      console.error(`restore clear ${collection.key} error:`, e);
+    }
+  }
+
+  for (const key of ordered) {
+    const collection = getCollectionByKey(key);
+    if (!collection) continue;
+    const rows = Array.isArray(data[collection.key]) ? data[collection.key] : [];
+    if (!rows.length) continue;
+    try {
+      await collection.model.insertMany(rows, { ordered: false });
+    } catch (e) {
+      console.error(`restore insert ${collection.key} error:`, e);
+    }
+  }
+
+  return collectionKeys.map((key) => ({
+    key,
+    count: key === "settings" ? countSettingsEntries(data.settings) : Array.isArray(data[key]) ? data[key].length : 0,
+  }));
+};
+
+const resolveModuleCollectionStats = async (module) => {
+  let totalRecords = 0;
+  let latestUpdatedAt = null;
+  const collections = [];
+
+  for (const key of module.collections) {
+    if (key === "settings") {
+      const settings = await getSingletonSettings();
+      const count = countSettingsEntries(settings);
+      totalRecords += count;
+      const updatedAt = settings?.updatedAt ? new Date(settings.updatedAt) : null;
+      if (updatedAt && (!latestUpdatedAt || updatedAt > latestUpdatedAt)) latestUpdatedAt = updatedAt;
+      collections.push({ key: "settings", count, updatedAt });
+      continue;
+    }
+
+    const collection = getCollectionByKey(key);
+    if (!collection) continue;
+    const count = await collection.model.countDocuments({});
+    totalRecords += count;
+    const latestRow = await collection.model.findOne({}).sort({ updatedAt: -1, createdAt: -1 }).select("updatedAt createdAt").lean();
+    const updatedAt = latestRow?.updatedAt || latestRow?.createdAt || null;
+    const updatedAtDate = updatedAt ? new Date(updatedAt) : null;
+    if (updatedAtDate && (!latestUpdatedAt || updatedAtDate > latestUpdatedAt)) latestUpdatedAt = updatedAtDate;
+    collections.push({ key: collection.key, count, updatedAt: updatedAtDate });
+  }
+
+  return {
+    key: module.key,
+    name: module.name,
+    description: module.description,
+    collections: collections.map((c) => ({
+      key: c.key,
+      count: c.count,
+      updatedAt: c.updatedAt,
+    })),
+    totalRecords,
+    latestUpdatedAt,
+  };
+};
+
+const appendBackupHistory = async ({
+  action,
+  scope = "module",
+  moduleKey = "",
+  moduleName = "",
+  fileName = "",
+  recordCount = 0,
+  status = "SUCCESS",
+}) => {
+  const settings = await SystemSettings.findOne({}).sort({ createdAt: 1 });
+  const target = settings || (await SystemSettings.create({}));
+  const history = Array.isArray(target.backupHistory) ? target.backupHistory.slice(0, 24) : [];
+  history.unshift({
+    action,
+    scope,
+    moduleKey,
+    moduleName,
+    fileName,
+    recordCount,
+    status,
+    createdAt: new Date(),
+  });
+  target.backupHistory = history.slice(0, 25);
+  await target.save();
+};
+
+const runScheduledBackupIfDue = async () => {
+  if (backupSchedulerBusy) return;
+  backupSchedulerBusy = true;
+  try {
+    const settings = await SystemSettings.findOne({}).sort({ createdAt: 1 });
+    if (!settings?.backupAutomationEnabled) return;
+
+    const scheduleTime = String(settings.backupScheduleTime || "").trim() || "02:00";
+    const timezone = String(settings.timezone || "Asia/Karachi").trim() || "Asia/Karachi";
+    const nowParts = getNowInTimezoneParts(timezone);
+    if (nowParts.timeKey !== scheduleTime) return;
+
+    const lastRun = settings.backupScheduleLastRunAt ? new Date(settings.backupScheduleLastRunAt) : null;
+    if (lastRun) {
+      const lastRunKey = getDateKeyInTimezone(lastRun, timezone);
+      if (lastRunKey === nowParts.dateKey) return;
+    }
+
+    const claimFilter = { _id: settings._id };
+    if (settings.backupScheduleLastRunAt) {
+      claimFilter.backupScheduleLastRunAt = settings.backupScheduleLastRunAt;
+    } else {
+      claimFilter.backupScheduleLastRunAt = null;
+    }
+
+    const claimedAt = new Date();
+    const claim = await SystemSettings.updateOne(claimFilter, {
+      $set: { backupScheduleLastRunAt: claimedAt },
+    });
+    if (!claim?.modifiedCount) return;
+
+    const payload = await buildBackupPayload();
+    const fileName = `smj-scheduled-backup-${nowParts.dateKey.replace(/-/g, "")}-${scheduleTime.replace(":", "")}.json`;
+    writeBackupSnapshotToDisk({ payload, fileName });
+    const recordCount = countPayloadRecords(payload);
+
+    await SystemSettings.updateOne(
+      { _id: settings._id },
+      { $set: { backupLastBackupAt: new Date() } }
+    );
+
+    await appendBackupHistory({
+      action: "BACKUP",
+      scope: "full",
+      moduleName: "Scheduled Daily Backup",
+      fileName,
+      recordCount,
+      status: "SUCCESS",
+    });
+  } catch (err) {
+    console.error("scheduled backup error:", err);
+    await appendBackupHistory({
+      action: "BACKUP",
+      scope: "full",
+      moduleName: "Scheduled Daily Backup",
+      fileName: "",
+      recordCount: 0,
+      status: "FAILED",
+    }).catch(() => {});
+  } finally {
+    backupSchedulerBusy = false;
+  }
+};
+
+exports.initBackupScheduler = () => {
+  if (backupSchedulerHandle || backupSchedulerStartHandle) return;
+  ensureBackupFolder();
+  const delayMs = Math.max(1000, 60000 - (Date.now() % 60000));
+  backupSchedulerStartHandle = setTimeout(() => {
+    backupSchedulerStartHandle = null;
+    runScheduledBackupIfDue().catch(() => {});
+    backupSchedulerHandle = setInterval(() => {
+      runScheduledBackupIfDue().catch(() => {});
+    }, 60 * 1000);
+  }, delayMs);
+};
 
 /**
  * Get settings (single document). If none exists, return defaults via an upsert fallback.
@@ -141,29 +567,28 @@ exports.uploadLogo = async (req, res) => {
  */
 exports.exportBackup = async (req, res) => {
   try {
-    const payload = {
-      backupVersion: 2,
-      exportedAt: new Date(),
-      // Keep singleton behavior (oldest settings doc) if duplicates exist.
-      settings:
-        (await SystemSettings.find({})
-          .sort({ createdAt: 1 })
-          .limit(1)
-          .lean()
-          .then((rows) => rows[0] || null)) || null,
-    };
-
-    for (const c of COLLECTIONS) {
-      try {
-        payload[c.key] = await c.model.find({}).lean();
-      } catch (_) {
-        payload[c.key] = [];
-      }
-    }
+    const includeDropdowns = String(req.query?.includeDropdowns ?? "true").toLowerCase() !== "false";
+    const payload = await buildBackupPayload({ includeDropdowns });
+    const suffix = includeDropdowns ? "with-dropdowns" : "records-only";
+    const fileName = `smj-backup-all-${suffix}-${new Date().toISOString().slice(0, 10)}.json`;
+    const recordCount = countPayloadRecords(payload);
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupLastBackupAt: new Date() } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "BACKUP",
+      scope: "full",
+      moduleName: "Full System",
+      fileName,
+      recordCount,
+      status: "SUCCESS",
+    });
 
     res.setHeader(
       "Content-Disposition",
-      "attachment; filename=smj-backup.json"
+      `attachment; filename=${fileName}`
     );
     res.setHeader("Content-Type", "application/json");
     res.send(JSON.stringify(payload, null, 2));
@@ -172,60 +597,199 @@ exports.exportBackup = async (req, res) => {
   }
 };
 
+exports.getBackupModules = async (_req, res) => {
+  try {
+    const settings = await getSingletonSettings();
+    const modules = [];
+    for (const module of MODULES) {
+      // eslint-disable-next-line no-await-in-loop
+      modules.push(await resolveModuleCollectionStats(module));
+    }
+    res.json({
+      success: true,
+      data: {
+        automationEnabled: !!settings?.backupAutomationEnabled,
+        scheduleTime: settings?.backupScheduleTime || "02:00",
+        lastBackupAt: settings?.backupLastBackupAt || null,
+        lastRestoreAt: settings?.backupLastRestoreAt || null,
+        lastScheduledRunAt: settings?.backupScheduleLastRunAt || null,
+        history: Array.isArray(settings?.backupHistory) ? settings.backupHistory : [],
+        modules,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.clearBackupHistory = async (_req, res) => {
+  try {
+    const updated = await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupHistory: [] } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    res.json({
+      success: true,
+      message: "Backup history cleared successfully.",
+      data: {
+        history: Array.isArray(updated?.backupHistory) ? updated.backupHistory : [],
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || "Failed to clear backup history." });
+  }
+};
+
+exports.exportModuleBackup = async (req, res) => {
+  try {
+    const moduleKey = String(req.params?.moduleKey || "").trim();
+    const module = getModuleByKey(moduleKey);
+    if (!module) {
+      return res.status(404).json({ success: false, message: "Backup module not found." });
+    }
+
+    const includeDropdowns = String(req.query?.includeDropdowns ?? "true").toLowerCase() !== "false";
+    const payload = await buildBackupPayload({ moduleKey, includeDropdowns });
+    const suffix = includeDropdowns ? "with-dropdowns" : "records-only";
+    const fileName = `smj-backup-${module.key}-${suffix}-${new Date().toISOString().slice(0, 10)}.json`;
+    const recordCount = countPayloadRecords(payload, module.collections);
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupLastBackupAt: new Date() } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "BACKUP",
+      scope: "module",
+      moduleKey: module.key,
+      moduleName: module.name,
+      fileName,
+      recordCount,
+      status: "SUCCESS",
+    });
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=${fileName}`
+    );
+    res.setHeader("Content-Type", "application/json");
+    res.send(JSON.stringify(payload, null, 2));
+  } catch (err) {
+    const code = err?.statusCode || 500;
+    res.status(code).json({ success: false, message: err.message });
+  }
+};
+
 /**
  * Restore backup from JSON file
  */
 exports.restoreBackup = async (req, res) => {
+  let filePath = "";
   try {
     if (!req.file)
       return res
         .status(400)
         .json({ success: false, message: "No file uploaded" });
 
-    const filePath = req.file.path;
+    filePath = req.file.path;
     const raw = fs.readFileSync(filePath, "utf8");
     const data = JSON.parse(raw);
+    validateBackupPayload(data);
 
-    // 1) Settings
-    if (data.settings) {
-      await SystemSettings.deleteMany({});
-      await SystemSettings.create(data.settings);
-    }
+    const restoredCollections = await restoreCollections(data, ["settings", ...COLLECTIONS.map((c) => c.key)]);
+    const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupLastRestoreAt: new Date() } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "RESTORE",
+      scope: "full",
+      moduleName: "Full System",
+      fileName: String(req.file?.originalname || req.file?.filename || "restore.json"),
+      recordCount: restoredCount,
+      status: "SUCCESS",
+    });
 
-    // 2) Clear data in reverse dependency order
-    for (const c of [...COLLECTIONS].reverse()) {
-      try {
-        await c.model.deleteMany({});
-      } catch (e) {
-        console.error(`restore clear ${c.key} error:`, e);
-      }
-    }
+    cleanupFile(filePath);
 
-    // 3) Restore data in dependency-safe order
-    for (const c of COLLECTIONS) {
-      const rows = Array.isArray(data[c.key]) ? data[c.key] : [];
-      if (!rows.length) continue;
-      try {
-        await c.model.insertMany(rows, { ordered: false });
-      } catch (e) {
-        console.error(`restore insert ${c.key} error:`, e);
-      }
-    }
-
-    fs.unlinkSync(filePath);
-
-    res.json({ success: true, message: "Backup restored successfully" });
+    res.json({
+      success: true,
+      message: "Backup restored successfully",
+      data: {
+        backupVersion: data.backupVersion || null,
+        restoredCollections,
+      },
+    });
   } catch (err) {
+    cleanupFile(filePath);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-const getMailer = () => {
-  const host = process.env.SMJ_SMTP_HOST;
-  const port = Number(process.env.SMJ_SMTP_PORT || 587);
-  const user = process.env.SMJ_SMTP_USER;
-  const pass = process.env.SMJ_SMTP_PASS;
-  const secure = String(process.env.SMJ_SMTP_SECURE || "false") === "true";
+exports.restoreModuleBackup = async (req, res) => {
+  let filePath = "";
+  try {
+    const moduleKey = String(req.params?.moduleKey || "").trim();
+    const module = getModuleByKey(moduleKey);
+    if (!module) {
+      return res.status(404).json({ success: false, message: "Backup module not found." });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    filePath = req.file.path;
+    const raw = fs.readFileSync(filePath, "utf8");
+    const data = JSON.parse(raw);
+    validateBackupPayload(data);
+
+    const restoredCollections = await restoreCollections(data, module.collections);
+    const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupLastRestoreAt: new Date() } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "RESTORE",
+      scope: "module",
+      moduleKey: module.key,
+      moduleName: module.name,
+      fileName: String(req.file?.originalname || req.file?.filename || `${module.key}.json`),
+      recordCount: restoredCount,
+      status: "SUCCESS",
+    });
+
+    cleanupFile(filePath);
+
+    res.json({
+      success: true,
+      message: `${module.name} restored successfully`,
+      data: {
+        moduleKey: module.key,
+        moduleName: module.name,
+        backupVersion: data.backupVersion || null,
+        restoredCollections,
+      },
+    });
+  } catch (err) {
+    cleanupFile(filePath);
+    const code = err?.statusCode || 500;
+    res.status(code).json({ success: false, message: err.message });
+  }
+};
+
+const getMailer = (settings = null) => {
+  const host = String(process.env.SMJ_SMTP_HOST || settings?.smtpHost || "").trim();
+  const port = Number(process.env.SMJ_SMTP_PORT || settings?.smtpPort || 587);
+  const user = String(process.env.SMJ_SMTP_USER || settings?.smtpUser || "").trim();
+  const pass = String(process.env.SMJ_SMTP_PASS || settings?.smtpPass || "").trim();
+  const secureSource =
+    process.env.SMJ_SMTP_SECURE != null ? process.env.SMJ_SMTP_SECURE : settings?.smtpSecure;
+  const secure = String(secureSource || "false") === "true" || secureSource === true;
   if (!host || !user || !pass) return null;
   return nodemailer.createTransport({
     host,
@@ -235,16 +799,116 @@ const getMailer = () => {
   });
 };
 
+const escapeHtml = (value = "") =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const buildOtpEmail = (settings = {}, otp, expiresAt) => {
+  const companyName = String(settings.companyName || settings.shortName || "SMJ Rice Mill").trim();
+  const address = String(settings.address || "").trim();
+  const supportEmail = String(settings.email || settings.mailFrom || settings.smtpUser || "").trim();
+  const logoUrl = String(settings.logoUrl || "").trim();
+  const expiryTime = new Date(expiresAt).toLocaleString("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const safeCompanyName = escapeHtml(companyName);
+  const safeAddress = escapeHtml(address).replace(/\r?\n/g, "<br />");
+  const safeSupportEmail = escapeHtml(supportEmail);
+  const safeOtp = escapeHtml(otp);
+
+  const text = [
+    companyName,
+    address || null,
+    "",
+    "OTP Verification",
+    `Your verification code is: ${otp}`,
+    "This code will expire in 5 minutes.",
+    `Valid until: ${expiryTime}`,
+    "",
+    "If you did not request this code, you can ignore this email.",
+    supportEmail ? `Support: ${supportEmail}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${safeCompanyName} OTP Verification</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f4f8f4;font-family:Arial,sans-serif;color:#1f2937;">
+    <div style="padding:24px 12px;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d1e7dd;border-radius:20px;overflow:hidden;box-shadow:0 12px 30px rgba(16,24,40,0.08);">
+        <div style="background:linear-gradient(135deg,#065f46,#10b981);padding:28px 24px;color:#ffffff;text-align:center;">
+          ${
+            logoUrl
+              ? `<img src="${escapeHtml(logoUrl)}" alt="${safeCompanyName} logo" style="max-height:72px;max-width:180px;margin:0 auto 14px;display:block;background:#ffffff;padding:8px 12px;border-radius:16px;" />`
+              : ""
+          }
+          <div style="font-size:26px;font-weight:700;letter-spacing:0.4px;">${safeCompanyName}</div>
+          <div style="margin-top:8px;font-size:13px;line-height:1.6;opacity:0.92;">
+            ${safeAddress || "Secure verification message"}
+          </div>
+        </div>
+
+        <div style="padding:28px 24px 12px;">
+          <div style="font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#059669;">OTP Verification</div>
+          <h1 style="margin:10px 0 12px;font-size:24px;line-height:1.3;color:#111827;">Use this code to continue</h1>
+          <p style="margin:0 0 22px;font-size:15px;line-height:1.7;color:#4b5563;">
+            We received a request to verify access for your SMJ account. Enter the one-time password below in the app.
+          </p>
+
+          <div style="margin:0 auto 22px;max-width:260px;border:1px dashed #10b981;border-radius:18px;background:#ecfdf5;padding:18px 16px;text-align:center;">
+            <div style="font-size:13px;color:#047857;text-transform:uppercase;letter-spacing:1px;font-weight:700;">One-Time Password</div>
+            <div style="margin-top:10px;font-size:34px;letter-spacing:10px;font-weight:700;color:#064e3b;">${safeOtp}</div>
+          </div>
+
+          <div style="border-radius:16px;background:#f9fafb;border:1px solid #e5e7eb;padding:16px 18px;font-size:14px;line-height:1.7;color:#374151;">
+            <div><strong>Expiry:</strong> 5 minutes</div>
+            <div><strong>Valid until:</strong> ${escapeHtml(expiryTime)}</div>
+            <div><strong>Requested for:</strong> ${safeSupportEmail || "Registered system email"}</div>
+          </div>
+
+          <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#6b7280;">
+            If you did not request this code, you can safely ignore this email. For help, contact ${
+              safeSupportEmail || "your administrator"
+            }.
+          </p>
+        </div>
+
+        <div style="padding:18px 24px 26px;border-top:1px solid #ecfdf5;background:#f8fffb;color:#6b7280;font-size:12px;line-height:1.8;text-align:center;">
+          <div style="font-weight:700;color:#065f46;">${safeCompanyName}</div>
+          ${safeAddress ? `<div>${safeAddress}</div>` : ""}
+          ${safeSupportEmail ? `<div>${safeSupportEmail}</div>` : ""}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+  return { html, text };
+};
+
 const hashOtp = (otp) =>
   crypto.createHash("sha256").update(String(otp)).digest("hex");
 
 exports.sendEmailOtp = async (req, res) => {
   try {
     const settings = await SystemSettings.findOne({});
-    if (!settings || !settings.email) {
+    if (!settings) {
+      return res.status(400).json({ success: false, message: "System settings not found." });
+    }
+    if (!settings.email) {
       return res.status(400).json({ success: false, message: "Email not set in General Settings." });
     }
-    const transport = getMailer();
+    const transport = getMailer(settings);
     if (!transport) {
       return res.status(400).json({
         success: false,
@@ -254,21 +918,23 @@ exports.sendEmailOtp = async (req, res) => {
 
     const otp = String(Math.floor(1000 + Math.random() * 9000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    settings.otpCodeHash = hashOtp(otp);
-    settings.otpExpiresAt = expiresAt;
-    await settings.save();
-
-    const from = process.env.SMJ_MAIL_FROM || "no-reply@smj.local";
+    const from = String(process.env.SMJ_MAIL_FROM || settings?.mailFrom || settings?.smtpUser || "no-reply@smj.local").trim();
+    const emailContent = buildOtpEmail(settings, otp, expiresAt);
     await transport.sendMail({
       from,
       to: settings.email,
       subject: "SMJ OTP Verification",
-      text: `Your OTP is ${otp}. It expires in 5 minutes.`,
+      text: emailContent.text,
+      html: emailContent.html,
     });
 
-    res.json({ success: true, message: "OTP sent" });
+    settings.otpCodeHash = hashOtp(otp);
+    settings.otpExpiresAt = expiresAt;
+    await settings.save();
+
+    res.json({ success: true, message: "OTP sent to email", data: { expiresAt } });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
 
@@ -293,6 +959,41 @@ exports.verifyEmailOtp = async (req, res) => {
     settings.otpExpiresAt = null;
     await settings.save();
     res.json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.resetPinWithOtp = async (req, res) => {
+  try {
+    const otp = String(req.body?.otp || "").trim();
+    const newPin = String(req.body?.newPin || "").replace(/\D/g, "").slice(0, 4);
+
+    if (otp.length !== 4) {
+      return res.status(400).json({ success: false, message: "Invalid OTP." });
+    }
+    if (newPin.length !== 4) {
+      return res.status(400).json({ success: false, message: "Enter a valid 4-digit PIN." });
+    }
+
+    const settings = await SystemSettings.findOne({});
+    if (!settings || !settings.otpCodeHash || !settings.otpExpiresAt) {
+      return res.status(400).json({ success: false, message: "OTP not requested." });
+    }
+    if (new Date(settings.otpExpiresAt).getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: "OTP expired." });
+    }
+    if (hashOtp(otp) !== settings.otpCodeHash) {
+      return res.status(400).json({ success: false, message: "OTP is incorrect." });
+    }
+
+    settings.adminPin = newPin;
+    settings.loginPassword = newPin;
+    settings.otpCodeHash = "";
+    settings.otpExpiresAt = null;
+    await settings.save();
+
+    res.json({ success: true, message: "PIN reset successfully." });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

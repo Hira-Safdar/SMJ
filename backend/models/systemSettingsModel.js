@@ -1,6 +1,32 @@
 // backend/models/systemSettingsModel.js
 const mongoose = require("mongoose");
 
+const backupHistoryEntrySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["BACKUP", "RESTORE"],
+      required: true,
+    },
+    scope: {
+      type: String,
+      enum: ["full", "module"],
+      default: "module",
+    },
+    moduleKey: { type: String, default: "" },
+    moduleName: { type: String, default: "" },
+    fileName: { type: String, default: "" },
+    recordCount: { type: Number, default: 0, min: 0 },
+    status: {
+      type: String,
+      enum: ["SUCCESS", "FAILED"],
+      default: "SUCCESS",
+    },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const systemSettingsSchema = new mongoose.Schema(
   {
     // General
@@ -9,6 +35,12 @@ const systemSettingsSchema = new mongoose.Schema(
     address: { type: String, default: "" },
     phone: { type: String, default: "" },
     email: { type: String, default: "" },
+    smtpHost: { type: String, default: "" },
+    smtpPort: { type: Number, default: 587, min: 1 },
+    smtpUser: { type: String, default: "" },
+    smtpPass: { type: String, default: "" },
+    smtpSecure: { type: Boolean, default: false },
+    mailFrom: { type: String, default: "" },
     ntn: { type: String, default: "" },
     strn: { type: String, default: "" },
     defaultCurrency: { type: String, default: "PKR" },
@@ -36,6 +68,13 @@ const systemSettingsSchema = new mongoose.Schema(
     purchaseCategoryOptions: { type: [String], default: [] },
     transporterOptions: { type: [String], default: [] },
     brandOptions: { type: [String], default: [] },
+    // Backup center
+    backupAutomationEnabled: { type: Boolean, default: false },
+    backupScheduleTime: { type: String, default: "02:00" },
+    backupLastBackupAt: { type: Date, default: null },
+    backupLastRestoreAt: { type: Date, default: null },
+    backupScheduleLastRunAt: { type: Date, default: null },
+    backupHistory: { type: [backupHistoryEntrySchema], default: [] },
     // Accounting migration marker for idempotent historical journal rebuild
     accountingBackfillVersion: { type: Number, default: 0, min: 0 },
     accountingBackfillAt: { type: Date, default: null },

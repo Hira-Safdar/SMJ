@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
+const { initBackupScheduler } = require("./controllers/systemSettingsController");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -52,6 +53,10 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ MongoDB Error:", err.message));
+
+mongoose.connection.once("open", () => {
+  initBackupScheduler();
+});
 
 // Start server
 const PORT = process.env.PORT || 5000;

@@ -199,6 +199,22 @@ const getDashboardStats = async (req, res) => {
         createdAt: l.date || l.createdAt,
       });
     });
+    (Array.isArray(settings?.backupHistory) ? settings.backupHistory.slice(0, 2) : []).forEach((entry) => {
+      const isRestore = String(entry.action || "").toUpperCase() === "RESTORE";
+      const isFailed = String(entry.status || "").toUpperCase() === "FAILED";
+      const scope = String(entry.scope || "").toLowerCase() === "full" ? "Full System" : entry.moduleName || "Module";
+      activityRows.push({
+        type: isFailed ? "BACKUP_ERROR" : isRestore ? "RESTORE" : "BACKUP",
+        title: isFailed
+          ? `${isRestore ? "Restore" : "Backup"} Failed`
+          : isRestore
+          ? "Backup Restored"
+          : "Backup Completed",
+        meta: `${scope} · ${entry.fileName || "backup.json"} · ${Number(entry.recordCount || 0)} entries`,
+        amount: 0,
+        createdAt: entry.createdAt,
+      });
+    });
 
     activityRows.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

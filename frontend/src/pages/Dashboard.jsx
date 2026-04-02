@@ -1,7 +1,7 @@
 ﻿// src/pages/Dashboard.jsx
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
-import { Truck, Box, Coins, AlertTriangle, Info } from "lucide-react";
+import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -109,6 +109,9 @@ export default function Dashboard() {
     if (type === "GATE_PASS") return <Truck size={16} />;
     if (type === "PAYMENT") return <Coins size={16} />;
     if (type === "PRODUCTION") return <Box size={16} />;
+    if (type === "BACKUP") return <DatabaseBackup size={16} />;
+    if (type === "RESTORE") return <RotateCcw size={16} />;
+    if (type === "BACKUP_ERROR") return <AlertTriangle size={16} />;
     return <Box size={16} />;
   };
 
@@ -116,6 +119,9 @@ export default function Dashboard() {
     if (type === "GATE_PASS") return "teal";
     if (type === "PAYMENT") return "blue";
     if (type === "PRODUCTION") return "amber";
+    if (type === "BACKUP") return "blue";
+    if (type === "RESTORE") return "teal";
+    if (type === "BACKUP_ERROR") return "red";
     return "red";
   };
 
