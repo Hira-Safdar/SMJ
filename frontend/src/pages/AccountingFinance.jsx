@@ -20,6 +20,7 @@ import {
   Printer,
   Filter,
   Download,
+  ChevronDown,
   RefreshCcw,
 } from "lucide-react";
 import api from "../services/api";
@@ -107,6 +108,14 @@ const blankEntry = ({ like } = {}) => {
 
 const n0 = (v) => (v === "" || v == null ? 0 : Number(v || 0) || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
+const normalizeText = (v) => String(v || "").trim().toLowerCase();
+const toTitleCase = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+const normalizeCompanyName = (value) => toTitleCase(String(value || "").trim().replace(/\s+/g, " "));
 const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleDateString("en-US", { month: "long", day: "2-digit" });
@@ -123,6 +132,7 @@ function GroupedProductDropdown({
   preferredBrandKey = "",
   onSelect,
   disabled = false,
+  placeholder = "(Optional)",
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -188,7 +198,7 @@ function GroupedProductDropdown({
             setQ(e.target.value);
             setOpen(true);
           }}
-          placeholder="(Optional)"
+          placeholder={placeholder}
           className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm focus:outline-none ${
             disabled ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
           } placeholder:text-gray-500`}
@@ -296,6 +306,15 @@ export default function AccountingFinance() {
   const [filterAccountId, setFilterAccountId] = useState("");
   const [filterCustomerName, setFilterCustomerName] = useState("");
   const [filterProductId, setFilterProductId] = useState("");
+  const [reportRangeStart, setReportRangeStart] = useState("");
+  const [reportRangeEnd, setReportRangeEnd] = useState("");
+  const [reportFilterCompanyName, setReportFilterCompanyName] = useState("");
+  const [reportFilterBookType, setReportFilterBookType] = useState("ALL");
+  const [reportFilterVoucherNo, setReportFilterVoucherNo] = useState("");
+  const [reportFilterVoucherType, setReportFilterVoucherType] = useState("");
+  const [reportFilterCompanyId, setReportFilterCompanyId] = useState("");
+  const [reportFilterCustomerName, setReportFilterCustomerName] = useState("");
+  const [reportFilterProductId, setReportFilterProductId] = useState("");
   const [vouchers, setVouchers] = useState([]);
 
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: "", voucherNo: "" });
@@ -309,10 +328,21 @@ export default function AccountingFinance() {
   const [journalNameTouched, setJournalNameTouched] = useState(false);
   const [generatedJournalList, setGeneratedJournalList] = useState([]);
   const [activeGeneratedJournalId, setActiveGeneratedJournalId] = useState("");
-  const [journalGenerateRange, setJournalGenerateRange] = useState("month");
+  const [journalGenerateRange, setJournalGenerateRange] = useState("all");
   const [journalGenerateDate, setJournalGenerateDate] = useState("");
   const [journalGenerateStart, setJournalGenerateStart] = useState("");
   const [journalGenerateEnd, setJournalGenerateEnd] = useState("");
+  const [journalFilterCompanyName, setJournalFilterCompanyName] = useState("");
+  const [journalFilterCustomerName, setJournalFilterCustomerName] = useState("");
+  const [journalFilterProductId, setJournalFilterProductId] = useState("");
+  const [journalFilterVoucherType, setJournalFilterVoucherType] = useState("");
+  const [journalPreviewOpen, setJournalPreviewOpen] = useState(false);
+  const [journalPreviewMeta, setJournalPreviewMeta] = useState(null);
+  const [journalPreviewEntries, setJournalPreviewEntries] = useState([]);
+  const [journalInfoDialog, setJournalInfoDialog] = useState({ open: false, message: "" });
+  const [downloadMenu, setDownloadMenu] = useState({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+  const [printSettings, setPrintSettings] = useState({});
+  const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
 
   const [accountDialog, setAccountDialog] = useState({
     open: false,
@@ -374,20 +404,14 @@ export default function AccountingFinance() {
 
   const companyOptions = useMemo(() => {
     const map = new Map();
-    (companies || []).forEach((c) => {
-      if (c?.isActive === false) return;
-      const name = String(c?.name || "").trim();
-      if (!name) return;
-      map.set(name.toLowerCase(), { id: String(c._id), name });
-    });
     (gatepassCompanies || []).forEach((name) => {
-      const clean = String(name || "").trim();
+      const clean = normalizeCompanyName(name);
       if (!clean) return;
-      const key = clean.toLowerCase();
+      const key = normalizeText(clean);
       if (!map.has(key)) map.set(key, { id: clean, name: clean });
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [companies, gatepassCompanies]);
+  }, [gatepassCompanies]);
   const accountOptions = useMemo(() => {
     const seen = new Set();
     return (accounts || [])
@@ -435,6 +459,141 @@ export default function AccountingFinance() {
     return { buckets, groups };
   }, [productTypes]);
 
+  const productLabelById = useMemo(() => {
+    const map = new Map();
+    (productTypes || []).forEach((p) => {
+      const label = [String(p.brand || "").trim(), String(p.name || "").trim()].filter(Boolean).join(" - ");
+      map.set(String(p._id), label);
+    });
+    return map;
+  }, [productTypes]);
+
+  const filterProductLabel = productLabelById.get(String(filterProductId || "")) || "";
+  const reportFilterProductLabel = productLabelById.get(String(reportFilterProductId || "")) || "";
+  const journalFilterProductLabel = productLabelById.get(String(journalFilterProductId || "")) || "";
+  const isJournalReportFilterApplied = useMemo(() => {
+    const hasCompany = String(reportFilterCompanyName || "").trim().length > 0;
+    const hasCustomer = String(reportFilterCustomerName || "").trim().length > 0;
+    const hasProduct = String(reportFilterProductId || "").trim().length > 0;
+    const hasVoucherType = String(reportFilterVoucherType || "").trim().length > 0;
+    const hasVoucherNo = String(reportFilterVoucherNo || "").trim().length > 0;
+    const hasDateRange = String(reportRangeStart || "").trim().length > 0 || String(reportRangeEnd || "").trim().length > 0;
+    return hasCompany || hasCustomer || hasProduct || hasVoucherType || hasVoucherNo || hasDateRange;
+  }, [
+    reportFilterCompanyName,
+    reportFilterCustomerName,
+    reportFilterProductId,
+    reportFilterVoucherType,
+    reportFilterVoucherNo,
+    reportRangeStart,
+    reportRangeEnd,
+  ]);
+
+  const openJournalFilterModal = () => {
+    setJournalFilterCompanyName(reportFilterCompanyName || "");
+    setJournalFilterCustomerName(reportFilterCustomerName || "");
+    setJournalFilterProductId(reportFilterProductId || "");
+    setJournalFilterVoucherType(reportFilterVoucherType || "");
+    setJournalFilterOpen(true);
+  };
+
+  const clearJournalFilters = () => {
+    setJournalFilterCompanyName("");
+    setJournalFilterCustomerName("");
+    setJournalFilterProductId("");
+    setJournalFilterVoucherType("");
+    setJournalGenerateRange("all");
+    setJournalGenerateDate("");
+    setJournalGenerateStart("");
+    setJournalGenerateEnd("");
+    setReportFilterCompanyName("");
+    setReportFilterCustomerName("");
+    setReportFilterProductId("");
+    setReportFilterVoucherType("");
+    setReportRangeStart("");
+    setReportRangeEnd("");
+    setActiveGeneratedJournalId("");
+    loadGeneratedJournalsWithOverride({
+      startDate: "",
+      endDate: "",
+      companyName: undefined,
+      partyName: undefined,
+      itemId: undefined,
+      voucherType: undefined,
+    }).catch(() => {});
+  };
+
+  const buildJournalRangeLabel = (opts = {}) => {
+    const now = new Date();
+    const range = opts.range || journalGenerateRange;
+    const dateVal = opts.date || journalGenerateDate;
+    const start = opts.start || journalGenerateStart;
+    const end = opts.end || journalGenerateEnd;
+    if (range === "day" || range === "particular") {
+      const d = dateVal ? new Date(dateVal) : now;
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "2-digit" });
+    }
+    if (range === "month") {
+      const d = dateVal ? new Date(`${dateVal}-01`) : now;
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    }
+    if (range === "year") {
+      const y = Number(dateVal) || now.getFullYear();
+      return String(y);
+    }
+    if (range === "custom") {
+      return [start, end].filter(Boolean).join(" to ");
+    }
+    if (range === "all") return "All Dates";
+    return now.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+  };
+
+  const getShortByStamp = () => {
+    const now = new Date();
+    const date = now.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    const time = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return `By ${date} ${time}`;
+  };
+
+  const toAbsoluteLogoUrl = (value) => {
+    const url = String(value || "").trim();
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = api.defaults.baseURL || "";
+    const origin = base.replace(/\/api\/?$/i, "");
+    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
+  };
+
+  const fetchLogoAsDataUrl = async (url) => {
+    if (!url) return "";
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const resolvePrintHeader = () => {
+    const name = String(printSettings.companyName || printSettings.shortName || "").trim();
+    const address = String(printSettings.address || "").trim();
+    const email = String(printSettings.email || "").trim();
+    const logoUrl = toAbsoluteLogoUrl(printSettings.logoUrl || printSettings.logo || "");
+    return { name, address, email, logoUrl, logoDataUrl: printLogoDataUrl };
+  };
+
+  const addPdfHeader = (doc, title, subTitle) => {
+    const { name, address, email, logoDataUrl } = resolvePrintHeader();
+    // revert to legacy: no custom header
+    return 32;
+  };
+
   const loadDropdowns = async () => {
     const [accRes, compRes] = await Promise.all([
       api.get("/accounting/accounts"),
@@ -450,13 +609,25 @@ export default function AccountingFinance() {
   };
 
   const loadGatepassCompanies = async () => {
-    const res = await api.get("/product-types");
-    const rows = res.data?.data || [];
+    const [prodRes, settingsRes] = await Promise.all([
+      api.get("/product-types"),
+      api.get("/settings"),
+    ]);
+    const rows = prodRes.data?.data || [];
     setProductTypes(rows);
-    const names = Array.from(
-      new Set(rows.map((r) => String(r.brand || "").trim()).filter(Boolean))
-    ).sort();
-    setGatepassCompanies(names);
+    const productBrands = rows.map((r) => normalizeCompanyName(r.brand)).filter(Boolean);
+    const settingsData = settingsRes.data?.data || settingsRes.data || {};
+    const settingsBrands = Array.isArray(settingsData.brandOptions)
+      ? settingsData.brandOptions.map((b) => normalizeCompanyName(b)).filter(Boolean)
+      : [];
+    const merged = new Map();
+    [...productBrands, ...settingsBrands].forEach((name) => {
+      const clean = normalizeCompanyName(name);
+      if (!clean) return;
+      const key = normalizeText(clean);
+      if (!merged.has(key)) merged.set(key, clean);
+    });
+    setGatepassCompanies(Array.from(merged.values()).sort((a, b) => a.localeCompare(b)));
   };
 
   const inferAccountType = (name) => {
@@ -654,19 +825,21 @@ export default function AccountingFinance() {
       accountId: filterAccountId || undefined,
       partyName: filterCustomerName || undefined,
       itemId: filterProductId || undefined,
+      itemName: filterProductLabel || undefined,
       range: "custom",
     };
     const res = await api.get("/accounting/vouchers", { params });
     setVouchers(res.data?.data || []);
   };
 
-  const loadGeneratedJournals = async () => {
+  const loadGeneratedJournalsEntry = async () => {
     const params = {
       startDate: rangeStart || undefined,
       endDate: rangeEnd || undefined,
       companyId: filterCompanyId || undefined,
       companyName: filterCompanyName || undefined,
       partyName: filterCustomerName || undefined,
+      itemName: filterProductLabel || undefined,
       bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
       voucherNo: filterVoucherNo || undefined,
       range: "custom",
@@ -676,44 +849,105 @@ export default function AccountingFinance() {
     setSelectedGeneratedIds(new Set());
   };
 
-  const loadGeneratedJournalsWithOverride = async (override = {}) => {
-    const res = await api.get("/accounting/journal", {
-      params: {
-        startDate: rangeStart || undefined,
-        endDate: rangeEnd || undefined,
-        companyId: filterCompanyId || undefined,
-        companyName: filterCompanyName || undefined,
-        partyName: filterCustomerName || undefined,
-        itemId: filterProductId || undefined,
-        bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
-        voucherNo: filterVoucherNo || undefined,
-        range: "custom",
-        ...override,
-      },
-    });
+  const loadGeneratedJournalsReport = async () => {
+    const params = {
+      startDate: reportRangeStart || undefined,
+      endDate: reportRangeEnd || undefined,
+      ignoreDate: "1",
+      companyName: reportFilterCompanyName || undefined,
+      partyName: reportFilterCustomerName || undefined,
+      itemId: reportFilterProductId || undefined,
+      itemName: reportFilterProductLabel || undefined,
+      voucherType: reportFilterVoucherType || undefined,
+      bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
+      voucherNo: reportFilterVoucherNo || undefined,
+      range: "custom",
+    };
+    const res = await api.get("/accounting/journal", { params });
     setGeneratedJournals(res.data?.data || []);
     setSelectedGeneratedIds(new Set());
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const syncRes = await Promise.allSettled([
-          api.post("/accounting/sync/parties"),
-          api.post("/accounting/sync/products"),
-        ]);
-        if (syncRes.some((r) => r.status === "rejected")) {
-          toast.error("Master sync failed. Loading saved data.");
-        }
-        await Promise.all([loadDropdowns(), loadGatepassCompanies(), loadCustomers()]);
-      } catch (err) {
-        toast.error(err?.response?.data?.message || "Failed to load accounting master data.");
-      } finally {
-        setLoading(false);
+  const loadGeneratedJournalsWithOverride = async (override = {}) => {
+    const resolvedStart =
+      typeof override.startDate !== "undefined" ? override.startDate : reportRangeStart || undefined;
+    const resolvedEnd = typeof override.endDate !== "undefined" ? override.endDate : reportRangeEnd || undefined;
+    const ignoreDate = resolvedStart || resolvedEnd ? undefined : "1";
+    const res = await api.get("/accounting/journal", {
+      params: {
+        startDate: resolvedStart,
+        endDate: resolvedEnd,
+        ignoreDate,
+        companyName: reportFilterCompanyName || undefined,
+        partyName: reportFilterCustomerName || undefined,
+        itemId: reportFilterProductId || undefined,
+        itemName: reportFilterProductLabel || undefined,
+        voucherType: reportFilterVoucherType || undefined,
+        bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
+        voucherNo: reportFilterVoucherNo || undefined,
+        range: "custom",
+        ...override,
+      },
+    });
+    const data = res.data?.data || [];
+    setGeneratedJournals(data);
+    setSelectedGeneratedIds(new Set());
+    return data;
+  };
+
+  const loadGeneratedJournalList = async () => {
+    const res = await api.get("/accounting/generated-journals");
+    setGeneratedJournalList(res.data?.data || []);
+  };
+
+    const loadPrintSettings = async () => {
+      const res = await api.get("/settings");
+      const data = res.data?.data || res.data || {};
+      const general = data.general || data.generalSettings || data;
+      setPrintSettings(general || {});
+      const rawLogo = general?.logoUrl || general?.logo || general?.logoPath || "";
+      if (String(rawLogo || "").startsWith("data:")) {
+        setPrintLogoDataUrl(String(rawLogo));
+        return;
       }
-    })();
-  }, []);
+      const logoUrl = toAbsoluteLogoUrl(rawLogo);
+      const dataUrl = await fetchLogoAsDataUrl(logoUrl);
+      setPrintLogoDataUrl(dataUrl);
+    };
+
+    useEffect(() => {
+      (async () => {
+        try {
+          setLoading(true);
+          const syncRes = await Promise.allSettled([
+            api.post("/accounting/sync/parties"),
+            api.post("/accounting/sync/products"),
+          ]);
+          if (syncRes.some((r) => r.status === "rejected")) {
+            toast.error("Master sync failed. Loading saved data.");
+          }
+          await Promise.all([
+            loadPrintSettings(),
+            loadDropdowns(),
+            loadGatepassCompanies(),
+            loadCustomers(),
+            loadGeneratedJournalList(),
+          ]);
+        } catch (err) {
+          toast.error(err?.response?.data?.message || "Failed to load accounting master data.");
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }, []);
+
+    useEffect(() => {
+      const onSettingsUpdated = () => {
+        loadPrintSettings().catch(() => {});
+      };
+      window.addEventListener("smj-settings-updated", onSettingsUpdated);
+      return () => window.removeEventListener("smj-settings-updated", onSettingsUpdated);
+    }, []);
 
   // Reset voucher filters on full page refresh
   useEffect(() => {
@@ -723,7 +957,15 @@ export default function AccountingFinance() {
     setFilterCompanyName("");
     setFilterProductId("");
     setFilterAccountId("");
+    setReportRangeStart("");
+    setReportRangeEnd("");
+    setReportFilterCompanyId("");
+    setReportFilterCompanyName("");
+    setReportFilterCustomerName("");
+    setReportFilterProductId("");
+    setReportFilterVoucherType("");
   }, []);
+
 
   useEffect(() => {
     const onProductRefresh = () => {
@@ -749,11 +991,26 @@ export default function AccountingFinance() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== "journal-entry" && activeTab !== "journal-report") return;
+    if (activeTab !== "journal-entry") return;
     (async () => {
       try {
         setLoading(true);
-        await loadGeneratedJournals();
+        await loadGeneratedJournalsEntry();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to load journals.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, rangeStart, rangeEnd, filterCompanyId, filterCompanyName, filterBookType, filterVoucherNo]);
+
+  useEffect(() => {
+    if (activeTab !== "journal-report") return;
+    (async () => {
+      try {
+        setLoading(true);
+        await loadGeneratedJournalsReport();
       } catch (err) {
         toast.error(err?.response?.data?.message || "Failed to load journals.");
       } finally {
@@ -763,12 +1020,14 @@ export default function AccountingFinance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab,
-    rangeStart,
-    rangeEnd,
-    filterCompanyId,
-    filterCompanyName,
-    filterBookType,
-    filterVoucherNo,
+    reportRangeStart,
+    reportRangeEnd,
+    reportFilterCompanyName,
+    reportFilterCustomerName,
+    reportFilterProductId,
+    reportFilterBookType,
+    reportFilterVoucherType,
+    reportFilterVoucherNo,
   ]);
 
   const patchEntry = (entryId, patch) => {
@@ -962,10 +1221,10 @@ export default function AccountingFinance() {
     return {
       date: entry?.date || new Date().toISOString().slice(0, 10),
       voucherType: entry?.voucherType || "JOURNAL",
+      bookType: "JOURNAL",
       companyId: entry?.companyId || "",
       companyName,
       description: String(entry?.narration || "").trim(),
-      bookType: entry?.voucherType || "JOURNAL",
       lines: lineItems,
     };
   };
@@ -1002,7 +1261,7 @@ export default function AccountingFinance() {
         const payloadEntries = activeEntries.map((e) => ({
           date: e.date,
           voucherType: e.voucherType || "JOURNAL",
-          bookType: e.voucherType || "JOURNAL",
+          bookType: "JOURNAL",
           companyId: e.companyId,
           companyName: e.companyName,
           customerId: e.customerId,
@@ -1025,7 +1284,7 @@ export default function AccountingFinance() {
       }
       if (andNew) resetEntry();
       await loadVouchers();
-      if (activeTab === "journal-entry") await loadGeneratedJournals();
+      if (activeTab === "journal-entry") await loadGeneratedJournalsEntry();
       resetEntry();
       if (autoPrint && savedId) {
         await handlePrintVoucher(savedId);
@@ -1046,24 +1305,34 @@ export default function AccountingFinance() {
       if (!v) throw new Error("Voucher not found.");
       setEditingVoucherId(String(v._id));
       setEditingVoucherNo(v.voucherNo || "");
-      const firstParty = (v.lines || []).find((l) => String(l.partyName || "").trim())?.partyName || "";
-      const firstItem = (v.lines || []).find((l) => String(l.itemName || "").trim())?.itemName || "";
-      const mappedLines = (v.lines || []).map((l) => ({
-        rowId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        debitAccountId: n0(l.debit) > 0 ? String(l.accountId || "") : "",
-        debitMode: "list",
-        debitInput: "",
-        creditAccountId: n0(l.credit) > 0 ? String(l.accountId || "") : "",
-        creditMode: "list",
-        creditInput: "",
-        customerId: "",
-        customerName: "",
-        productTypeId: "",
-        productName: "",
-        debitAmount: n0(l.debit) > 0 ? String(round2(n0(l.debit))) : "",
-        creditAmount: n0(l.credit) > 0 ? String(round2(n0(l.credit))) : "",
-        entryType: n0(l.debit) > 0 ? "debit" : n0(l.credit) > 0 ? "credit" : "both",
-      }));
+      const firstParty = String(v.customerName || "").trim() || (v.lines || []).find((l) => String(l.partyName || "").trim())?.partyName || "";
+      const firstItem = String(v.productName || "").trim() || (v.lines || []).find((l) => String(l.itemName || "").trim())?.itemName || "";
+
+      const debitLines = (v.lines || []).filter((l) => n0(l.debit) > 0);
+      const creditLines = (v.lines || []).filter((l) => n0(l.credit) > 0);
+      const rowCount = Math.max(debitLines.length, creditLines.length, 1);
+      const mappedLines = Array.from({ length: rowCount }).map((_, idx) => {
+        const d = debitLines[idx];
+        const c = creditLines[idx];
+        const entryType = d && c ? "both" : d ? "debit" : "credit";
+        return {
+          rowId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          entryType,
+          isBase: idx === 0,
+          debitAccountId: d ? String(d.accountId || "") : "",
+          debitMode: "list",
+          debitInput: "",
+          creditAccountId: c ? String(c.accountId || "") : "",
+          creditMode: "list",
+          creditInput: "",
+          customerId: "",
+          customerName: "",
+          productTypeId: "",
+          productName: "",
+          debitAmount: d ? String(round2(n0(d.debit))) : "",
+          creditAmount: c ? String(round2(n0(c.credit))) : "",
+        };
+      });
       const e = {
         ...blankEntry(),
         entryId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1071,10 +1340,12 @@ export default function AccountingFinance() {
         voucherType: v.voucherType || "JOURNAL",
         companyId: v.companyId || "",
         companyName: v.companyName || "",
+        customerId: v.customerId || "",
         customerName: firstParty || "",
+        productTypeId: v.productTypeId || "",
         productName: firstItem || "",
         narration: v.description || "",
-        lines: mappedLines.length ? mappedLines : [{ ...blankLine(), entryType: "debit" }, { ...blankLine(), entryType: "credit" }],
+        lines: mappedLines.length ? mappedLines : [{ ...blankLine(), entryType: "debit", isBase: true }, { ...blankLine(), entryType: "credit" }],
       };
       setEntries([e]);
       setSubmitAttempted(false);
@@ -1121,6 +1392,12 @@ export default function AccountingFinance() {
   };
 
   const askDeleteVoucher = (id, voucherNo) => {
+    setShowJournalFilters(false);
+    setShowVoucherFilters(false);
+    setJournalFilterOpen(false);
+    setJournalGenerateOpen(false);
+    setJournalPreviewOpen(false);
+    setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
     setDeleteDialog({ open: true, id, voucherNo: voucherNo || "" });
   };
 
@@ -1132,7 +1409,7 @@ export default function AccountingFinance() {
       toast.success("Voucher deleted.");
       setDeleteDialog({ open: false, id: "", voucherNo: "" });
       if (activeTab === "journal-entry") await loadVouchers();
-      if (activeTab === "journal-entry") await loadGeneratedJournals();
+      if (activeTab === "journal-entry") await loadGeneratedJournalsEntry();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete voucher.");
     } finally {
@@ -1217,16 +1494,102 @@ export default function AccountingFinance() {
     return rows;
   };
 
+  const filterJournalsBy = (journals = [], filters = {}) => {
+    const startDate = filters.startDate ? new Date(filters.startDate) : null;
+    const endDate = filters.endDate ? new Date(`${filters.endDate}T23:59:59.999`) : null;
+    const companyFilter = normalizeText(filters.companyName || filters.companyId || "");
+    const partyFilter = normalizeText(filters.partyName || "");
+    const itemId = filters.itemId || "";
+    const itemNameFilter = normalizeText(filters.itemName || "");
+    const voucherTypeFilter = normalizeText(filters.voucherType || "");
+    return (journals || []).filter((j) => {
+      const d = j?.date ? new Date(j.date) : null;
+      const inRange =
+        (!startDate || (d && d >= startDate)) && (!endDate || (d && d <= endDate));
+      if (!inRange) return false;
+      const byCompany = !companyFilter
+        ? true
+        : [String(j?.companyId || ""), String(j?.companyName || "")]
+            .map((v) => normalizeText(v))
+            .some((v) => v === companyFilter || v.includes(companyFilter));
+      if (!byCompany) return false;
+      const byType = !voucherTypeFilter
+        ? true
+        : normalizeText(j?.voucherType || "").includes(voucherTypeFilter);
+      if (!byType) return false;
+      const lines = j?.lines || [];
+      const byParty = !partyFilter
+        ? true
+        : lines.some((l) => normalizeText(l.partyName || "").includes(partyFilter)) ||
+          normalizeText(j?.customerName || "").includes(partyFilter);
+      if (!byParty) return false;
+      const byItemId = !itemId || lines.some((l) => String(l.itemId || "") === String(itemId));
+      if (!byItemId) return false;
+      const byItemName = !itemNameFilter
+        ? true
+        : lines.some((l) => normalizeText(l.itemName || "").includes(itemNameFilter)) ||
+          normalizeText(j?.productName || "").includes(itemNameFilter);
+      return byItemName;
+    });
+  };
+
+  const buildGroupedJournalRows = (entries = []) => {
+    const rows = [];
+    (entries || []).forEach((entry) => {
+      const dateText = entry?.date ? `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}` : "";
+      const lines = entry?.lines || [];
+      const narration = String(entry?.description || entry?.narration || "").trim();
+      const particulars = [];
+      const debitLines = [];
+      const creditLines = [];
+      const debitsOnly = lines.filter((l) => round2(n0(l.debit)) > 0);
+      const creditsOnly = lines.filter((l) => round2(n0(l.credit)) > 0);
+      debitsOnly.forEach((l) => {
+        const acc = String(l.accountName || l.accountCode || "Account");
+        particulars.push({ text: `${acc} Dr.`, style: "normal", indent: 0 });
+        debitLines.push(`Rs. ${String(round2(n0(l.debit)))}`);
+        creditLines.push("");
+      });
+      creditsOnly.forEach((l) => {
+        const acc = String(l.accountName || l.accountCode || "Account");
+        particulars.push({ text: `To ${acc}`, style: "normal", indent: 1 });
+        debitLines.push("");
+        creditLines.push(`Rs. ${String(round2(n0(l.credit)))}`);
+      });
+      if (narration) {
+        particulars.push({ text: `(${withBeing(narration)})`, style: "italic", indent: 0 });
+        debitLines.push("");
+        creditLines.push("");
+      }
+      const targetLen = Math.max(particulars.length, debitLines.length, creditLines.length, 1);
+      while (debitLines.length < targetLen) debitLines.push("");
+      while (creditLines.length < targetLen) creditLines.push("");
+      rows.push({
+        date: dateText,
+        particulars,
+        debitLines,
+        creditLines,
+      });
+    });
+    return rows;
+  };
+
   const fetchGeneratedJournals = async (override = {}) => {
+    const resolvedStart =
+      typeof override.startDate !== "undefined" ? override.startDate : reportRangeStart || undefined;
+    const resolvedEnd = typeof override.endDate !== "undefined" ? override.endDate : reportRangeEnd || undefined;
+    const ignoreDate = resolvedStart || resolvedEnd ? undefined : "1";
     const params = {
-      startDate: rangeStart || undefined,
-      endDate: rangeEnd || undefined,
-      companyId: filterCompanyId || undefined,
-      companyName: filterCompanyName || undefined,
-      partyName: filterCustomerName || undefined,
-      itemId: filterProductId || undefined,
-      bookType: filterBookType && filterBookType !== "ALL" ? filterBookType : undefined,
-      voucherNo: filterVoucherNo || undefined,
+      startDate: resolvedStart,
+      endDate: resolvedEnd,
+      ignoreDate,
+      companyName: reportFilterCompanyName || undefined,
+      partyName: reportFilterCustomerName || undefined,
+      itemId: reportFilterProductId || undefined,
+      itemName: reportFilterProductLabel || undefined,
+      voucherType: reportFilterVoucherType || undefined,
+      bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
+      voucherNo: reportFilterVoucherNo || undefined,
       range: "custom",
       ...override,
     };
@@ -1234,13 +1597,16 @@ export default function AccountingFinance() {
     return res.data?.data || [];
   };
 
-  const applyJournalGenerateFilters = () => {
-    const range = journalGenerateRange;
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    let nextStart = "";
-    let nextEnd = "";
-    if (range === "day" || range === "particular") {
+    const applyJournalGenerateFilters = () => {
+      const range = journalGenerateRange;
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      let nextStart = "";
+      let nextEnd = "";
+    if (range === "all") {
+      nextStart = "";
+      nextEnd = "";
+    } else if (range === "day" || range === "particular") {
       const base = journalGenerateDate ? new Date(journalGenerateDate) : now;
       const y = base.getFullYear();
       const m = pad(base.getMonth() + 1);
@@ -1263,35 +1629,56 @@ export default function AccountingFinance() {
       nextStart = journalGenerateStart || "";
       nextEnd = journalGenerateEnd || "";
     }
-    const finalName = String(journalGenerateName || "").trim() || getSuggestedJournalName();
-    setGeneratedJournalList((prev) => {
-      const next = [...prev];
-      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      next.unshift({
-        id,
-        name: finalName,
+      const baseName = String(journalGenerateName || "").trim() || getSuggestedJournalName();
+      const finalName = baseName.includes(" By ") ? baseName : `${baseName} ${getShortByStamp()}`;
+      setReportRangeStart(nextStart);
+      setReportRangeEnd(nextEnd);
+      setJournalGenerateOpen(false);
+      loadGeneratedJournalsWithOverride({
         startDate: nextStart,
         endDate: nextEnd,
-        companyId: filterCompanyId || "",
-        companyName: filterCompanyName || "",
-        partyName: filterCustomerName || "",
-        itemId: filterProductId || "",
-      });
-      setActiveGeneratedJournalId(id);
-      return next;
-    });
-    setRangeStart(nextStart);
-    setRangeEnd(nextEnd);
-    setJournalGenerateOpen(false);
-    loadGeneratedJournalsWithOverride({
-      startDate: nextStart || undefined,
-      endDate: nextEnd || undefined,
-      companyId: filterCompanyId || undefined,
-      companyName: filterCompanyName || undefined,
-      partyName: filterCustomerName || undefined,
-      itemId: filterProductId || undefined,
-    }).catch(() => {});
-  };
+        companyName: reportFilterCompanyName || undefined,
+        partyName: reportFilterCustomerName || undefined,
+        itemId: reportFilterProductId || undefined,
+        voucherType: reportFilterVoucherType || undefined,
+      })
+        .then((data) => {
+          const filtered = filterJournalsBy(data || [], {
+            startDate: nextStart,
+            endDate: nextEnd,
+            companyName: reportFilterCompanyName || "",
+            partyName: reportFilterCustomerName || "",
+            itemId: reportFilterProductId || "",
+            itemName: reportFilterProductLabel || "",
+            voucherType: reportFilterVoucherType || "",
+          });
+          if (!filtered.length) {
+            toast.error("No journals found for the selected filters.");
+            setJournalInfoDialog({ open: true, message: "Empty journal cannot be generated." });
+            return;
+          }
+          return api
+            .post("/accounting/generated-journals", {
+              name: finalName,
+              range: journalGenerateRange,
+              rangeDate: journalGenerateDate,
+              startDate: nextStart,
+              endDate: nextEnd,
+              companyId: "",
+              companyName: reportFilterCompanyName || "",
+              partyName: reportFilterCustomerName || "",
+              itemId: reportFilterProductId || "",
+              itemName: reportFilterProductLabel || "",
+              voucherType: reportFilterVoucherType || "",
+            })
+            .then((res) => {
+              const created = res.data?.data;
+              if (created?._id) setActiveGeneratedJournalId(String(created._id));
+              return loadGeneratedJournalList();
+            });
+        })
+        .catch(() => {});
+    };
 
   const applyJournalFiltersOnly = () => {
     const range = journalGenerateRange;
@@ -1299,7 +1686,10 @@ export default function AccountingFinance() {
     const pad = (n) => String(n).padStart(2, "0");
     let nextStart = "";
     let nextEnd = "";
-    if (range === "day" || range === "particular") {
+    if (range === "all") {
+      nextStart = "";
+      nextEnd = "";
+    } else if (range === "day" || range === "particular") {
       const base = journalGenerateDate ? new Date(journalGenerateDate) : now;
       const y = base.getFullYear();
       const m = pad(base.getMonth() + 1);
@@ -1322,76 +1712,316 @@ export default function AccountingFinance() {
       nextStart = journalGenerateStart || "";
       nextEnd = journalGenerateEnd || "";
     }
-    setRangeStart(nextStart);
-    setRangeEnd(nextEnd);
-    setActiveGeneratedJournalId("");
-    loadGeneratedJournalsWithOverride({
-      startDate: nextStart || undefined,
-      endDate: nextEnd || undefined,
-      companyId: filterCompanyId || undefined,
-      companyName: filterCompanyName || undefined,
-      partyName: filterCustomerName || undefined,
-      itemId: filterProductId || undefined,
-    }).catch(() => {});
-  };
+      setReportRangeStart(nextStart);
+      setReportRangeEnd(nextEnd);
+      setActiveGeneratedJournalId("");
+      loadGeneratedJournalsWithOverride({
+        startDate: nextStart,
+        endDate: nextEnd,
+        companyName: journalFilterCompanyName || undefined,
+        partyName: journalFilterCustomerName || undefined,
+        itemId: journalFilterProductId || undefined,
+        voucherType: journalFilterVoucherType || undefined,
+      }).catch(() => {});
+      setReportFilterCompanyName(journalFilterCompanyName || "");
+      setReportFilterCustomerName(journalFilterCustomerName || "");
+      setReportFilterProductId(journalFilterProductId || "");
+      setReportFilterVoucherType(journalFilterVoucherType || "");
+    };
 
-  const handleViewGeneratedJournal = async (j) => {
-    if (!j) return;
-    setActiveGeneratedJournalId(j.id);
-    setRangeStart(j.startDate || "");
-    setRangeEnd(j.endDate || "");
-    setFilterCompanyId(j.companyId || "");
-    setFilterCompanyName(j.companyName || "");
-    setFilterCustomerName(j.partyName || "");
-    setFilterProductId(j.itemId || "");
-    await loadGeneratedJournalsWithOverride({
-      startDate: j.startDate || undefined,
-      endDate: j.endDate || undefined,
-      companyId: j.companyId || undefined,
-      companyName: j.companyName || undefined,
-      partyName: j.partyName || undefined,
-      itemId: j.itemId || undefined,
-    });
-  };
-
-  const handleDownloadGeneratedJournal = async (j) => {
-    if (!j) return;
-    try {
-      setLoading(true);
-      const data = await fetchGeneratedJournals({
+    const handleViewGeneratedJournal = async (j) => {
+      if (!j) return;
+      setActiveGeneratedJournalId(String(j._id || j.id || ""));
+      setReportRangeStart(j.startDate || "");
+      setReportRangeEnd(j.endDate || "");
+      setReportFilterCompanyName(j.companyName || "");
+      setReportFilterCustomerName(j.partyName || "");
+      setReportFilterProductId(j.itemId || "");
+      setReportFilterVoucherType(j.voucherType || "");
+      setJournalGenerateRange(j.range || "all");
+      setJournalGenerateDate(j.rangeDate || "");
+      setJournalGenerateStart(j.startDate || "");
+      setJournalGenerateEnd(j.endDate || "");
+      const data = await loadGeneratedJournalsWithOverride({
         startDate: j.startDate || undefined,
         endDate: j.endDate || undefined,
-        companyId: j.companyId || undefined,
         companyName: j.companyName || undefined,
         partyName: j.partyName || undefined,
         itemId: j.itemId || undefined,
+        voucherType: j.voucherType || undefined,
       });
-      const rows = buildReportRowsFromJournals(data);
-      const body = rows.map((r) => {
-        const dateText = r.showDate ? `${formatYear(r.date)}\n${formatMonthDay(r.date)}` : "";
-        const details = r.isNarrationRow ? `(${withBeing(r.narration)})` : r.account || "";
-        const debit = r.side === "debit" ? `Rs. ${String(r.amount)}` : "";
-        const credit = r.side === "credit" ? `Rs. ${String(r.amount)}` : "";
-        return [dateText, details, "", debit, credit];
+      const filtered = filterJournalsBy(data || [], {
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        companyName: j.companyName || "",
+        partyName: j.partyName || "",
+        itemId: j.itemId || "",
+        itemName: j.itemName || "",
+        voucherType: j.voucherType || "",
       });
-      const doc = new jsPDF();
-      doc.setFontSize(12);
-      doc.text(String(j.name || "Journal"), 14, 14);
-      autoTable(doc, {
-        startY: 20,
-        head: [["Date", "Details", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
-        body,
-        styles: { fontSize: 9, cellPadding: 2 },
-        headStyles: { fillColor: [240, 253, 250], textColor: [6, 95, 70] },
-        columnStyles: { 0: { cellWidth: 22 }, 2: { cellWidth: 10 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 } },
+      const rows = buildReportRowsFromJournals(filtered);
+      setJournalPreviewEntries(rows);
+      setJournalPreviewMeta({
+        title: String(j.name || "Journal Entries"),
+        rangeLabel: buildJournalRangeLabel({
+          range: j.range || "all",
+          date: j.rangeDate || "",
+          start: j.startDate || "",
+          end: j.endDate || "",
+        }),
+        companyName: j.companyName || "",
+        customerName: j.partyName || "",
+        productName: j.itemName || "",
       });
+      setJournalPreviewOpen(true);
+    };
+
+    const handleDownloadGeneratedJournal = async (j) => {
+      if (!j) return;
+      try {
+        setLoading(true);
+        const data = await fetchGeneratedJournals({
+          startDate: j.startDate || undefined,
+          endDate: j.endDate || undefined,
+          companyName: j.companyName || undefined,
+          partyName: j.partyName || undefined,
+          itemId: j.itemId || undefined,
+          voucherType: j.voucherType || undefined,
+        });
+        const filtered = filterJournalsBy(data || [], {
+          startDate: j.startDate || "",
+          endDate: j.endDate || "",
+          companyName: j.companyName || "",
+          partyName: j.partyName || "",
+          itemId: j.itemId || "",
+          itemName: j.itemName || "",
+          voucherType: j.voucherType || "",
+        });
+        const groupedBody = buildGroupedJournalRows(filtered);
+        const doc = new jsPDF();
+        const baseRangeLabel = buildJournalRangeLabel({
+          range: j.range || "all",
+          date: j.rangeDate || "",
+          start: j.startDate || "",
+          end: j.endDate || "",
+        });
+        const rangeLabel =
+          j.range === "month" && baseRangeLabel ? `the month of ${baseRangeLabel}` : baseRangeLabel;
+        const title = "JOURNAL ENTRIES";
+        doc.setFont("times", "normal");
+        const centerX = doc.internal.pageSize.getWidth() / 2;
+        let headerY = 10;
+        const headerName = String(j.partyName || j.companyName || "").trim();
+        if (headerName) {
+          doc.setFontSize(11);
+          doc.text(headerName, centerX, headerY, { align: "center" });
+          headerY += 5;
+        }
+        // show only one of customer/company (prefer customer if present)
+        doc.setFontSize(10);
+        doc.text(title, centerX, headerY, { align: "center" });
+        headerY += 4;
+        doc.setFontSize(9);
+        doc.text(rangeLabel ? `For ${rangeLabel}` : "", centerX, headerY, { align: "center" });
+        const startY = headerY + 8;
+
+        const groupedTable = groupedBody.map((row) => ({
+          date: row.date,
+          particularsText: "",
+          lf: "",
+          debit: "",
+          credit: "",
+          _particularsLines: row.particulars,
+          _debitLines: row.debitLines,
+          _creditLines: row.creditLines,
+        }));
+
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const marginX = 14;
+        const usableWidth = pageWidth - marginX * 2;
+        const measureLines = (lines = []) =>
+          lines.reduce((m, t) => Math.max(m, doc.getTextWidth(String(t || ""))), 0);
+        const maxDate = Math.max(
+          22,
+          ...groupedTable.map((r) => doc.getTextWidth(String(r.date || "").split("\n")[0] || ""))
+        );
+        const maxLf = Math.max(10, doc.getTextWidth("L.F."));
+        const maxDebit = Math.max(24, ...groupedBody.map((r) => measureLines(r._debitLines)));
+        const maxCredit = Math.max(24, ...groupedBody.map((r) => measureLines(r._creditLines)));
+        const fixed = maxDate + maxLf + maxDebit + maxCredit + 8;
+        const particularsWidth = Math.max(50, usableWidth - fixed);
+
+        autoTable(doc, {
+          startY,
+          head: [["Date", "Particulars", "L.F.", "Debit Amount (Rs.)", "Credit Amount (Rs.)"]],
+          body: groupedTable,
+          columns: [
+            { header: "Date", dataKey: "date" },
+            { header: "Particulars", dataKey: "particularsText" },
+            { header: "L.F.", dataKey: "lf" },
+            { header: "Debit Amount (Rs.)", dataKey: "debit" },
+            { header: "Credit Amount (Rs.)", dataKey: "credit" },
+          ],
+          styles: {
+            fontSize: 9,
+            cellPadding: 2,
+            lineColor: [90, 90, 90],
+            lineWidth: 0.1,
+            textColor: [30, 30, 30],
+          },
+          headStyles: {
+            fillColor: [255, 255, 255],
+            textColor: [20, 20, 20],
+            lineColor: [90, 90, 90],
+            lineWidth: 0.2,
+            fontStyle: "bold",
+          },
+          columnStyles: {
+            0: { cellWidth: maxDate },
+            1: { cellWidth: particularsWidth },
+            2: { cellWidth: maxLf },
+            3: { cellWidth: maxDebit, halign: "right" },
+            4: { cellWidth: maxCredit, halign: "right" },
+          },
+          theme: "grid",
+          didParseCell: (data) => {
+            if (data.section !== "body") return;
+            if (data.column.dataKey === "particularsText" || data.column.dataKey === "debit" || data.column.dataKey === "credit") {
+              data.cell.text = "";
+            }
+            const row = data.row?.raw || {};
+            const maxLines = Math.max(
+              (row._particularsLines || []).length,
+              (row._debitLines || []).length,
+              (row._creditLines || []).length,
+              1
+            );
+            const lineHeight = 4;
+            data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight || 0, maxLines * lineHeight + 2);
+          },
+          didDrawCell: (data) => {
+            if (data.section !== "body") return;
+            const row = data.row?.raw || {};
+            const lineHeight = 4;
+            const baseX = data.cell.x + 2;
+            let baseY = data.cell.y + 4;
+            if (data.column.dataKey === "particularsText") {
+              const parts = row._particularsLines || [];
+              parts.forEach((p) => {
+                const indent = p.indent ? 4 : 0;
+                if (p.style === "italic") {
+                  doc.setFont("times", "italic");
+                  doc.setTextColor(120, 120, 120);
+                } else {
+                  doc.setFont("times", "normal");
+                  doc.setTextColor(30, 30, 30);
+                }
+                doc.text(String(p.text || ""), baseX + indent, baseY);
+                baseY += lineHeight;
+              });
+              doc.setFont("times", "normal");
+              doc.setTextColor(30, 30, 30);
+            }
+            if (data.column.dataKey === "debit") {
+              const lines = row._debitLines || [];
+              lines.forEach((txt) => {
+                if (txt) doc.text(String(txt), data.cell.x + data.cell.width - 2, baseY, { align: "right" });
+                baseY += lineHeight;
+              });
+            }
+            if (data.column.dataKey === "credit") {
+              const lines = row._creditLines || [];
+              lines.forEach((txt) => {
+                if (txt) doc.text(String(txt), data.cell.x + data.cell.width - 2, baseY, { align: "right" });
+                baseY += lineHeight;
+              });
+            }
+          },
+        });
       doc.save(`${String(j.name || "journal").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || "Failed to download journal.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleDownloadGeneratedJournalExcel = async (j) => {
+      if (!j) return;
+      try {
+        setLoading(true);
+        const data = await fetchGeneratedJournals({
+          startDate: j.startDate || undefined,
+          endDate: j.endDate || undefined,
+          companyName: j.companyName || undefined,
+          partyName: j.partyName || undefined,
+          itemId: j.itemId || undefined,
+          voucherType: j.voucherType || undefined,
+        });
+        const filtered = filterJournalsBy(data || [], {
+          startDate: j.startDate || "",
+          endDate: j.endDate || "",
+          companyName: j.companyName || "",
+          partyName: j.partyName || "",
+          itemId: j.itemId || "",
+          itemName: j.itemName || "",
+          voucherType: j.voucherType || "",
+        });
+        const grouped = buildGroupedJournalRows(filtered);
+        const baseRangeLabel = buildJournalRangeLabel({
+          range: j.range || "all",
+          date: j.rangeDate || "",
+          start: j.startDate || "",
+          end: j.endDate || "",
+        });
+        const rangeLabel =
+          j.range === "month" && baseRangeLabel ? `For the month of ${baseRangeLabel}` : baseRangeLabel
+            ? `For ${baseRangeLabel}`
+            : "";
+        const headerRows = [
+          [j.companyName || ""],
+          ["JOURNAL ENTRIES"],
+          [rangeLabel],
+          [],
+          ["Date", "Particulars", "L.F.", "Debit Amount (Rs.)", "Credit Amount (Rs.)"],
+        ];
+        const bodyRows = [];
+        grouped.forEach((r) => {
+          const lineCount = Math.max(r.particulars.length, r.debitLines.length, r.creditLines.length, 1);
+          for (let i = 0; i < lineCount; i += 1) {
+            const part = r.particulars[i];
+            const partText = part ? `${" ".repeat(part.indent ? 2 : 0)}${part.text}` : "";
+            bodyRows.push([
+              i === 0 ? r.date : "",
+              partText,
+              "",
+              r.debitLines[i] || "",
+              r.creditLines[i] ? `  ${r.creditLines[i]}` : "",
+            ]);
+          }
+        });
+        const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
+        ws["!merges"] = [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+          { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+          { s: { r: 2, c: 0 }, e: { r: 2, c: 4 } },
+        ];
+        ws["!cols"] = [
+          { wch: 14 },
+          { wch: 60 },
+          { wch: 6 },
+          { wch: 18 },
+          { wch: 18 },
+        ];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Journal");
+        XLSX.writeFile(wb, `${j.name || "journal"}.xlsx`);
+      } catch (err) {
+        toast.error(err?.response?.data?.message || err?.message || "Failed to download Excel.");
+      } finally {
+        setLoading(false);
+      }
+    };
 
   const getSuggestedJournalName = (opts = {}) => {
     const now = new Date();
@@ -1399,8 +2029,8 @@ export default function AccountingFinance() {
     const dateVal = opts.date || journalGenerateDate;
     const start = opts.start || journalGenerateStart;
     const end = opts.end || journalGenerateEnd;
-    const company = (opts.companyName || filterCompanyName || "").trim();
-    const customer = (opts.customerName || filterCustomerName || "").trim();
+    const company = (opts.companyName || reportFilterCompanyName || "").trim();
+    const customer = (opts.customerName || reportFilterCustomerName || "").trim();
     const product = (opts.productName || "").trim();
 
     let rangeLabel = "";
@@ -1415,18 +2045,21 @@ export default function AccountingFinance() {
       rangeLabel = String(y);
     } else if (range === "custom") {
       rangeLabel = [start, end].filter(Boolean).join(" to ");
+    } else if (range === "all") {
+      rangeLabel = "All Dates";
     } else {
       rangeLabel = now.toLocaleDateString("en-US", { year: "numeric", month: "long" });
     }
 
-    const parts = ["Journal", rangeLabel].filter(Boolean);
-    if (company) parts.push(company);
-    if (customer) parts.push(customer);
-    if (product) parts.push(product);
-    return parts.join(" - ");
-  };
+      const parts = ["Journal", rangeLabel].filter(Boolean);
+      if (company) parts.push(company);
+      if (customer) parts.push(customer);
+      if (product) parts.push(product);
+      const base = parts.join(" - ");
+      return `${base} ${getShortByStamp()}`;
+    };
 
-  const handleFilterCompany = (value) => {
+    const handleFilterCompany = (value) => {
     const v = String(value || "").trim();
     if (!v) {
       setFilterCompanyId("");
@@ -1442,6 +2075,28 @@ export default function AccountingFinance() {
     setFilterCompanyId(v);
     setFilterCompanyName(v);
   };
+
+    const handleReportFilterCompany = (value) => {
+      const v = String(value || "").trim();
+      if (!v) {
+        setReportFilterCompanyId("");
+        setReportFilterCompanyName("");
+        return;
+      }
+      const match = companyOptions.find((c) => String(c.id) === String(v));
+      setReportFilterCompanyId("");
+      setReportFilterCompanyName(match?.name || v);
+    };
+
+    const handleJournalFilterCompanyDraft = (value) => {
+      const v = String(value || "").trim();
+      if (!v) {
+        setJournalFilterCompanyName("");
+        return;
+      }
+      const match = companyOptions.find((c) => String(c.id) === String(v));
+      setJournalFilterCompanyName(match?.name || v);
+    };
 
   const accountLabel = (id) => {
     const a = accountOptions.find((x) => String(x.id) === String(id));
@@ -1522,19 +2177,15 @@ export default function AccountingFinance() {
   const reportPreviewEntries = useMemo(() => {
     const rows = [];
     const selected = activeGeneratedJournalId
-      ? generatedJournalList.find((x) => x.id === activeGeneratedJournalId)
+      ? generatedJournalList.find((x) => String(x._id || x.id) === String(activeGeneratedJournalId))
       : null;
-    const productMatch = (productTypes || []).find((p) => String(p._id) === String(filterProductId || ""));
-    const productName = productMatch
-      ? [String(productMatch.brand || "").trim(), String(productMatch.name || "").trim()].filter(Boolean).join(" - ")
-      : "";
+    const productName = reportFilterProductLabel || "";
     const filterBase = selected || {
-      startDate: rangeStart || "",
-      endDate: rangeEnd || "",
-      companyId: filterCompanyId || "",
-      companyName: filterCompanyName || "",
-      partyName: filterCustomerName || "",
-      itemId: filterProductId || "",
+      startDate: reportRangeStart || "",
+      endDate: reportRangeEnd || "",
+      companyName: reportFilterCompanyName || "",
+      partyName: reportFilterCustomerName || "",
+      itemId: reportFilterProductId || "",
       productName,
     };
     const hasFilter = (j) => {
@@ -1543,18 +2194,21 @@ export default function AccountingFinance() {
       const inRange =
         (!filterBase.startDate || (d && d >= new Date(filterBase.startDate))) &&
         (!filterBase.endDate || (d && d <= new Date(`${filterBase.endDate}T23:59:59.999`)));
-      const companyFilter = String(filterBase.companyName || filterBase.companyId || "").toLowerCase();
-      const byCompany =
-        !companyFilter ||
-        String(j?.companyId || "").toLowerCase() === companyFilter ||
-        String(j?.companyName || "").toLowerCase() === companyFilter;
+      const companyFilter = normalizeText(filterBase.companyName || filterBase.companyId || "");
+      const byCompany = !companyFilter
+        ? true
+        : [String(j?.companyId || ""), String(j?.companyName || "")]
+            .map((v) => normalizeText(v))
+            .some((v) => v === companyFilter || v.includes(companyFilter));
       const lines = j?.lines || [];
-      const partyFilter = String(filterBase.partyName || "").toLowerCase();
-      const byParty = !partyFilter || lines.some((l) => String(l.partyName || "").toLowerCase().includes(partyFilter));
+      const partyFilter = normalizeText(filterBase.partyName || "");
+      const byParty = !partyFilter
+        ? true
+        : lines.some((l) => normalizeText(l.partyName || "").includes(partyFilter)) ||
+          normalizeText(j?.customerName || "").includes(partyFilter);
       const byItemId = !filterBase.itemId || lines.some((l) => String(l.itemId || "") === String(filterBase.itemId || ""));
-      const itemNameFilter = String(filterBase.productName || "").toLowerCase();
-      const byItemName =
-        !itemNameFilter || lines.some((l) => String(l.itemName || "").toLowerCase().includes(itemNameFilter));
+      const itemNameFilter = normalizeText(filterBase.productName || "");
+      const byItemName = !itemNameFilter || lines.some((l) => normalizeText(l.itemName || "").includes(itemNameFilter));
       return inRange && byCompany && byParty && byItemId && byItemName;
     };
     const journals = [...(generatedJournals || [])]
@@ -1619,12 +2273,11 @@ export default function AccountingFinance() {
     generatedJournals,
     activeGeneratedJournalId,
     generatedJournalList,
-    filterCompanyId,
-    filterCompanyName,
-    filterCustomerName,
-    filterProductId,
-    rangeStart,
-    rangeEnd,
+    reportFilterCompanyName,
+    reportFilterCustomerName,
+    reportFilterProductId,
+    reportRangeStart,
+    reportRangeEnd,
     productTypes,
   ]);
 
@@ -1712,19 +2365,24 @@ export default function AccountingFinance() {
       })
       .join("");
 
-    const printHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Journal Print</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { font-family: "Times New Roman", serif; color: #111; padding: 24px; }
-            .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-            .title { font-size: 18px; font-weight: 700; text-transform: uppercase; }
-            .meta { font-size: 12px; color: #333; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #222; padding: 6px 8px; vertical-align: top; font-size: 12px; }
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Journal Print</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: "Times New Roman", serif; color: #111; padding: 24px; }
+              .print-header { text-align: center; margin-bottom: 10px; }
+              .print-header { margin-bottom: 4px; line-height: 1.1; }
+              .print-header img { max-height: 144px; margin: 0; display: inline-block; }
+              .print-header .name { font-weight: 700; font-size: 14px; margin: 0; }
+              .print-header .line { font-size: 11px; color: #333; margin: 0; }
+              .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+              .title { font-size: 18px; font-weight: 700; text-transform: uppercase; }
+              .meta { font-size: 12px; color: #333; }
+              table { width: 100%; border-collapse: collapse; }
+              th, td { border: 1px solid #222; padding: 6px 8px; vertical-align: top; font-size: 12px; }
             th { text-align: center; font-weight: 700; }
             .date-cell { width: 90px; text-align: center; }
             .details-cell { width: 55%; }
@@ -1737,12 +2395,18 @@ export default function AccountingFinance() {
             .entry-row .date-cell > div { line-height: 1.2; }
             .narration-row td { border-top: 0; }
           </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">Journal</div>
-            <div class="meta">Voucher: ${entry.voucherNo || "-"}</div>
-          </div>
+          </head>
+          <body>
+            <div class="print-header">
+              ${resolvePrintHeader().logoUrl ? `<img src="${resolvePrintHeader().logoUrl}" alt="logo" />` : ""}
+              ${resolvePrintHeader().name ? `<div class="name">${resolvePrintHeader().name}</div>` : ""}
+              ${resolvePrintHeader().address ? `<div class="line">${resolvePrintHeader().address}</div>` : ""}
+              ${resolvePrintHeader().email ? `<div class="line">${resolvePrintHeader().email}</div>` : ""}
+            </div>
+            <div class="header">
+              <div class="title">Journal</div>
+              <div class="meta">Voucher: ${entry.voucherNo || "-"}</div>
+            </div>
           <table>
             <thead>
               <tr>
@@ -1791,17 +2455,15 @@ export default function AccountingFinance() {
     }
   };
 
-  const handleDownloadPdf = async (id) => {
-    try {
-      setLoading(true);
-      const entry = await fetchVoucher(id);
-      if (!entry) throw new Error("Voucher not found.");
-      const doc = new jsPDF();
-      doc.setFontSize(12);
-      doc.text(`Journal: ${entry.voucherNo || "-"}`, 14, 14);
-      doc.setFontSize(10);
-      doc.text(`Company: ${entry.companyName || "-"}`, 14, 20);
-      doc.text(`Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`, 14, 26);
+    const handleDownloadPdf = async (id) => {
+      try {
+        setLoading(true);
+        const entry = await fetchVoucher(id);
+        if (!entry) throw new Error("Voucher not found.");
+        const doc = new jsPDF();
+        const title = `Journal: ${entry.voucherNo || "-"}`;
+        const subTitle = `Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`;
+        const startY = addPdfHeader(doc, title, subTitle);
 
       const rows = journalRowsForEntry(entry);
       const body = rows.map((r) => [
@@ -1812,13 +2474,13 @@ export default function AccountingFinance() {
         r.credit,
       ]);
 
-      autoTable(doc, {
-        head: [["Date", "References", "J.R.", "Amount (Dr.)", "Amount (Cr.)"]],
-        body,
-        startY: 32,
-        styles: { fontSize: 9 },
-        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
-      });
+        autoTable(doc, {
+          head: [["Date", "References", "J.R.", "Amount (Dr.)", "Amount (Cr.)"]],
+          body,
+          startY,
+          styles: { fontSize: 9 },
+          columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
+        });
       doc.save(`${entry.voucherNo || "journal"}.pdf`);
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || "Failed to download PDF.");
@@ -1856,20 +2518,21 @@ export default function AccountingFinance() {
     return generatedJournals.filter((j) => ids.has(j._id));
   };
 
-  const handleBulkDownloadPdf = () => {
-    const entries = resolveSelectedEntries();
-    if (!entries.length) {
-      toast.error("Select at least one voucher to download.");
-      return;
-    }
-    const doc = new jsPDF();
-    entries.forEach((entry, index) => {
-      if (index > 0) doc.addPage();
-      doc.setFontSize(12);
-      doc.text(`Journal Voucher: ${entry.voucherNo || "-"}`, 14, 14);
-      doc.setFontSize(10);
-      doc.text(`Company: ${entry.companyName || "-"}`, 14, 20);
-      doc.text(`Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`, 14, 26);
+    const handleBulkDownloadPdf = () => {
+      const entries = resolveSelectedEntries();
+      if (!entries.length) {
+        toast.error("Select at least one voucher to download.");
+        return;
+      }
+      const doc = new jsPDF();
+      const startY = addPdfHeader(doc, "Journal Vouchers", "");
+      entries.forEach((entry, index) => {
+        if (index > 0) doc.addPage();
+        const entryStartY = index === 0 ? startY : addPdfHeader(
+          doc,
+          `Journal Voucher: ${entry.voucherNo || "-"}`,
+          `Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`
+        );
 
       const body = [];
       (entry.lines || []).forEach((l) => {
@@ -1877,7 +2540,7 @@ export default function AccountingFinance() {
         const credit = round2(n0(l.credit));
         const isDebit = debit > 0;
         const details = isDebit
-          ? `${l.accountName || l.accountCode || "Account"} Dr`
+          ? `${l.accountName || l.accountCode || "Account"} Dr.`
           : `${l.accountName || l.accountCode || "Account"}`;
         body.push([
           `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}`,
@@ -1891,14 +2554,14 @@ export default function AccountingFinance() {
       if (narration) {
         body.push(["", `(${narration})`, "", "", ""]);
       }
-      autoTable(doc, {
-        head: [["Date", "Details", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
-        body,
-        startY: 32,
-        styles: { fontSize: 9 },
-        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
+        autoTable(doc, {
+          head: [["Date", "Details", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
+          body,
+          startY: entryStartY,
+          styles: { fontSize: 9 },
+          columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
+        });
       });
-    });
     doc.save("journals.pdf");
   };
 
@@ -1924,7 +2587,7 @@ export default function AccountingFinance() {
         rows.push({
           Date: `${formatYear(entry.date)} ${formatMonthDay(entry.date)}`,
           Details: isDebit
-            ? `${l.accountName || l.accountCode || "Account"} Dr`
+            ? `${l.accountName || l.accountCode || "Account"} Dr.`
             : `${l.accountName || l.accountCode || "Account"}`,
           "L.F.": "",
           "Amount (Dr.)": isDebit ? debit.toFixed(2) : "",
@@ -2084,19 +2747,33 @@ export default function AccountingFinance() {
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setJournalFilterOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                  title="Filters"
-                >
-                  <Filter size={16} /> Filters
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const suggested = getSuggestedJournalName();
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openJournalFilterModal}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm hover:bg-gray-50 ${
+                      isJournalReportFilterApplied
+                        ? "border-emerald-400 text-emerald-700 bg-emerald-50"
+                        : "border-gray-300 text-gray-700"
+                    }`}
+                    title="Filters"
+                  >
+                    <Filter size={16} /> Filters
+                  </button>
+                  {isJournalReportFilterApplied && (
+                    <button
+                      type="button"
+                      onClick={clearJournalFilters}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                      title="Clear Filters"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const suggested = getSuggestedJournalName();
                     setJournalGenerateName(suggested);
                     setJournalNameTouched(false);
                     setJournalGenerateOpen(true);
@@ -2233,8 +2910,8 @@ export default function AccountingFinance() {
                       </td>
                     </tr>
                   )}
-                  {generatedJournalList.map((j, idx) => (
-                    <tr key={j.id}>
+                    {generatedJournalList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
                       <td className="px-3 py-2">{idx + 1}</td>
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
@@ -2247,19 +2924,39 @@ export default function AccountingFinance() {
                           >
                             <Eye size={14} />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadGeneratedJournal(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Download"
-                          >
-                            <Download size={14} />
-                          </button>
+                            <div className="flex">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadGeneratedJournal(j)}
+                                className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                title="Download PDF"
+                              >
+                                <Download size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setDownloadMenu({
+                                    open: true,
+                                    journal: j,
+                                    anchor: { x: rect.right, y: rect.bottom + 4 },
+                                  });
+                                }}
+                                className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                                title="Download Options"
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                            </div>
                           <button
                             type="button"
                             onClick={() =>
-                              setGeneratedJournalList((prev) => prev.filter((x) => x.id !== j.id))
-                            }
+                                api
+                                  .delete(`/accounting/generated-journals/${j._id || j.id}`)
+                                  .then(() => loadGeneratedJournalList())
+                                  .catch(() => {})
+                              }
                             className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                             title="Delete"
                           >
@@ -2546,8 +3243,7 @@ export default function AccountingFinance() {
 
       {activeTab === "journal-entry" && (
         <div className="space-y-4">
-          <div className="grid md:grid-cols-5 gap-4 items-start">
-          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4 md:col-span-3">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm font-semibold text-gray-900">New Voucher</div>
               <div className="flex items-center gap-2">
@@ -3370,120 +4066,6 @@ export default function AccountingFinance() {
             )}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 md:col-span-2">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 overflow-x-hidden">
-              <table className="w-full text-sm border border-gray-200 table-fixed">
-                <thead className="bg-gray-50 text-gray-800">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Date</th>
-                    <th className="text-left font-semibold px-3 py-2 border border-gray-200">Details</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[50px] border border-gray-200">L.F.</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Amount (Dr.)</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">Amount (Cr.)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewEntries.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
-                        Start entering rows above to preview the journal format here.
-                      </td>
-                    </tr>
-                  )}
-                  {previewEntries.map((entry, idx) => (
-                    <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
-                      {entry.isNarrationRow ? (
-                        <tr>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          >
-                            ({withBeing(entry.narration)})
-                          </td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                        </tr>
-                      ) : (
-                        <tr>
-                          <td
-                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          >
-                            {entry.showDate && (
-                              <>
-                                <div className="text-xs text-gray-700">{formatYear(entry.date)}</div>
-                                <div className="text-xs text-gray-700">{formatMonthDay(entry.date)}</div>
-                              </>
-                            )}
-                          </td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          >
-                            <div
-                              className={`flex items-center justify-between gap-2 ${
-                                entry.side === "credit" ? "pl-8 text-gray-700" : ""
-                              }`}
-                            >
-                              <span>{entry.account}</span>
-                              {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
-                            </div>
-                          </td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          >
-                            {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
-                          </td>
-                          <td
-                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          >
-                            {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          </div>
-
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             {showVoucherFilters && (
               <div className="grid md:grid-cols-6 gap-3 items-end">
@@ -3520,20 +4102,31 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">Product</label>
+                <div className="md:col-span-2">
+                  <label className="block text-xs text-gray-600 mb-1">Customer</label>
                   <select
-                    value={filterProductId}
-                    onChange={(e) => setFilterProductId(e.target.value)}
+                    value={filterCustomerName}
+                    onChange={(e) => setFilterCustomerName(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
-                    <option value="">All products</option>
-                    {(productTypes || []).map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {String(p.brand || "").trim()} {String(p.name || "").trim()}
+                    <option value="">All customers</option>
+                    {customerOptions.map((c) => (
+                      <option key={c._id || c.name} value={c.name}>
+                        {c.name}
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="md:col-span-1">
+                  <label className="block text-xs text-gray-600 mb-1">Product</label>
+                  <GroupedProductDropdown
+                    valueId={filterProductId || ""}
+                    valueLabel={filterProductLabel || ""}
+                    groups={productTypesByBrand.groups}
+                    preferredBrandKey={filterCompanyName}
+                    placeholder="Select product"
+                    onSelect={({ id }) => setFilterProductId(id)}
+                  />
                 </div>
                 <div className="md:col-span-1">
                   <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
@@ -3550,16 +4143,6 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="md:col-span-1 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => loadVouchers().catch(() => {})}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-                  >
-                    <RefreshCcw size={16} /> Apply
-                  </button>
-                </div>
-
                 <div className="md:col-span-3">
                   <label className="block text-xs text-gray-600 mb-1">Account (optional filter)</label>
                   <select
@@ -3574,6 +4157,15 @@ export default function AccountingFinance() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="md:col-span-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadVouchers().catch(() => {})}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                  >
+                    <RefreshCcw size={16} /> Apply
+                  </button>
                 </div>
               </div>
             )}
@@ -3694,19 +4286,6 @@ export default function AccountingFinance() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <Reports embedded initialTab="daybook" allowedTabs={["daybook"]} hideFilters />
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setJournalGenerateOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-            >
-              <Printer size={16} /> Generate
-            </button>
-          </div>
         </div>
       )}
 
@@ -3785,6 +4364,7 @@ export default function AccountingFinance() {
                   }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 >
+                  <option value="all">All Dates</option>
                   <option value="day">Day (Today)</option>
                   <option value="particular">Particular Date</option>
                   <option value="month">Month</option>
@@ -3877,13 +4457,13 @@ export default function AccountingFinance() {
 
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-600 mb-1">Company</label>
-                <select
-                  value={filterCompanyId || filterCompanyName}
-                  onChange={(e) => handleFilterCompany(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                >
-                  <option value="">All companies</option>
-                  {companyOptions.map((c) => (
+                  <select
+                    value={journalFilterCompanyName}
+                    onChange={(e) => handleJournalFilterCompanyDraft(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All companies</option>
+                    {companyOptions.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -3893,13 +4473,13 @@ export default function AccountingFinance() {
 
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-600 mb-1">Customer</label>
-                <select
-                  value={filterCustomerName}
-                  onChange={(e) => setFilterCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                >
-                  <option value="">All customers</option>
-                  {customerOptions.map((c) => (
+                  <select
+                    value={journalFilterCustomerName}
+                    onChange={(e) => setJournalFilterCustomerName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                    <option value="">All customers</option>
+                    {customerOptions.map((c) => (
                     <option key={c._id || c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -3907,17 +4487,17 @@ export default function AccountingFinance() {
                 </select>
               </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-gray-600 mb-1">Product</label>
-                <select
-                  value={filterProductId}
-                  onChange={(e) => setFilterProductId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                >
-                  <option value="">All products</option>
-                  {(productTypes || []).map((p) => (
-                    <option key={p._id} value={p._id}>
-                      {String(p.brand || "").trim()} {String(p.name || "").trim()}
+                <div className="md:col-span-2">
+                  <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
+                  <select
+                    value={journalFilterVoucherType}
+                    onChange={(e) => setJournalFilterVoucherType(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  >
+                  <option value="">All</option>
+                  {VOUCHER_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
                     </option>
                   ))}
                 </select>
@@ -3944,6 +4524,216 @@ export default function AccountingFinance() {
                 Apply
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {journalPreviewOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
+          onClick={() => setJournalPreviewOpen(false)}
+        >
+          <div
+            className="w-full max-w-4xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
+              <button
+                type="button"
+                onClick={() => setJournalPreviewOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="text-center space-y-1">
+              <div className="text-xs uppercase tracking-wide text-gray-500">Journal Entries</div>
+              <div className="text-sm font-semibold text-gray-900">
+                For {journalPreviewMeta?.rangeLabel || "All Dates"}
+              </div>
+              {!!journalPreviewMeta?.companyName && (
+                <div className="text-xs text-gray-700">{journalPreviewMeta.companyName}</div>
+              )}
+              {!!journalPreviewMeta?.customerName && (
+                <div className="text-xs text-gray-700">{journalPreviewMeta.customerName}</div>
+              )}
+              {!!journalPreviewMeta?.productName && (
+                <div className="text-xs text-gray-700">{journalPreviewMeta.productName}</div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-hidden">
+              <table className="w-full text-sm border border-gray-200 table-fixed">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[260px] border border-gray-200">Particulars</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">L.F.</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Debit Amount (Rs.)</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Credit Amount (Rs.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {journalPreviewEntries.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No journals found for the selected filters.
+                      </td>
+                    </tr>
+                  )}
+                  {journalPreviewEntries.map((entry, idx) => (
+                    <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
+                      {entry.isNarrationRow ? (
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            ({withBeing(entry.narration)})
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <td
+                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.showDate && (
+                              <>
+                                <div className="text-xs text-gray-700">{formatYear(entry.date)}</div>
+                                <div className="text-xs text-gray-700">{formatMonthDay(entry.date)}</div>
+                              </>
+                            )}
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            <div
+                              className={`flex items-center justify-between gap-2 ${
+                                entry.side === "credit" ? "pl-4 text-gray-700" : ""
+                              }`}
+                            >
+                              <span className="truncate">{entry.account}</span>
+                              {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
+                            </div>
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          ></td>
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
+                          </td>
+                          <td
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          >
+                            {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {journalInfoDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-sm p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Notice</div>
+              <button
+                type="button"
+                onClick={() => setJournalInfoDialog({ open: false, message: "" })}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="text-sm text-gray-700">{journalInfoDialog.message}</div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setJournalInfoDialog({ open: false, message: "" })}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {downloadMenu.open && (
+        <div
+          className="fixed inset-0 z-50"
+          onClick={() => setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } })}
+        >
+          <div
+            className="absolute bg-white rounded-lg border border-gray-200 shadow-lg py-1 text-sm"
+            style={{ top: downloadMenu.anchor.y, left: downloadMenu.anchor.x, transform: "translateX(-100%)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const j = downloadMenu.journal;
+                setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+                handleDownloadGeneratedJournal(j);
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50"
+            >
+              Download PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const j = downloadMenu.journal;
+                setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+                handleDownloadGeneratedJournalExcel(j);
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50"
+            >
+              Download Excel
+            </button>
           </div>
         </div>
       )}

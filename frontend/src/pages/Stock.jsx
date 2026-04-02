@@ -514,8 +514,29 @@ export default function Stock() {
     );
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     const doc = new jsPDF();
+    let header = { name: "", address: "", email: "", logoUrl: "" };
+    try {
+      const res = await api.get("/settings");
+      const data = res.data?.data || res.data || {};
+      const general = data.general || data.generalSettings || data;
+      const rawLogo = general?.logoUrl || general?.logo || "";
+      const base = api.defaults.baseURL || "";
+      const origin = base.replace(/\/api\/?$/i, "");
+      const logoUrl = rawLogo
+        ? /^https?:\/\//i.test(rawLogo)
+          ? rawLogo
+          : `${origin}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
+        : "";
+      header = {
+        name: String(general?.companyName || general?.shortName || "").trim(),
+        address: String(general?.address || "").trim(),
+        email: String(general?.email || "").trim(),
+        logoUrl,
+      };
+    } catch {}
+    // revert to legacy: no custom header
     const body = exportRows.map((r) => [
       r["Company Name"],
       r.Products,
@@ -523,7 +544,6 @@ export default function Stock() {
       r.Status,
       r.Updated,
     ]);
-    doc.text("Production Stock", 14, 12);
     autoTable(doc, {
       startY: 18,
       head: [["Company Name", "Products", "Stock (kg)", "Status", "Updated"]],
@@ -533,7 +553,63 @@ export default function Stock() {
     doc.save(`production_stock_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
-  const handlePrint = () => window.print();
+  const handlePrint = async () => {
+    let header = { name: "", address: "", email: "", logoUrl: "" };
+    try {
+      const res = await api.get("/settings");
+      const data = res.data?.data || res.data || {};
+      const general = data.general || data.generalSettings || data;
+      const rawLogo = general?.logoUrl || general?.logo || "";
+      const base = api.defaults.baseURL || "";
+      const origin = base.replace(/\/api\/?$/i, "");
+      const logoUrl = rawLogo
+        ? /^https?:\/\//i.test(rawLogo)
+          ? rawLogo
+          : `${origin}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
+        : "";
+      header = {
+        name: String(general?.companyName || general?.shortName || "").trim(),
+        address: String(general?.address || "").trim(),
+        email: String(general?.email || "").trim(),
+        logoUrl,
+      };
+    } catch {}
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    const tableHtml = document.getElementById("data-table-print")?.outerHTML ?? "";
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Production Stock</title>
+          <style>
+            body { font-family: system-ui, sans-serif; padding: 16px; }
+            .print-header { text-align: center; margin-bottom: 4px; line-height: 1.1; }
+            .print-header img { max-height: 144px; margin: 0; display: inline-block; }
+            .print-header .name { font-weight: 700; font-size: 14px; margin: 0; }
+            .print-header .line { font-size: 11px; color: #333; margin: 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+            th { background: #ecfdf5; color: #065f46; }
+          </style>
+        </head>
+        <body>
+          <div class="print-header">
+            ${header.logoUrl ? `<img src="${header.logoUrl}" alt="logo" />` : ""}
+            ${header.name ? `<div class="name">${header.name}</div>` : ""}
+            ${header.address ? `<div class="line">${header.address}</div>` : ""}
+            ${header.email ? `<div class="line">${header.email}</div>` : ""}
+          </div>
+          <h2>Production Stock Overview</h2>
+          <p>Printed on ${new Date().toLocaleString()}</p>
+          ${tableHtml}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
 
   // --------------------------------------------------------------------
   // RENDER

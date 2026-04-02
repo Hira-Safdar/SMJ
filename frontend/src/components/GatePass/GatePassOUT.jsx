@@ -198,6 +198,20 @@ export default function GatePassOUT() {
     return `${s.slice(0, 4)}-${s.slice(4, 11)}`;
   };
 
+  const normalizeCompanyName = (value) =>
+    toTitleCase(String(value || "").trim().replace(/\s+/g, " "));
+
+  const mergeOptionsCaseInsensitive = (...lists) => {
+    const map = new Map();
+    lists.flat().forEach((value) => {
+      const clean = normalizeCompanyName(value);
+      if (!clean) return;
+      const key = normalizeText(clean);
+      if (!map.has(key)) map.set(key, clean);
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  };
+
   // Load settings
   useEffect(() => {
     const loadSettings = async () => {
@@ -218,8 +232,8 @@ export default function GatePassOUT() {
         if (res.data && res.data.success !== false) {
           const s = res.data.data || res.data;
           if (Array.isArray(s.brandOptions)) {
-            setBrandOptions(
-              Array.from(new Set(s.brandOptions.filter(Boolean))).sort()
+            setBrandOptions((prev) =>
+              mergeOptionsCaseInsensitive(prev || [], s.brandOptions || [])
             );
           }
         }
@@ -228,7 +242,14 @@ export default function GatePassOUT() {
     const loadProducts = async () => {
       try {
         const res = await api.get("/product-types");
-        setProductCatalog(res.data?.data || []);
+        const rows = res.data?.data || [];
+        setProductCatalog(rows);
+        const brands = Array.from(
+          new Set(rows.map((r) => normalizeCompanyName(r.brand)).filter(Boolean))
+        ).sort();
+        setBrandOptions((prev) =>
+          mergeOptionsCaseInsensitive(prev || [], brands || [])
+        );
       } catch {}
     };
     loadSettings();
@@ -236,7 +257,22 @@ export default function GatePassOUT() {
   }, []);
 
   useEffect(() => {
-    const onProductRefresh = () => loadProducts();
+    const onProductRefresh = () => {
+      const loadProducts = async () => {
+        try {
+          const res = await api.get("/product-types");
+          const rows = res.data?.data || [];
+          setProductCatalog(rows);
+          const brands = Array.from(
+            new Set(rows.map((r) => normalizeCompanyName(r.brand)).filter(Boolean))
+          ).sort();
+          setBrandOptions((prev) =>
+            mergeOptionsCaseInsensitive(prev || [], brands || [])
+          );
+        } catch {}
+      };
+      loadProducts();
+    };
     window.addEventListener("product:refresh", onProductRefresh);
     return () => window.removeEventListener("product:refresh", onProductRefresh);
   }, []);
@@ -878,7 +914,7 @@ export default function GatePassOUT() {
       `${apiHost}/uploads/logo.png`;
 
     const logoHtml = logo
-      ? `<img src="${logo}" style="height:50px;margin-right:12px;" alt="logo" />`
+      ? `<img src="${logo}" style="height:96px;margin-right:10px;" alt="logo" />`
       : `<div style="width:50px;height:50px;background:#d1fae5;color:#047857;display:inline-flex;align-items:center;justify-content:center;font-weight:700;margin-right:12px;border-radius:8px;font-size:20px;">GP</div>`;
 
     const customerName = String(row.customer || "").trim();
@@ -921,7 +957,9 @@ export default function GatePassOUT() {
       <style>
         @media print { @page { size: A5; margin: 10mm; } }
         body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;margin:0;padding:12mm;width:148mm;min-height:210mm;box-sizing:border-box;}
-        .header{display:flex;align-items:center;border-bottom:2px solid #047857;padding-bottom:10px;margin-bottom:12px;}
+        .header{display:flex;flex-direction:row;align-items:center;gap:10px;border-bottom:2px solid #047857;padding-bottom:4px;margin-bottom:4px;line-height:1;}
+        .header img{margin:0;display:block;}
+        .header .title{margin-top:0;text-align:left;}
         .title{font-weight:700;color:#047857;font-size:18px;line-height:1.2;}
         .addr{font-size:11px;color:#6b7280;margin-top:2px;}
         .tag{display:inline-block;margin-top:4px;padding:3px 8px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:11px;}

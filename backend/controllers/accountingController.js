@@ -3,6 +3,7 @@ const AccountingEntity = require("../models/accountingEntityModel");
 const AccountingParty = require("../models/accountingPartyModel");
 const AccountingProduct = require("../models/accountingProductModel");
 const AccountingFilterTemplate = require("../models/accountingFilterTemplateModel");
+const AccountingGeneratedJournal = require("../models/accountingGeneratedJournalModel");
 const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
 const { getDateRangeFromQuery } = require("../utils/dateRange");
@@ -71,15 +72,18 @@ async function nextVoucherNo() {
 }
 
 async function getEntriesInRange({ start, end, companyId, voucherType, status = "POSTED", bookType }) {
-  const filter = { date: { $gte: start, $lte: end } };
-  if (status) filter.status = status;
-  if (companyId) filter.companyId = companyId;
-  if (Array.isArray(voucherType) && voucherType.length) filter.voucherType = { $in: voucherType };
-  else if (voucherType) filter.voucherType = voucherType;
-  if (Array.isArray(bookType) && bookType.length) filter.bookType = { $in: bookType };
-  else if (bookType) filter.bookType = bookType;
-  return await JournalEntry.find(filter).sort({ date: 1, createdAt: 1 }).lean();
-}
+    const filter = { date: { $gte: start, $lte: end } };
+    if (status) filter.status = status;
+    if (companyId) filter.companyId = companyId;
+    if (Array.isArray(voucherType)) {
+      if (voucherType.length) filter.voucherType = { $in: voucherType };
+    } else if (voucherType) {
+      filter.voucherType = voucherType;
+    }
+    if (Array.isArray(bookType) && bookType.length) filter.bookType = { $in: bookType };
+    else if (bookType) filter.bookType = bookType;
+    return await JournalEntry.find(filter).sort({ date: 1, createdAt: 1 }).lean();
+  }
 
 async function getLinesForEntries(entryIds, extraFilter = {}) {
   if (!entryIds?.length) return [];
@@ -360,6 +364,50 @@ exports.deleteFilterTemplate = async (req, res) => {
     res.json({ success: true, message: "Template deleted." });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to delete template." });
+  }
+};
+
+exports.getGeneratedJournals = async (_req, res) => {
+  try {
+    const rows = await AccountingGeneratedJournal.find({}).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load generated journals." });
+  }
+};
+
+exports.createGeneratedJournal = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const name = String(payload.name || "").trim();
+    if (!name) return res.status(400).json({ success: false, message: "Name is required." });
+    const doc = await AccountingGeneratedJournal.create({
+      name,
+      range: String(payload.range || "all"),
+      rangeDate: String(payload.rangeDate || ""),
+      startDate: String(payload.startDate || ""),
+      endDate: String(payload.endDate || ""),
+      companyId: String(payload.companyId || ""),
+      companyName: String(payload.companyName || ""),
+      partyName: String(payload.partyName || ""),
+      itemId: String(payload.itemId || ""),
+      itemName: String(payload.itemName || ""),
+      voucherType: String(payload.voucherType || ""),
+    });
+    res.status(201).json({ success: true, data: doc });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || "Unable to create generated journal." });
+  }
+};
+
+exports.deleteGeneratedJournal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doc = await AccountingGeneratedJournal.findByIdAndDelete(id).lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Generated journal not found." });
+    res.json({ success: true, message: "Generated journal deleted." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Unable to delete generated journal." });
   }
 };
 
@@ -934,6 +982,8 @@ exports.getVouchers = async (req, res) => {
     if (accountIds.length) lineFilter.accountId = { $in: accountIds };
     if (partyIds.length) lineFilter.partyId = { $in: partyIds };
     if (partyName) lineFilter.partyName = new RegExp(escRe(partyName), "i");
+    if (itemIds.length) lineFilter.itemId = { $in: itemIds };
+    if (itemName) lineFilter.itemName = new RegExp(escRe(itemName), "i");
 
     const lines = await JournalLine.find(lineFilter).lean();
     const bucket = new Map(); // entryId -> { debit, credit }
@@ -946,7 +996,8 @@ exports.getVouchers = async (req, res) => {
     });
 
     // If account/party filters are applied, only show entries that have at least one matching line.
-    const filteredEntries = (accountIds.length || partyIds.length)
+    const hasLineFilters = accountIds.length || partyIds.length || !!partyName || itemIds.length || !!itemName;
+    const filteredEntries = hasLineFilters
       ? entries.filter((e) => bucket.has(String(e._id)))
       : entries;
 
@@ -1033,16 +1084,13 @@ exports.createVoucher = async (req, res) => {
         const entry = await postJournalEntry({
           date: eBody.date || new Date(),
           voucherType: eBody.voucherType || body.voucherType || "JOURNAL",
-          bookType: eBody.bookType || body.bookType || "JOURNAL",
           companyId: companyId || "",
           companyName,
-          referenceNo: String(eBody.referenceNo || body.referenceNo || "").trim(),
-          description: narration,
+          customerId: String(eBody.customerId || "").trim(),
+          customerName: String(eBody.customerName || "").trim(),
+          productTypeId: String(eBody.productTypeId || "").trim(),
+          productName: String(eBody.productName || "").trim(),
           narration,
-          createdBy: eBody.createdBy || body.createdBy || "user",
-          sourceModule: "MANUAL",
-          sourceRefType: "VOUCHER",
-          sourceRefId: `${Date.now()}-${i + 1}`,
           lines: normLines,
         });
 
@@ -1058,10 +1106,8 @@ exports.createVoucher = async (req, res) => {
           voucherNo: v.voucherNo,
           date: v.date,
           voucherType: v.voucherType,
-          bookType: v.bookType,
           companyId: v.companyId,
           companyName: v.companyName,
-          description: v.description || v.narration || "",
           status: v.status || "POSTED",
         })),
       };
@@ -1089,16 +1135,13 @@ exports.createVoucher = async (req, res) => {
     const entry = await postJournalEntry({
       date: body.date || new Date(),
       voucherType: body.voucherType || "JOURNAL",
-      bookType: body.bookType || "JOURNAL",
       companyId: companyId || "",
       companyName,
-      referenceNo: String(body.referenceNo || "").trim(),
-      description: narration,
+      customerId: String(body.customerId || "").trim(),
+      customerName: String(body.customerName || "").trim(),
+      productTypeId: String(body.productTypeId || "").trim(),
+      productName: String(body.productName || "").trim(),
       narration,
-      createdBy: body.createdBy || "user",
-      sourceModule: "MANUAL",
-      sourceRefType: "VOUCHER",
-      sourceRefId: String(Date.now()),
       lines,
     });
     if (!entry) return res.status(400).json({ success: false, message: "No valid lines to post." });
@@ -1157,11 +1200,13 @@ exports.updateVoucher = async (req, res) => {
 
     entry.date = body.date ? new Date(body.date) : entry.date;
     entry.voucherType = body.voucherType || entry.voucherType;
-    entry.bookType = body.bookType || entry.bookType || "JOURNAL";
     entry.companyId = companyId;
     entry.companyName = companyName;
-    entry.referenceNo = String(body.referenceNo ?? entry.referenceNo ?? "").trim();
-    entry.description = narration;
+    entry.customerId = String(body.customerId ?? entry.customerId ?? "").trim();
+    entry.customerName = String(body.customerName ?? entry.customerName ?? "").trim();
+    entry.productTypeId = String(body.productTypeId ?? entry.productTypeId ?? "").trim();
+    entry.productName = String(body.productName ?? entry.productName ?? "").trim();
+    entry.referenceNo = entry.referenceNo || "";
     entry.narration = narration;
     await entry.save();
 
@@ -1204,26 +1249,24 @@ exports.deleteVoucher = async (req, res) => {
   }
 };
 
-exports.getJournalEntries = async (req, res) => {
-  try {
-    const { start, end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
-    const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
-    const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
-    const companyName = String(req.query.companyName || "").trim();
-    const voucherNo = String(req.query.voucherNo || "").trim();
-    const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
-    const partyNames = parseListParam(req.query.partyName || req.query.partyNames);
-    const partyName = partyNames.length ? "" : String(req.query.partyName || "").trim();
-    const itemIds = parseListParam(req.query.itemId || req.query.itemIds || req.query.productId || req.query.productIds);
-    const itemName = String(req.query.itemName || "").trim();
+  exports.getJournalEntries = async (req, res) => {
+    try {
+      const { start, end } = parseRange(req);
+      const companyId = String(req.query.companyId || "").trim();
+      const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
+      const companyName = String(req.query.companyName || "").trim();
+      const voucherNo = String(req.query.voucherNo || "").trim();
+      const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
+      const partyNames = parseListParam(req.query.partyName || req.query.partyNames);
+      const partyName = partyNames.length ? "" : String(req.query.partyName || "").trim();
+      const itemIds = parseListParam(req.query.itemId || req.query.itemIds || req.query.productId || req.query.productIds);
+      const itemName = String(req.query.itemName || "").trim();
 
     let entries = await getEntriesInRange({
       start,
       end,
       companyId,
       voucherType,
-      bookType: bookTypes,
       status: null,
     });
     const hasFilters =
@@ -1231,7 +1274,6 @@ exports.getJournalEntries = async (req, res) => {
       !!companyName ||
       !!voucherNo ||
       (Array.isArray(voucherType) && voucherType.length) ||
-      (Array.isArray(bookTypes) && bookTypes.length) ||
       partyIds.length ||
       partyNames.length ||
       !!partyName ||
@@ -1244,7 +1286,6 @@ exports.getJournalEntries = async (req, res) => {
         end,
         companyId,
         voucherType: [],
-        bookType: bookTypes,
         status: null,
       });
     }
@@ -1252,28 +1293,56 @@ exports.getJournalEntries = async (req, res) => {
     if (!entries.length && !hasFilters) {
       entries = await JournalEntry.find({}).sort({ date: -1, createdAt: -1 }).lean();
     }
-    entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+      entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      // Apply company name filter early (companyId is often stored as name string)
+      const companyRegex = companyName ? new RegExp(escRe(companyName), "i") : null;
+      if (companyRegex) {
+        entries = entries.filter(
+          (e) => companyRegex.test(String(e.companyName || "")) || companyRegex.test(String(e.companyId || ""))
+        );
+      }
 
     const partyNameRegex =
       partyNames.length ? new RegExp(partyNames.map((n) => escRe(n)).join("|"), "i") : partyName ? new RegExp(escRe(partyName), "i") : null;
-    const lineFilter = {
-      ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
-      ...(partyNameRegex ? { partyName: partyNameRegex } : {}),
-      ...(itemIds.length ? { itemId: { $in: itemIds } } : {}),
-      ...(itemName ? { itemName: new RegExp(escRe(itemName), "i") } : {}),
-    };
-    const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
+    const itemNameRegex = itemName ? new RegExp(escRe(itemName), "i") : null;
+
+      const lineFilter = {
+        ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
+      };
+      const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
     const accountMap = await getAccountMapForLines(lines);
 
-    const filteredEntries = (partyIds.length || partyNameRegex || itemIds.length || itemName)
-      ? entries.filter((e) => lines.some((l) => String(l.journalEntryId) === String(e._id)))
-      : entries;
+    const entryMatchesParty = (e) =>
+      partyNameRegex ? partyNameRegex.test(String(e.customerName || "")) : false;
+      const entryMatchesItem = (e) =>
+        itemNameRegex ? itemNameRegex.test(String(e.productName || "")) : false;
+      const entryMatchesItemId = (e) =>
+        itemIds.length ? itemIds.some((id) => String(id) === String(e.productTypeId || "")) : false;
+    const lineMatchesParty = (entryId) =>
+      partyNameRegex ? lines.some((l) => String(l.journalEntryId) === String(entryId) && partyNameRegex.test(String(l.partyName || ""))) : false;
+    const lineMatchesItem = (entryId) =>
+      itemNameRegex ? lines.some((l) => String(l.journalEntryId) === String(entryId) && itemNameRegex.test(String(l.itemName || ""))) : false;
 
-    const data = filteredEntries
-      .filter((e) => (companyName ? new RegExp(escRe(companyName), "i").test(e.companyName || "") : true))
-      .filter((e) => (voucherNo ? new RegExp(escRe(voucherNo), "i").test(e.voucherNo || "") : true))
-      .map((e) => ({
-        ...e,
+      const hasLineFilters = partyIds.length || partyNameRegex || itemIds.length || itemNameRegex;
+      const filteredEntries = hasLineFilters
+        ? entries.filter(
+            (e) =>
+              lines.some((l) => String(l.journalEntryId) === String(e._id)) ||
+              entryMatchesParty(e) ||
+              entryMatchesItem(e) ||
+              entryMatchesItemId(e) ||
+              lineMatchesParty(e._id) ||
+              lineMatchesItem(e._id)
+          )
+        : entries;
+
+    const voucherRegex = voucherNo ? new RegExp(escRe(voucherNo), "i") : null;
+      const data = filteredEntries
+        .filter((e) => (companyRegex ? companyRegex.test(e.companyName || "") || companyRegex.test(String(e.companyId || "")) : true))
+        .filter((e) => (voucherRegex ? voucherRegex.test(e.voucherNo || "") : true))
+        .map((e) => ({
+          ...e,
         lines: lines
           .filter((l) => String(l.journalEntryId) === String(e._id))
           .map((l) => ({
@@ -1281,9 +1350,9 @@ exports.getJournalEntries = async (req, res) => {
             accountCode: accountMap.get(String(l.accountId))?.code || "",
             accountName: accountMap.get(String(l.accountId))?.name || "",
           })),
-      }));
+        }));
 
-    res.json({ success: true, data });
+      res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load journal." });
   }

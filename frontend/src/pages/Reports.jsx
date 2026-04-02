@@ -171,10 +171,50 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settings, setSettings] = useState({});
+  const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
 
   const filterInputClass =
     "border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
   const filterLabelClass = "block text-xs font-medium text-gray-600 mb-1";
+
+  const toAbsoluteLogoUrl = (value) => {
+    const url = String(value || "").trim();
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = api.defaults.baseURL || "";
+    const origin = base.replace(/\/api\/?$/i, "");
+    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
+  };
+
+  const fetchLogoAsDataUrl = async (url) => {
+    if (!url) return "";
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const resolvePrintHeader = () => {
+    const name = String(settings.companyName || settings.shortName || "").trim();
+    const address = String(settings.address || "").trim();
+    const email = String(settings.email || "").trim();
+    const logoUrl = toAbsoluteLogoUrl(settings.logoUrl || settings.logo || "");
+    return { name, address, email, logoUrl, logoDataUrl: printLogoDataUrl };
+  };
+
+  const addPdfHeader = (doc, title, subTitle) => {
+    const { name, address, email, logoDataUrl } = resolvePrintHeader();
+    // revert to legacy: no custom header
+    return 32;
+  };
 
   const visibleTabs = useMemo(() => {
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
@@ -203,17 +243,31 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (tab && visibleTabMap.has(tab)) setActiveTab(tab);
   }, [searchParams, embedded, initialTab, visibleTabs, visibleTabMap]);
 
+  const loadPrintSettings = async () => {
+    const res = await api.get("/settings");
+    const data = res.data?.data || res.data || {};
+    const general = data.general || data.generalSettings || data;
+    setSettings(general || {});
+    const rawLogo = general?.logoUrl || general?.logo || "";
+    if (String(rawLogo || "").startsWith("data:")) {
+      setPrintLogoDataUrl(String(rawLogo));
+      return;
+    }
+    const logoUrl = toAbsoluteLogoUrl(rawLogo);
+    const dataUrl = await fetchLogoAsDataUrl(logoUrl);
+    setPrintLogoDataUrl(dataUrl);
+  };
+
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get("/settings");
-        const data = res.data?.data || res.data || {};
-        const general = data.general || data.generalSettings || data;
-        setSettings(general || {});
-      } catch {
-        // silent if settings not available
-      }
-    })();
+    loadPrintSettings().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onSettingsUpdated = () => {
+      loadPrintSettings().catch(() => {});
+    };
+    window.addEventListener("smj-settings-updated", onSettingsUpdated);
+    return () => window.removeEventListener("smj-settings-updated", onSettingsUpdated);
   }, []);
 
   const params = useMemo(() => {
@@ -1004,20 +1058,26 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       setLoading(true);
       const entry = await fetchVoucher(id);
       if (!entry) throw new Error("Voucher not found.");
-      const content = renderJournalEntryHtml(entry);
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Journal Print</title>
-            <style>
-              * { box-sizing: border-box; }
-              body { font-family: "Times New Roman", serif; color: #111; padding: 24px; }
-              .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-              .title { font-size: 18px; font-weight: 700; text-transform: uppercase; }
-              .meta { font-size: 12px; color: #333; }
-              table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-              th, td { border: 1px solid #222; padding: 6px 8px; vertical-align: top; font-size: 12px; }
+        const content = renderJournalEntryHtml(entry);
+        const header = resolvePrintHeader();
+        const printHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Journal Print</title>
+              <style>
+                * { box-sizing: border-box; }
+                body { font-family: "Times New Roman", serif; color: #111; padding: 24px; }
+                .print-header { text-align: center; margin-bottom: 10px; }
+                .print-header { margin-bottom: 4px; line-height: 1.1; }
+                .print-header img { max-height: 144px; margin: 0; display: inline-block; }
+                .print-header .name { font-weight: 700; font-size: 14px; margin: 0; }
+                .print-header .line { font-size: 11px; color: #333; margin: 0; }
+                .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+                .title { font-size: 18px; font-weight: 700; text-transform: uppercase; }
+                .meta { font-size: 12px; color: #333; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+                th, td { border: 1px solid #222; padding: 6px 8px; vertical-align: top; font-size: 12px; }
               th { text-align: center; font-weight: 700; }
               .date-cell { width: 90px; text-align: center; }
               .details-cell { width: 55%; }
@@ -1030,12 +1090,18 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
               .entry-row .date-cell > div { line-height: 1.2; }
               .narration-row td { border-top: 0; }
             </style>
-          </head>
-          <body>
-            ${content}
-          </body>
-        </html>
-      `;
+            </head>
+            <body>
+              <div class="print-header">
+                ${header.logoUrl ? `<img src="${header.logoUrl}" alt="logo" />` : ""}
+                ${header.name ? `<div class="name">${header.name}</div>` : ""}
+                ${header.address ? `<div class="line">${header.address}</div>` : ""}
+                ${header.email ? `<div class="line">${header.email}</div>` : ""}
+              </div>
+              ${content}
+            </body>
+          </html>
+        `;
       const w = window.open("", "_blank", "width=900,height=700");
       if (!w) {
         toast.error("Popup blocked. Please allow popups to print.");
@@ -1058,12 +1124,12 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       setLoading(true);
       const entry = await fetchVoucher(id);
       if (!entry) throw new Error("Voucher not found.");
-      const doc = new jsPDF();
-      doc.setFontSize(12);
-      doc.text(selectedCompanyName || "Business", 14, 14);
-      doc.setFontSize(10);
-      doc.text(`Voucher: ${entry.voucherNo || "-"}`, 14, 20);
-      doc.text(`Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`, 14, 26);
+        const doc = new jsPDF();
+        const startY = addPdfHeader(
+          doc,
+          selectedCompanyName || "Business",
+          `Voucher: ${entry.voucherNo || "-"} | Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`
+        );
 
       const rows = journalRowsForEntry(entry);
       const body = rows.map((r) => [
@@ -1074,13 +1140,13 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         r.credit,
       ]);
 
-      autoTable(doc, {
-        head: [["Date", "References", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
-        body,
-        startY: 32,
-        styles: { fontSize: 9 },
-        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
-      });
+        autoTable(doc, {
+          head: [["Date", "References", "L.F.", "Amount (Dr.)", "Amount (Cr.)"]],
+          body,
+          startY,
+          styles: { fontSize: 9 },
+          columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } },
+        });
       doc.save(`${entry.voucherNo || "journal"}.pdf`);
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || "Failed to download PDF.");
@@ -1170,10 +1236,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const downloadTrialPdf = () => {
     const doc = new jsPDF();
     doc.setFont("times", "normal");
-    doc.setFontSize(14);
-    doc.text("TRIAL BALANCE", 105, 14, { align: "center" });
-    doc.setFontSize(10);
-    doc.text(`as at ${asOfDate}`, 105, 20, { align: "center" });
+    const startY = addPdfHeader(doc, "TRIAL BALANCE", `as at ${asOfDate}`);
 
     const body = (rows || []).map((r, idx) => [
       String(idx + 1),
@@ -1186,7 +1249,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     autoTable(doc, {
       head: [["S. No", "Account Names", "A/c No.", "Debit", "Credit"]],
       body,
-      startY: 26,
+      startY,
       styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
       headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
       theme: "grid",
@@ -1238,15 +1301,12 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
     const doc = new jsPDF();
     doc.setFont("times", "normal");
-    doc.setFontSize(12);
-    doc.text(`Profit and Loss A/c for the year ended`, 105, 12, { align: "center" });
-    doc.setFontSize(10);
-    doc.text(`${selectedCompanyName}`, 105, 18, { align: "center" });
+    const startY = addPdfHeader(doc, "Profit and Loss A/c for the year ended", selectedCompanyName);
 
     autoTable(doc, {
       head: [["Dr.", "Rs.", "Cr.", "Rs."]],
       body,
-      startY: 24,
+      startY,
       styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
       headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
       theme: "grid",
@@ -1276,16 +1336,12 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
     const doc = new jsPDF();
     doc.setFont("times", "normal");
-    doc.setFontSize(12);
-    doc.text(`${selectedCompanyName}`, 105, 12, { align: "center" });
-    doc.text("Balance Sheet", 105, 18, { align: "center" });
-    doc.setFontSize(10);
-    doc.text(`as at ${asOfDate}`, 105, 24, { align: "center" });
+    const startY = addPdfHeader(doc, "Balance Sheet", `as at ${asOfDate}`);
 
     autoTable(doc, {
       head: [["Assets", "Rs.", "Liabilities and Capital", "Rs."]],
       body,
-      startY: 30,
+      startY,
       styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
       headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
       theme: "grid",
@@ -1318,15 +1374,17 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
     const doc = new jsPDF("l", "pt", "a4");
     doc.setFont("times", "normal");
-    doc.setFontSize(12);
-    doc.text(drill.title?.replace(/\s*\(Ledger\)\s*$/, "") ? `${drill.title.replace(/\s*\(Ledger\)\s*$/, "")} Account in Ledger` : "Account in Ledger", 420, 24, { align: "center" });
-    doc.text("Dr.", 40, 24);
-    doc.text("Cr.", 780, 24);
+    const headerTitle = drill.title?.replace(/\s*\(Ledger\)\s*$/, "")
+      ? `${drill.title.replace(/\s*\(Ledger\)\s*$/, "")} Account in Ledger`
+      : "Account in Ledger";
+    const startY = addPdfHeader(doc, headerTitle, "");
+    doc.text("Dr.", 40, startY - 6);
+    doc.text("Cr.", 780, startY - 6);
 
     autoTable(doc, {
       head: [["Date", "References", "J.R.", "Amount Rs.", "Date", "References", "J.R.", "Amount Rs."]],
       body,
-      startY: 34,
+      startY,
       styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
       headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
       theme: "grid",

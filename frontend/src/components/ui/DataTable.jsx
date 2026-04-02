@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Search, ChevronLeft, ChevronRight, Download, Printer, Filter, X, FileText, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import api from "../../services/api";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -52,6 +53,31 @@ export default function DataTable({
     pinError: "",
     confirming: false,
   });
+  const [printHeader, setPrintHeader] = useState({ name: "", address: "", email: "", logoUrl: "" });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/settings");
+        const data = res.data?.data || res.data || {};
+        const general = data.general || data.generalSettings || data;
+        const rawLogo = general?.logoUrl || general?.logo || "";
+        const base = api.defaults.baseURL || "";
+        const origin = base.replace(/\/api\/?$/i, "");
+        const logoUrl = rawLogo
+          ? /^https?:\/\//i.test(rawLogo)
+            ? rawLogo
+            : `${origin}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
+          : "";
+        setPrintHeader({
+          name: String(general?.companyName || general?.shortName || "").trim(),
+          address: String(general?.address || "").trim(),
+          email: String(general?.email || "").trim(),
+          logoUrl,
+        });
+      } catch {}
+    })();
+  }, []);
 
   const filteredData = useMemo(() => {
     let result = [...data];
@@ -151,8 +177,7 @@ export default function DataTable({
       )
     );
     const doc = new jsPDF();
-    doc.setFontSize(12);
-    doc.text(title, 14, 12);
+    // revert to legacy: no custom header
     autoTable(doc, {
       head: [headers],
       body: rows,
@@ -174,12 +199,23 @@ export default function DataTable({
           <title>${title}</title>
           <style>
             body { font-family: system-ui, sans-serif; padding: 16px; }
+            .print-header { text-align: center; margin-bottom: 2px; line-height: 1; }
+            .print-header img { max-height: 144px; margin: 0; display: inline-block; }
+            .print-header .name { font-weight: 700; font-size: 14px; margin: 0; }
+            .print-header .line { font-size: 11px; color: #333; margin: 0; }
+            h2 { margin: 4px 0 6px; }
             table { width: 100%; border-collapse: collapse; }
             th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
             th { background: #ecfdf5; color: #065f46; }
           </style>
         </head>
         <body>
+          <div class="print-header">
+            ${printHeader.logoUrl ? `<img src="${printHeader.logoUrl}" alt="logo" />` : ""}
+            ${printHeader.name ? `<div class="name">${printHeader.name}</div>` : ""}
+            ${printHeader.address ? `<div class="line">${printHeader.address}</div>` : ""}
+            ${printHeader.email ? `<div class="line">${printHeader.email}</div>` : ""}
+          </div>
           <h2>${title}</h2>
           <p>Printed on ${new Date().toLocaleString()}</p>
           ${tableHtml}
@@ -210,6 +246,17 @@ export default function DataTable({
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-lg font-semibold text-gray-900">{title}</div>
+          <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
+        </div>
+        {hasActiveFilters && (
+          <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            Filters Applied
+          </div>
+        )}
+      </div>
       {/* Toolbar: search, filters, export, print */}
       {showToolbar && (
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">

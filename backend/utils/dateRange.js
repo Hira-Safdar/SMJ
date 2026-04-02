@@ -4,6 +4,15 @@ const getDateRangeFromQuery = (query = {}) => {
   let start = null;
   let end = null;
 
+  const ignoreDate =
+    String(query.ignoreDate || "").toLowerCase() === "1" ||
+    String(query.ignoreDate || "").toLowerCase() === "true" ||
+    range === "all";
+
+  if (ignoreDate) {
+    start = new Date(0);
+    end = new Date();
+  } else
   if (query.startDate || query.endDate) {
     start = query.startDate ? new Date(query.startDate) : new Date(0);
     end = query.endDate ? new Date(query.endDate) : new Date();
