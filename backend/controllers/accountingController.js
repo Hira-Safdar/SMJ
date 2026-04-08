@@ -71,10 +71,13 @@ async function nextVoucherNo() {
   return `${prefix}${String(seq).padStart(4, "0")}`;
 }
 
-async function getEntriesInRange({ start, end, companyId, voucherType, status = "POSTED", bookType }) {
+async function getEntriesInRange({ start, end, companyId, companyName, voucherType, status = "POSTED", bookType }) {
     const filter = { date: { $gte: start, $lte: end } };
     if (status) filter.status = status;
     if (companyId) filter.companyId = companyId;
+    else if (companyName) {
+      filter.$or = [{ companyId: companyName }, { companyName }];
+    }
     if (Array.isArray(voucherType)) {
       if (voucherType.length) filter.voucherType = { $in: voucherType };
     } else if (voucherType) {
@@ -367,9 +370,18 @@ exports.deleteFilterTemplate = async (req, res) => {
   }
 };
 
-exports.getGeneratedJournals = async (_req, res) => {
+exports.getGeneratedJournals = async (req, res) => {
   try {
-    const rows = await AccountingGeneratedJournal.find({}).sort({ createdAt: -1 }).lean();
+    const reportKey = String(req.query.reportKey || "").trim();
+    const query = {};
+    if (reportKey) {
+      if (reportKey === "journal") {
+        query.$or = [{ reportKey }, { reportKey: { $exists: false } }];
+      } else {
+        query.reportKey = reportKey;
+      }
+    }
+    const rows = await AccountingGeneratedJournal.find(query).sort({ createdAt: -1 }).lean();
     res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load generated journals." });
@@ -389,10 +401,13 @@ exports.createGeneratedJournal = async (req, res) => {
       endDate: String(payload.endDate || ""),
       companyId: String(payload.companyId || ""),
       companyName: String(payload.companyName || ""),
+      accountId: String(payload.accountId || ""),
+      accountName: String(payload.accountName || ""),
       partyName: String(payload.partyName || ""),
       itemId: String(payload.itemId || ""),
       itemName: String(payload.itemName || ""),
       voucherType: String(payload.voucherType || ""),
+      reportKey: String(payload.reportKey || "journal"),
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
@@ -417,6 +432,7 @@ exports.getLedger = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
+    const companyName = String(req.query.companyName || "").trim();
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
     const partyIds = parseListParam(req.query.partyId || req.query.partyIds);
     const productIds = parseListParam(req.query.productId || req.query.productIds || req.query.itemId || req.query.itemIds);
@@ -424,7 +440,7 @@ exports.getLedger = async (req, res) => {
     const item = String(req.query.item || "").trim(); // legacy product name filter
     const tags = parseListParam(req.query.tag || req.query.tags);
 
-    const entries = await getEntriesInRange({ start, end, companyId, status: "POSTED" });
+    const entries = await getEntriesInRange({ start, end, companyId, companyName, status: "POSTED" });
     const entryMap = new Map(entries.map((e) => [String(e._id), e]));
     const lines = await getLinesForEntries(entries.map((e) => e._id), {
       ...(accountIds.length ? { accountId: { $in: accountIds } } : {}),

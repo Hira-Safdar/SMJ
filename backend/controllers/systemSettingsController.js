@@ -161,16 +161,37 @@ const countPayloadRecords = (payload, collectionKeys = []) => {
   return total;
 };
 
+const normalizeTimezone = (value = "") => {
+  const tz = String(value || "").trim();
+  if (!tz) return "Asia/Karachi";
+  if (tz.toLowerCase() === "asia/lahore") return "Asia/Karachi";
+  return tz;
+};
+
 const getNowInTimezoneParts = (timezone = "Asia/Karachi") => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
+  const tz = normalizeTimezone(timezone);
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Karachi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  }
   const map = Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
   return {
     dateKey: `${map.year}-${map.month}-${map.day}`,
@@ -178,13 +199,24 @@ const getNowInTimezoneParts = (timezone = "Asia/Karachi") => {
   };
 };
 
-const getDateKeyInTimezone = (date, timezone = "Asia/Karachi") =>
-  new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+const getDateKeyInTimezone = (date, timezone = "Asia/Karachi") => {
+  const tz = normalizeTimezone(timezone);
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Karachi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  }
+};
 
 const writeBackupSnapshotToDisk = ({ payload, fileName }) => {
   ensureBackupFolder();

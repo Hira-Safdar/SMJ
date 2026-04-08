@@ -43,6 +43,14 @@ const TABS = [
 ];
 
 const VOUCHER_TYPES = ["JOURNAL", "PAYMENT", "RECEIPT"];
+const RANGE_OPTIONS = [
+  { value: "all", label: "All Dates" },
+  { value: "day", label: "Day (Today)" },
+  { value: "particular", label: "Particular Date" },
+  { value: "month", label: "Month" },
+  { value: "year", label: "Year" },
+  { value: "custom", label: "Custom Range" },
+];
 const BOOK_TYPES = [
   { value: "JOURNAL", label: "Journal Proper (General)" },
   { value: "CASH_BOOK", label: "Cash Book" },
@@ -115,12 +123,12 @@ const toTitleCase = (value) =>
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
-const normalizeCompanyName = (value) => toTitleCase(String(value || "").trim().replace(/\s+/g, " "));
-const formatMonthDay = (iso) => {
+  const normalizeCompanyName = (value) => toTitleCase(String(value || "").trim().replace(/\s+/g, " "));
+  const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleDateString("en-US", { month: "long", day: "2-digit" });
 };
-const formatYear = (iso) => {
+  const formatYear = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return d.getFullYear();
 };
@@ -337,10 +345,29 @@ export default function AccountingFinance() {
   const [journalFilterProductId, setJournalFilterProductId] = useState("");
   const [journalFilterVoucherType, setJournalFilterVoucherType] = useState("");
   const [journalPreviewOpen, setJournalPreviewOpen] = useState(false);
+  const [journalReportPreviewOpen, setJournalReportPreviewOpen] = useState(true);
   const [journalPreviewMeta, setJournalPreviewMeta] = useState(null);
   const [journalPreviewEntries, setJournalPreviewEntries] = useState([]);
   const [journalInfoDialog, setJournalInfoDialog] = useState({ open: false, message: "" });
   const [downloadMenu, setDownloadMenu] = useState({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+  const [ledgerFilterOpen, setLedgerFilterOpen] = useState(false);
+  const [ledgerGenerateOpen, setLedgerGenerateOpen] = useState(false);
+  const [ledgerGenerateName, setLedgerGenerateName] = useState("");
+  const [ledgerNameTouched, setLedgerNameTouched] = useState(false);
+  const [ledgerGenerateRange, setLedgerGenerateRange] = useState("all");
+  const [ledgerGenerateDate, setLedgerGenerateDate] = useState("");
+  const [ledgerGenerateStart, setLedgerGenerateStart] = useState("");
+  const [ledgerGenerateEnd, setLedgerGenerateEnd] = useState("");
+  const [ledgerFilterCompanyId, setLedgerFilterCompanyId] = useState("");
+  const [ledgerFilterCompanyName, setLedgerFilterCompanyName] = useState("");
+  const [ledgerFilterAccountId, setLedgerFilterAccountId] = useState("");
+  const [ledgerFilterPartyName, setLedgerFilterPartyName] = useState("");
+  const [ledgerFilterProductId, setLedgerFilterProductId] = useState("");
+  const [ledgerPreviewOpen, setLedgerPreviewOpen] = useState(true);
+  const [ledgerPreviewRows, setLedgerPreviewRows] = useState([]);
+  const [ledgerHighlightId, setLedgerHighlightId] = useState("");
+  const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
+  const [activeGeneratedLedgerId, setActiveGeneratedLedgerId] = useState("");
   const [printSettings, setPrintSettings] = useState({});
   const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
 
@@ -471,6 +498,7 @@ export default function AccountingFinance() {
   const filterProductLabel = productLabelById.get(String(filterProductId || "")) || "";
   const reportFilterProductLabel = productLabelById.get(String(reportFilterProductId || "")) || "";
   const journalFilterProductLabel = productLabelById.get(String(journalFilterProductId || "")) || "";
+  const ledgerFilterProductLabel = productLabelById.get(String(ledgerFilterProductId || "")) || "";
   const isJournalReportFilterApplied = useMemo(() => {
     const hasCompany = String(reportFilterCompanyName || "").trim().length > 0;
     const hasCustomer = String(reportFilterCustomerName || "").trim().length > 0;
@@ -895,9 +923,19 @@ export default function AccountingFinance() {
     return data;
   };
 
-  const loadGeneratedJournalList = async () => {
-    const res = await api.get("/accounting/generated-journals");
+  const loadGeneratedJournalList = async (reportKey = "journal") => {
+    const res = await api.get("/accounting/generated-journals", {
+      params: { reportKey },
+    });
     setGeneratedJournalList(res.data?.data || []);
+  };
+
+  const openLedgerFromLf = (entryId) => {
+    if (!entryId) return;
+    setActiveTab("ledger");
+    setSearchParams({ tab: "ledger" });
+    setLedgerHighlightId(String(entryId));
+    setLedgerPreviewOpen(true);
   };
 
     const loadPrintSettings = async () => {
@@ -989,6 +1027,16 @@ export default function AccountingFinance() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "ledger") return;
+    loadGeneratedLedgerList().catch(() => {});
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "ledger") return;
+    applyLedgerFiltersOnly().catch(() => {});
+  }, [activeTab, ledgerFilterAccountId, ledgerFilterCompanyId, ledgerFilterCompanyName, ledgerFilterPartyName]);
 
   useEffect(() => {
     if (activeTab !== "journal-entry") return;
@@ -1450,10 +1498,12 @@ export default function AccountingFinance() {
           date,
           showDate: !dateShown,
           side: "debit",
-          account: String(l.accountName || l.accountCode || "Account"),
+          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
           amount: round2(n0(l.debit)),
           narration,
           isNarrationRow: false,
+          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
+          entryId: String(j?._id || ""),
         });
         dateShown = true;
       });
@@ -1463,10 +1513,12 @@ export default function AccountingFinance() {
           date,
           showDate: !dateShown,
           side: "credit",
-          account: String(l.accountName || l.accountCode || "Account"),
+          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
           amount: round2(n0(l.credit)),
           narration,
           isNarrationRow: false,
+          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
+          entryId: String(j?._id || ""),
         });
         dateShown = true;
       });
@@ -1539,20 +1591,21 @@ export default function AccountingFinance() {
       const dateText = entry?.date ? `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}` : "";
       const lines = entry?.lines || [];
       const narration = String(entry?.description || entry?.narration || "").trim();
+      const lf = shortVoucherSeq(entry?.voucherNo || entry?._id || entry?.journalEntryId || "");
       const particulars = [];
       const debitLines = [];
       const creditLines = [];
       const debitsOnly = lines.filter((l) => round2(n0(l.debit)) > 0);
       const creditsOnly = lines.filter((l) => round2(n0(l.credit)) > 0);
       debitsOnly.forEach((l) => {
-        const acc = String(l.accountName || l.accountCode || "Account");
-        particulars.push({ text: `${acc} Dr.`, style: "normal", indent: 0 });
+          const acc = ensureAccountSuffix(String(l.accountName || l.accountCode || "Account"));
+          particulars.push({ text: `By ${acc}`, style: "normal", indent: 0 });
         debitLines.push(`Rs. ${String(round2(n0(l.debit)))}`);
         creditLines.push("");
       });
       creditsOnly.forEach((l) => {
-        const acc = String(l.accountName || l.accountCode || "Account");
-        particulars.push({ text: `To ${acc}`, style: "normal", indent: 1 });
+          const acc = ensureAccountSuffix(String(l.accountName || l.accountCode || "Account"));
+          particulars.push({ text: `To ${acc}`, style: "normal", indent: 1 });
         debitLines.push("");
         creditLines.push(`Rs. ${String(round2(n0(l.credit)))}`);
       });
@@ -1566,6 +1619,7 @@ export default function AccountingFinance() {
       while (creditLines.length < targetLen) creditLines.push("");
       rows.push({
         date: dateText,
+        lf,
         particulars,
         debitLines,
         creditLines,
@@ -1670,6 +1724,7 @@ export default function AccountingFinance() {
               itemId: reportFilterProductId || "",
               itemName: reportFilterProductLabel || "",
               voucherType: reportFilterVoucherType || "",
+              reportKey: "journal",
             })
             .then((res) => {
               const created = res.data?.data;
@@ -1680,8 +1735,8 @@ export default function AccountingFinance() {
         .catch(() => {});
     };
 
-  const applyJournalFiltersOnly = () => {
-    const range = journalGenerateRange;
+  const applyJournalFiltersOnly = (override = {}) => {
+    const range = override.range || journalGenerateRange;
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
     let nextStart = "";
@@ -1690,14 +1745,16 @@ export default function AccountingFinance() {
       nextStart = "";
       nextEnd = "";
     } else if (range === "day" || range === "particular") {
-      const base = journalGenerateDate ? new Date(journalGenerateDate) : now;
+      const dateVal = override.date || journalGenerateDate;
+      const base = dateVal ? new Date(dateVal) : now;
       const y = base.getFullYear();
       const m = pad(base.getMonth() + 1);
       const d = pad(base.getDate());
       nextStart = `${y}-${m}-${d}`;
       nextEnd = `${y}-${m}-${d}`;
     } else if (range === "month") {
-      const base = journalGenerateDate ? new Date(`${journalGenerateDate}-01`) : now;
+      const dateVal = override.date || journalGenerateDate;
+      const base = dateVal ? new Date(`${dateVal}-01`) : now;
       const y = base.getFullYear();
       const m = base.getMonth();
       const start = new Date(y, m, 1);
@@ -1705,16 +1762,17 @@ export default function AccountingFinance() {
       nextStart = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
       nextEnd = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
     } else if (range === "year") {
-      const y = Number(journalGenerateDate) || now.getFullYear();
+      const dateVal = override.date || journalGenerateDate;
+      const y = Number(dateVal) || now.getFullYear();
       nextStart = `${y}-01-01`;
       nextEnd = `${y}-12-31`;
     } else if (range === "custom") {
-      nextStart = journalGenerateStart || "";
-      nextEnd = journalGenerateEnd || "";
+      nextStart = override.start ?? journalGenerateStart ?? "";
+      nextEnd = override.end ?? journalGenerateEnd ?? "";
     }
-      setReportRangeStart(nextStart);
-      setReportRangeEnd(nextEnd);
-      setActiveGeneratedJournalId("");
+    setReportRangeStart(nextStart);
+    setReportRangeEnd(nextEnd);
+    setActiveGeneratedJournalId("");
       loadGeneratedJournalsWithOverride({
         startDate: nextStart,
         endDate: nextEnd,
@@ -1724,10 +1782,283 @@ export default function AccountingFinance() {
         voucherType: journalFilterVoucherType || undefined,
       }).catch(() => {});
       setReportFilterCompanyName(journalFilterCompanyName || "");
-      setReportFilterCustomerName(journalFilterCustomerName || "");
-      setReportFilterProductId(journalFilterProductId || "");
-      setReportFilterVoucherType(journalFilterVoucherType || "");
+    setReportFilterCustomerName(journalFilterCustomerName || "");
+    setReportFilterProductId(journalFilterProductId || "");
+    setReportFilterVoucherType(journalFilterVoucherType || "");
+  };
+
+  const buildLedgerPreviewRows = (rows = []) => {
+    const debits = (rows || []).filter((r) => round2(n0(r.debit)) > 0);
+    const credits = (rows || []).filter((r) => round2(n0(r.credit)) > 0);
+    const max = Math.max(debits.length, credits.length, 1);
+    return Array.from({ length: max }).map((_, i) => {
+      const d = debits[i];
+      const c = credits[i];
+      return {
+        drDate: d?.date ? `${formatYear(d.date)}\n${formatMonthDay(d.date)}` : "",
+        drRef: (() => {
+          const text = ensureAccountSuffix(d?.references || d?.account || d?.description || "");
+          return text ? `To ${text}` : "";
+        })(),
+        drJr: shortVoucherSeq(d?.voucherNo || d?.journalEntryId || ""),
+        drAmount: d ? `Rs. ${String(round2(n0(d.debit)))}` : "",
+        crDate: c?.date ? `${formatYear(c.date)}\n${formatMonthDay(c.date)}` : "",
+        crRef: (() => {
+          const text = ensureAccountSuffix(c?.references || c?.account || c?.description || "");
+          return text ? `By ${text}` : "";
+        })(),
+        crJr: shortVoucherSeq(c?.voucherNo || c?.journalEntryId || ""),
+        crAmount: c ? `Rs. ${String(round2(n0(c.credit)))}` : "",
+      };
+    });
+  };
+
+  const fetchLedgerPreview = async (override = {}) => {
+    const resolvedStart =
+      typeof override.startDate !== "undefined" ? override.startDate : ledgerGenerateStart || undefined;
+    const resolvedEnd =
+      typeof override.endDate !== "undefined" ? override.endDate : ledgerGenerateEnd || undefined;
+    const ignoreDate = resolvedStart || resolvedEnd ? undefined : "1";
+    const params = {
+      startDate: resolvedStart,
+      endDate: resolvedEnd,
+      ignoreDate,
+      range: "custom",
+      accountId: ledgerFilterAccountId || undefined,
+      companyId: ledgerFilterCompanyId || undefined,
+      companyName: ledgerFilterCompanyName || undefined,
+      party: ledgerFilterPartyName || undefined,
+      ...override,
     };
+    const res = await api.get("/accounting/ledger", { params });
+    return res.data?.data || [];
+  };
+
+  const getSuggestedLedgerName = (opts = {}) => {
+    const accountId = opts.accountId || ledgerFilterAccountId || "";
+    const acc = accountOptions.find((a) => String(a.id) === String(accountId));
+    const accName = String(acc?.name || acc?.label || "").trim();
+    const companyLabel = String(opts.companyName || ledgerFilterCompanyName || "").trim();
+    const customerLabel = String(opts.partyName || ledgerFilterPartyName || "").trim();
+    const rangeLabel = buildJournalRangeLabel({
+      range: opts.range || ledgerGenerateRange,
+      date: opts.date || ledgerGenerateDate,
+      start: opts.start || ledgerGenerateStart,
+      end: opts.end || ledgerGenerateEnd,
+    });
+    const parts = ["Ledger", accName, companyLabel || customerLabel, rangeLabel].filter(Boolean);
+    return parts.join(" - ");
+  };
+
+  const applyLedgerFiltersOnly = async (override = {}) => {
+    const range = override.range || ledgerGenerateRange;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    let nextStart = "";
+    let nextEnd = "";
+    if (range === "all") {
+      nextStart = "";
+      nextEnd = "";
+    } else if (range === "day" || range === "particular") {
+      const dateVal = override.date || ledgerGenerateDate;
+      const base = dateVal ? new Date(dateVal) : now;
+      const y = base.getFullYear();
+      const m = pad(base.getMonth() + 1);
+      const d = pad(base.getDate());
+      nextStart = `${y}-${m}-${d}`;
+      nextEnd = `${y}-${m}-${d}`;
+    } else if (range === "month") {
+      const dateVal = override.date || ledgerGenerateDate;
+      const base = dateVal ? new Date(`${dateVal}-01`) : now;
+      const y = base.getFullYear();
+      const m = base.getMonth();
+      const start = new Date(y, m, 1);
+      const end = new Date(y, m + 1, 0);
+      nextStart = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+      nextEnd = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+    } else if (range === "year") {
+      const dateVal = override.date || ledgerGenerateDate;
+      const y = Number(dateVal) || now.getFullYear();
+      nextStart = `${y}-01-01`;
+      nextEnd = `${y}-12-31`;
+    } else if (range === "custom") {
+      nextStart = override.start ?? ledgerGenerateStart ?? "";
+      nextEnd = override.end ?? ledgerGenerateEnd ?? "";
+    }
+    setLedgerGenerateStart(nextStart);
+    setLedgerGenerateEnd(nextEnd);
+    const data = await fetchLedgerPreview({ startDate: nextStart, endDate: nextEnd });
+    setLedgerPreviewRows(buildLedgerPreviewRows(data));
+  };
+
+  const fetchLedgerByFilters = async (filters = {}) => {
+    const resolvedStart = typeof filters.startDate !== "undefined" ? filters.startDate : "";
+    const resolvedEnd = typeof filters.endDate !== "undefined" ? filters.endDate : "";
+    const ignoreDate = resolvedStart || resolvedEnd ? undefined : "1";
+    const params = {
+      startDate: resolvedStart || undefined,
+      endDate: resolvedEnd || undefined,
+      ignoreDate,
+      range: "custom",
+      accountId: filters.accountId || undefined,
+      companyId: filters.companyId || undefined,
+      companyName: filters.companyName || undefined,
+      party: filters.partyName || undefined,
+    };
+    const res = await api.get("/accounting/ledger", { params });
+    return res.data?.data || [];
+  };
+
+  const loadGeneratedLedgerList = async () => {
+    const res = await api.get("/accounting/generated-journals", {
+      params: { reportKey: "ledger" },
+    });
+    setGeneratedLedgerList(res.data?.data || []);
+  };
+
+  const applyLedgerGenerateFilters = async () => {
+    const range = ledgerGenerateRange;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    let nextStart = "";
+    let nextEnd = "";
+    if (range === "all") {
+      nextStart = "";
+      nextEnd = "";
+    } else if (range === "day" || range === "particular") {
+      const base = ledgerGenerateDate ? new Date(ledgerGenerateDate) : now;
+      const y = base.getFullYear();
+      const m = pad(base.getMonth() + 1);
+      const d = pad(base.getDate());
+      nextStart = `${y}-${m}-${d}`;
+      nextEnd = `${y}-${m}-${d}`;
+    } else if (range === "month") {
+      const base = ledgerGenerateDate ? new Date(`${ledgerGenerateDate}-01`) : now;
+      const y = base.getFullYear();
+      const m = base.getMonth();
+      const start = new Date(y, m, 1);
+      const end = new Date(y, m + 1, 0);
+      nextStart = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+      nextEnd = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+    } else if (range === "year") {
+      const y = Number(ledgerGenerateDate) || now.getFullYear();
+      nextStart = `${y}-01-01`;
+      nextEnd = `${y}-12-31`;
+    } else if (range === "custom") {
+      nextStart = ledgerGenerateStart || "";
+      nextEnd = ledgerGenerateEnd || "";
+    }
+    const account = accountOptions.find((a) => String(a.id) === String(ledgerFilterAccountId || ""));
+    const company = companyOptions.find((c) => String(c.id) === String(ledgerFilterCompanyId || ""));
+    const finalName = String(ledgerGenerateName || "").trim() || getSuggestedLedgerName();
+    const payload = {
+      name: finalName,
+      range: ledgerGenerateRange,
+      rangeDate: ledgerGenerateDate,
+      startDate: nextStart,
+      endDate: nextEnd,
+      companyId: ledgerFilterCompanyId || "",
+      companyName: ledgerFilterCompanyName || company?.name || "",
+      accountId: ledgerFilterAccountId || "",
+      accountName: account?.name || account?.label || "",
+      partyName: ledgerFilterPartyName || "",
+      reportKey: "ledger",
+    };
+    const data = await fetchLedgerByFilters(payload);
+    if (!data.length) {
+      toast.error("No ledger rows found for the selected filters.");
+      return;
+    }
+    await api.post("/accounting/generated-journals", payload);
+    await loadGeneratedLedgerList();
+    setActiveGeneratedLedgerId("");
+    setLedgerGenerateOpen(false);
+    setLedgerGenerateStart(nextStart);
+    setLedgerGenerateEnd(nextEnd);
+    setLedgerPreviewRows(buildLedgerPreviewRows(data));
+  };
+
+  const handleViewGeneratedLedger = async (j) => {
+    if (!j) return;
+    setActiveGeneratedLedgerId(String(j._id || j.id || ""));
+    setLedgerFilterAccountId(j.accountId || "");
+    setLedgerFilterCompanyId(j.companyId || "");
+    setLedgerFilterCompanyName(j.companyName || "");
+    setLedgerFilterPartyName(j.partyName || "");
+    setLedgerGenerateRange(j.range || "all");
+    setLedgerGenerateDate(j.rangeDate || "");
+    setLedgerGenerateStart(j.startDate || "");
+    setLedgerGenerateEnd(j.endDate || "");
+    const data = await fetchLedgerByFilters({
+      startDate: j.startDate || "",
+      endDate: j.endDate || "",
+      companyId: j.companyId || "",
+      companyName: j.companyName || "",
+      accountId: j.accountId || "",
+      partyName: j.partyName || "",
+    });
+    setLedgerPreviewRows(buildLedgerPreviewRows(data));
+    setLedgerPreviewOpen(true);
+  };
+
+  const handleDownloadGeneratedLedger = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const data = await fetchLedgerByFilters({
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        companyId: j.companyId || "",
+        companyName: j.companyName || "",
+        accountId: j.accountId || "",
+        partyName: j.partyName || "",
+      });
+      const rows = buildLedgerPreviewRows(data);
+      if (!rows.length) {
+        toast.error("No ledger rows found for the selected filters.");
+        return;
+      }
+      const doc = new jsPDF("l", "pt", "a4");
+      doc.setFont("times", "normal");
+      const headerTitle = j.accountName ? `${j.accountName}` : "Ledger";
+      const entityLine = String(j.companyName || j.partyName || "").trim();
+      let headerY = 24;
+      doc.setFontSize(12);
+      doc.text(headerTitle, doc.internal.pageSize.getWidth() / 2, headerY, { align: "center" });
+      if (entityLine) {
+        headerY += 14;
+        doc.setFontSize(10);
+        doc.text(entityLine, doc.internal.pageSize.getWidth() / 2, headerY, { align: "center" });
+      }
+      const startY = headerY + 16;
+      doc.setFontSize(10);
+      doc.text("Dr.", 40, startY - 6);
+      doc.text("Cr.", doc.internal.pageSize.getWidth() - 40, startY - 6, { align: "right" });
+      autoTable(doc, {
+        head: [["Date", "References", "J.R.", "Amount Rs.", "Date", "References", "J.R.", "Amount Rs."]],
+        body: rows.map((r) => [
+          r.drDate,
+          r.drRef,
+          r.drJr,
+          r.drAmount,
+          r.crDate,
+          r.crRef,
+          r.crJr,
+          r.crAmount,
+        ]),
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 3: { halign: "right" }, 7: { halign: "right" } },
+      });
+      doc.save(`${String(j.name || "ledger").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to download ledger.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
     const handleViewGeneratedJournal = async (j) => {
       if (!j) return;
@@ -1773,37 +2104,44 @@ export default function AccountingFinance() {
         customerName: j.partyName || "",
         productName: j.itemName || "",
       });
-      setJournalPreviewOpen(true);
+      setJournalPreviewOpen(false);
+      setJournalReportPreviewOpen(true);
     };
 
     const handleDownloadGeneratedJournal = async (j) => {
       if (!j) return;
       try {
         setLoading(true);
+        const filterPayload = {
+          startDate: j.startDate || reportRangeStart || "",
+          endDate: j.endDate || reportRangeEnd || "",
+          companyName: j.companyName || reportFilterCompanyName || "",
+          partyName: j.partyName || reportFilterCustomerName || "",
+          itemId: j.itemId || reportFilterProductId || "",
+          itemName: j.itemName || reportFilterProductLabel || "",
+          voucherType: j.voucherType || reportFilterVoucherType || "",
+        };
         const data = await fetchGeneratedJournals({
-          startDate: j.startDate || undefined,
-          endDate: j.endDate || undefined,
-          companyName: j.companyName || undefined,
-          partyName: j.partyName || undefined,
-          itemId: j.itemId || undefined,
-          voucherType: j.voucherType || undefined,
+          startDate: filterPayload.startDate || undefined,
+          endDate: filterPayload.endDate || undefined,
+          companyName: filterPayload.companyName || undefined,
+          partyName: filterPayload.partyName || undefined,
+          itemId: filterPayload.itemId || undefined,
+          itemName: filterPayload.itemName || undefined,
+          voucherType: filterPayload.voucherType || undefined,
         });
-        const filtered = filterJournalsBy(data || [], {
-          startDate: j.startDate || "",
-          endDate: j.endDate || "",
-          companyName: j.companyName || "",
-          partyName: j.partyName || "",
-          itemId: j.itemId || "",
-          itemName: j.itemName || "",
-          voucherType: j.voucherType || "",
-        });
+        const filtered = filterJournalsBy(data || [], filterPayload);
+        if (!filtered.length) {
+          toast.error("No journals found for the selected filters.");
+          return;
+        }
         const groupedBody = buildGroupedJournalRows(filtered);
         const doc = new jsPDF();
         const baseRangeLabel = buildJournalRangeLabel({
           range: j.range || "all",
           date: j.rangeDate || "",
-          start: j.startDate || "",
-          end: j.endDate || "",
+          start: filterPayload.startDate || "",
+          end: filterPayload.endDate || "",
         });
         const rangeLabel =
           j.range === "month" && baseRangeLabel ? `the month of ${baseRangeLabel}` : baseRangeLabel;
@@ -1811,13 +2149,18 @@ export default function AccountingFinance() {
         doc.setFont("times", "normal");
         const centerX = doc.internal.pageSize.getWidth() / 2;
         let headerY = 10;
-        const headerName = String(j.partyName || j.companyName || "").trim();
-        if (headerName) {
+        const businessName = String(printSettings?.businessName || printSettings?.companyName || "").trim();
+        if (businessName) {
           doc.setFontSize(11);
-          doc.text(headerName, centerX, headerY, { align: "center" });
+          doc.text(businessName, centerX, headerY, { align: "center" });
           headerY += 5;
         }
-        // show only one of customer/company (prefer customer if present)
+        const entityName = String(filterPayload.partyName || filterPayload.companyName || "").trim();
+        if (entityName) {
+          doc.setFontSize(10);
+          doc.text(entityName, centerX, headerY, { align: "center" });
+          headerY += 5;
+        }
         doc.setFontSize(10);
         doc.text(title, centerX, headerY, { align: "center" });
         headerY += 4;
@@ -1828,7 +2171,7 @@ export default function AccountingFinance() {
         const groupedTable = groupedBody.map((row) => ({
           date: row.date,
           particularsText: "",
-          lf: "",
+          lf: row.lf || "",
           debit: "",
           credit: "",
           _particularsLines: row.particulars,
@@ -1845,7 +2188,7 @@ export default function AccountingFinance() {
           22,
           ...groupedTable.map((r) => doc.getTextWidth(String(r.date || "").split("\n")[0] || ""))
         );
-        const maxLf = Math.max(10, doc.getTextWidth("L.F."));
+        const maxLf = Math.max(18, doc.getTextWidth("L.F.") + 6);
         const maxDebit = Math.max(24, ...groupedBody.map((r) => measureLines(r._debitLines)));
         const maxCredit = Math.max(24, ...groupedBody.map((r) => measureLines(r._creditLines)));
         const fixed = maxDate + maxLf + maxDebit + maxCredit + 8;
@@ -1950,36 +2293,38 @@ export default function AccountingFinance() {
       if (!j) return;
       try {
         setLoading(true);
+        const filterPayload = {
+          startDate: j.startDate || reportRangeStart || "",
+          endDate: j.endDate || reportRangeEnd || "",
+          companyName: j.companyName || reportFilterCompanyName || "",
+          partyName: j.partyName || reportFilterCustomerName || "",
+          itemId: j.itemId || reportFilterProductId || "",
+          itemName: j.itemName || reportFilterProductLabel || "",
+          voucherType: j.voucherType || reportFilterVoucherType || "",
+        };
         const data = await fetchGeneratedJournals({
-          startDate: j.startDate || undefined,
-          endDate: j.endDate || undefined,
-          companyName: j.companyName || undefined,
-          partyName: j.partyName || undefined,
-          itemId: j.itemId || undefined,
-          voucherType: j.voucherType || undefined,
+          startDate: filterPayload.startDate || undefined,
+          endDate: filterPayload.endDate || undefined,
+          companyName: filterPayload.companyName || undefined,
+          partyName: filterPayload.partyName || undefined,
+          itemId: filterPayload.itemId || undefined,
+          itemName: filterPayload.itemName || undefined,
+          voucherType: filterPayload.voucherType || undefined,
         });
-        const filtered = filterJournalsBy(data || [], {
-          startDate: j.startDate || "",
-          endDate: j.endDate || "",
-          companyName: j.companyName || "",
-          partyName: j.partyName || "",
-          itemId: j.itemId || "",
-          itemName: j.itemName || "",
-          voucherType: j.voucherType || "",
-        });
+        const filtered = filterJournalsBy(data || [], filterPayload);
         const grouped = buildGroupedJournalRows(filtered);
         const baseRangeLabel = buildJournalRangeLabel({
           range: j.range || "all",
           date: j.rangeDate || "",
-          start: j.startDate || "",
-          end: j.endDate || "",
+          start: filterPayload.startDate || "",
+          end: filterPayload.endDate || "",
         });
         const rangeLabel =
           j.range === "month" && baseRangeLabel ? `For the month of ${baseRangeLabel}` : baseRangeLabel
             ? `For ${baseRangeLabel}`
             : "";
         const headerRows = [
-          [j.companyName || ""],
+          [String(printSettings?.businessName || printSettings?.companyName || j.companyName || "")],
           ["JOURNAL ENTRIES"],
           [rangeLabel],
           [],
@@ -2106,6 +2451,19 @@ export default function AccountingFinance() {
     return `${raw} A/c`;
   };
 
+  const ensureAccountSuffix = (name) => {
+    const raw = String(name || "").trim();
+    if (!raw) return "";
+    if (/\bA\/c\b/i.test(raw) || /\bAccount\b/i.test(raw)) return raw;
+    return `${raw} A/c`;
+  };
+
+  const shortVoucherSeq = (value) => {
+    const raw = String(value || "").replace(/\D/g, "");
+    if (!raw) return "";
+    return raw.slice(-4);
+  };
+
   const withBeing = (text) => {
     const t = String(text || "").trim();
     if (!t) return "";
@@ -2118,6 +2476,7 @@ export default function AccountingFinance() {
     sortedEntries.forEach((e) => {
       const date = e.date;
       const narration = String(e.narration || "").trim();
+      const lf = shortVoucherSeq(editingVoucherNo || "");
       const debitItems = (e.lines || []).filter((l) => round2(n0(l.debitAmount)) > 0 && l.debitAccountId);
       const creditItems = (e.lines || []).filter((l) => round2(n0(l.creditAmount)) > 0 && l.creditAccountId);
       let dateShown = false;
@@ -2133,6 +2492,7 @@ export default function AccountingFinance() {
           amount: debitAmt,
           narration,
           isNarrationRow: false,
+          lf,
         });
         dateShown = true;
       });
@@ -2147,6 +2507,7 @@ export default function AccountingFinance() {
           amount: creditAmt,
           narration,
           isNarrationRow: false,
+          lf,
         });
         dateShown = true;
       });
@@ -2186,6 +2547,7 @@ export default function AccountingFinance() {
       companyName: reportFilterCompanyName || "",
       partyName: reportFilterCustomerName || "",
       itemId: reportFilterProductId || "",
+      voucherType: reportFilterVoucherType || "",
       productName,
     };
     const hasFilter = (j) => {
@@ -2200,6 +2562,10 @@ export default function AccountingFinance() {
         : [String(j?.companyId || ""), String(j?.companyName || "")]
             .map((v) => normalizeText(v))
             .some((v) => v === companyFilter || v.includes(companyFilter));
+      const byType = !filterBase.voucherType
+        ? true
+        : normalizeText(j?.voucherType || "").includes(normalizeText(filterBase.voucherType || ""));
+      if (!byType) return false;
       const lines = j?.lines || [];
       const partyFilter = normalizeText(filterBase.partyName || "");
       const byParty = !partyFilter
@@ -2227,10 +2593,12 @@ export default function AccountingFinance() {
           date,
           showDate: !dateShown,
           side: "debit",
-          account: String(l.accountName || l.accountCode || "Account"),
+          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
           amount: round2(n0(l.debit)),
           narration,
           isNarrationRow: false,
+          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
+          entryId: String(j?._id || ""),
         });
         dateShown = true;
       });
@@ -2240,10 +2608,12 @@ export default function AccountingFinance() {
           date,
           showDate: !dateShown,
           side: "credit",
-          account: String(l.accountName || l.accountCode || "Account"),
+          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
           amount: round2(n0(l.credit)),
           narration,
           isNarrationRow: false,
+          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
+          entryId: String(j?._id || ""),
         });
         dateShown = true;
       });
@@ -2308,7 +2678,7 @@ export default function AccountingFinance() {
     let dateShown = false;
 
     const addLine = ({ side, line, amount }) => {
-      const acc = line.accountName || line.accountCode || "Account";
+        const acc = ensureAccountSuffix(line.accountName || line.accountCode || "Account");
       const extra = [String(line.partyName || "").trim(), String(line.itemName || "").trim()].filter(Boolean).join(" | ");
       rows.push({
         date: entry.date,
@@ -2746,44 +3116,274 @@ export default function AccountingFinance() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-gray-900">Journal Preview</div>
-                <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJournalReportPreviewOpen((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={journalReportPreviewOpen ? "Hide preview" : "Show preview"}
+                >
+                  <ChevronDown
+                    size={16}
+                    className={journalReportPreviewOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                </button>
+                Journal Preview
+              </div>
+              <div className="flex-1 flex justify-center gap-2 flex-wrap items-center">
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Range</span>
+                  <select
+                    value={journalGenerateRange}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalGenerateRange(v);
+                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ range: v }));
+                      setActiveGeneratedJournalId("");
+                      if (v === "day") {
+                        const today = new Date().toISOString().slice(0, 10);
+                        setJournalGenerateDate(today);
+                        applyJournalFiltersOnly({ range: v, date: today });
+                        return;
+                      }
+                      if (v === "particular" && !journalGenerateDate) {
+                        const today = new Date().toISOString().slice(0, 10);
+                        setJournalGenerateDate(today);
+                        applyJournalFiltersOnly({ range: v, date: today });
+                        return;
+                      }
+                      if (v === "month" && !journalGenerateDate) {
+                        const now = new Date();
+                        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+                        setJournalGenerateDate(ym);
+                        applyJournalFiltersOnly({ range: v, date: ym });
+                        return;
+                      }
+                      if (v === "year" && !journalGenerateDate) {
+                        const y = String(new Date().getFullYear());
+                        setJournalGenerateDate(y);
+                        applyJournalFiltersOnly({ range: v, date: y });
+                        return;
+                      }
+                      if (v === "custom") {
+                        setJournalGenerateStart("");
+                        setJournalGenerateEnd("");
+                        applyJournalFiltersOnly({ range: v, start: "", end: "" });
+                        return;
+                      }
+                      applyJournalFiltersOnly({ range: v });
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                  >
+                    <option value="all">All</option>
+                    <option value="day">Today</option>
+                    <option value="particular">Date</option>
+                    <option value="month">Month</option>
+                    <option value="year">Year</option>
+                    <option value="custom">FROM-TO</option>
+                  </select>
+                </div>
+                {(journalGenerateRange === "day" || journalGenerateRange === "particular") && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Date</span>
+                    <input
+                      type="date"
+                      value={journalGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setJournalGenerateDate(v);
+                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v }));
+                        applyJournalFiltersOnly({ range: journalGenerateRange, date: v });
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[100px]"
+                    />
+                  </div>
+                )}
+                {journalGenerateRange === "month" && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Month</span>
+                    <input
+                      type="month"
+                      value={journalGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setJournalGenerateDate(v);
+                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "month" }));
+                        applyJournalFiltersOnly({ range: "month", date: v });
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[90px]"
+                    />
+                  </div>
+                )}
+                {journalGenerateRange === "year" && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Year</span>
+                    <select
+                      value={journalGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setJournalGenerateDate(v);
+                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "year" }));
+                        applyJournalFiltersOnly({ range: "year", date: v });
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[70px]"
+                    >
+                      {Array.from({ length: 21 }).map((_, i) => {
+                        const y = String(new Date().getFullYear() - 10 + i);
+                        return (
+                          <option key={y} value={y}>
+                            {y}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+                {journalGenerateRange === "custom" && (
+                  <>
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                      <span className="text-xs text-gray-600">From</span>
+                      <input
+                        type="date"
+                        value={journalGenerateStart}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setJournalGenerateStart(v);
+                          if (!journalNameTouched)
+                            setJournalGenerateName(getSuggestedJournalName({ start: v, end: journalGenerateEnd }));
+                          applyJournalFiltersOnly({ range: "custom", start: v, end: journalGenerateEnd });
+                        }}
+                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                      />
+                    </div>
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                      <span className="text-xs text-gray-600">To</span>
+                      <input
+                        type="date"
+                        value={journalGenerateEnd}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setJournalGenerateEnd(v);
+                          if (!journalNameTouched)
+                            setJournalGenerateName(getSuggestedJournalName({ start: journalGenerateStart, end: v }));
+                          applyJournalFiltersOnly({ range: "custom", start: journalGenerateStart, end: v });
+                        }}
+                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Company</span>
+                  <select
+                    value={journalFilterCompanyName}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      handleJournalFilterCompanyDraft(v);
+                      setReportFilterCompanyName(String(v || ""));
+                      setActiveGeneratedJournalId("");
+                      loadGeneratedJournalsWithOverride({
+                        startDate: reportRangeStart || undefined,
+                        endDate: reportRangeEnd || undefined,
+                        companyName: String(v || "") || undefined,
+                        partyName: journalFilterCustomerName || undefined,
+                        itemId: reportFilterProductId || undefined,
+                        voucherType: journalFilterVoucherType || undefined,
+                      }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  >
+                    <option value="">All</option>
+                    {companyOptions.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Customer</span>
+                  <select
+                    value={journalFilterCustomerName}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalFilterCustomerName(v);
+                      setReportFilterCustomerName(v);
+                      setActiveGeneratedJournalId("");
+                      loadGeneratedJournalsWithOverride({
+                        startDate: reportRangeStart || undefined,
+                        endDate: reportRangeEnd || undefined,
+                        companyName: journalFilterCompanyName || undefined,
+                        partyName: v || undefined,
+                        itemId: reportFilterProductId || undefined,
+                        voucherType: journalFilterVoucherType || undefined,
+                      }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  >
+                    <option value="">All</option>
+                    {customerOptions.map((c) => (
+                      <option key={c._id || c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Voucher</span>
+                  <select
+                    value={journalFilterVoucherType}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setJournalFilterVoucherType(v);
+                      setReportFilterVoucherType(v);
+                      setActiveGeneratedJournalId("");
+                      loadGeneratedJournalsWithOverride({
+                        startDate: reportRangeStart || undefined,
+                        endDate: reportRangeEnd || undefined,
+                        companyName: journalFilterCompanyName || undefined,
+                        partyName: journalFilterCustomerName || undefined,
+                        itemId: reportFilterProductId || undefined,
+                        voucherType: v || undefined,
+                      }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                  >
+                    <option value="">All</option>
+                    {VOUCHER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {isJournalReportFilterApplied && (
                   <button
                     type="button"
-                    onClick={openJournalFilterModal}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm hover:bg-gray-50 ${
-                      isJournalReportFilterApplied
-                        ? "border-emerald-400 text-emerald-700 bg-emerald-50"
-                        : "border-gray-300 text-gray-700"
-                    }`}
-                    title="Filters"
-                  >
-                    <Filter size={16} /> Filters
-                  </button>
-                  {isJournalReportFilterApplied && (
-                    <button
-                      type="button"
-                      onClick={clearJournalFilters}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={clearJournalFilters}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
                       title="Clear Filters"
                     >
                       Clear
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const suggested = getSuggestedJournalName();
-                    setJournalGenerateName(suggested);
-                    setJournalNameTouched(false);
-                    setJournalGenerateOpen(true);
-                  }}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedJournalName();
+                  setJournalGenerateName(suggested);
+                  setJournalNameTouched(false);
+                  setJournalGenerateOpen(true);
+                }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
                 >
                   <Printer size={16} /> Generate
                 </button>
               </div>
             </div>
+            {journalReportPreviewOpen && (
             <div className="rounded-xl border border-gray-200 overflow-x-hidden">
               <table className="w-full text-sm border border-gray-200 table-fixed">
                 <thead className="bg-gray-50 text-gray-800">
@@ -2811,7 +3411,20 @@ export default function AccountingFinance() {
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
+                          >
+                            {entry.showDate && entry.lf ? (
+                              <button
+                                type="button"
+                                onClick={() => openLedgerFromLf(entry.entryId)}
+                                className="text-emerald-700 hover:underline text-xs"
+                                title="Open ledger entry"
+                              >
+                                {entry.lf}
+                              </button>
+                            ) : (
+                              ""
+                            )}
+                          </td>
                           <td
                             className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
@@ -2819,21 +3432,21 @@ export default function AccountingFinance() {
                           >
                             ({withBeing(entry.narration)})
                           </td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
-                          <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
+                        <td
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                        ></td>
+                        <td
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                        ></td>
+                        <td
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                        ></td>
                         </tr>
                       ) : (
                         <tr>
@@ -2859,7 +3472,10 @@ export default function AccountingFinance() {
                                 entry.side === "credit" ? "pl-4 text-gray-700" : ""
                               }`}
                             >
-                              <span className="truncate">{entry.account}</span>
+                              <span className="truncate">
+                                {entry.side === "credit" ? "To " : ""}
+                                {entry.account}
+                              </span>
                               {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
                             </div>
                           </td>
@@ -2867,7 +3483,20 @@ export default function AccountingFinance() {
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
+                          >
+                            {entry.showDate && entry.lf ? (
+                              <button
+                                type="button"
+                                onClick={() => openLedgerFromLf(entry.entryId)}
+                                className="text-emerald-700 hover:underline text-xs"
+                                title="Open ledger entry"
+                              >
+                                {entry.lf}
+                              </button>
+                            ) : (
+                              ""
+                            )}
+                          </td>
                           <td
                             className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
@@ -2889,6 +3518,7 @@ export default function AccountingFinance() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
@@ -2973,11 +3603,357 @@ export default function AccountingFinance() {
 
         </div>
       )}
-{["ledger", "trial", "pl", "balance", "receivables", "payables"].includes(activeTab) && (
+      {activeTab === "ledger" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLedgerPreviewOpen((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={ledgerPreviewOpen ? "Hide preview" : "Show preview"}
+                >
+                  <ChevronDown
+                    size={16}
+                    className={ledgerPreviewOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                </button>
+                Ledger Preview
+              </div>
+              <div className="flex-1 flex justify-center gap-2">
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Range</span>
+                  <select
+                    value={ledgerGenerateRange}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setLedgerGenerateRange(v);
+                      const now = new Date();
+                      if (v === "day" || v === "particular") {
+                        const today = now.toISOString().slice(0, 10);
+                        setLedgerGenerateDate(today);
+                        applyLedgerFiltersOnly({ range: v, date: today }).catch(() => {});
+                      } else if (v === "month") {
+                        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+                        setLedgerGenerateDate(ym);
+                        applyLedgerFiltersOnly({ range: v, date: ym }).catch(() => {});
+                      } else if (v === "year") {
+                        const y = String(now.getFullYear());
+                        setLedgerGenerateDate(y);
+                        applyLedgerFiltersOnly({ range: v, date: y }).catch(() => {});
+                      } else if (v === "custom") {
+                        setLedgerGenerateStart("");
+                        setLedgerGenerateEnd("");
+                        applyLedgerFiltersOnly({ range: v, start: "", end: "" }).catch(() => {});
+                      } else {
+                        applyLedgerFiltersOnly({ range: v }).catch(() => {});
+                      }
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                  >
+                    {RANGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {(ledgerGenerateRange === "day" || ledgerGenerateRange === "particular") && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Date</span>
+                    <input
+                      type="date"
+                      value={ledgerGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setLedgerGenerateDate(v);
+                        applyLedgerFiltersOnly({ range: ledgerGenerateRange, date: v }).catch(() => {});
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[100px]"
+                    />
+                  </div>
+                )}
+                {ledgerGenerateRange === "month" && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Month</span>
+                    <input
+                      type="month"
+                      value={ledgerGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setLedgerGenerateDate(v);
+                        applyLedgerFiltersOnly({ range: "month", date: v }).catch(() => {});
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[90px]"
+                    />
+                  </div>
+                )}
+                {ledgerGenerateRange === "year" && (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <span className="text-xs text-gray-600">Year</span>
+                    <input
+                      type="number"
+                      value={ledgerGenerateDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setLedgerGenerateDate(v);
+                        applyLedgerFiltersOnly({ range: "year", date: v }).catch(() => {});
+                      }}
+                      className="text-xs bg-transparent focus:outline-none w-[70px]"
+                    />
+                  </div>
+                )}
+                {ledgerGenerateRange === "custom" && (
+                  <>
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                      <span className="text-xs text-gray-600">From</span>
+                      <input
+                        type="date"
+                        value={ledgerGenerateStart}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setLedgerGenerateStart(v);
+                          applyLedgerFiltersOnly({ range: "custom", start: v, end: ledgerGenerateEnd }).catch(() => {});
+                        }}
+                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                      />
+                    </div>
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                      <span className="text-xs text-gray-600">To</span>
+                      <input
+                        type="date"
+                        value={ledgerGenerateEnd}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setLedgerGenerateEnd(v);
+                          applyLedgerFiltersOnly({ range: "custom", start: ledgerGenerateStart, end: v }).catch(() => {});
+                        }}
+                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Account</span>
+                  <select
+                    value={ledgerFilterAccountId}
+                    onChange={(e) => {
+                      setLedgerFilterAccountId(e.target.value);
+                      if (!ledgerNameTouched)
+                        setLedgerGenerateName(getSuggestedLedgerName({ accountId: e.target.value }));
+                      applyLedgerFiltersOnly().catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[120px]"
+                  >
+                    <option value="">Select account</option>
+                    {(accountOptions || []).map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label || a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Company</span>
+                  <select
+                    value={ledgerFilterCompanyId || ledgerFilterCompanyName}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const match = companyOptions.find((c) => String(c.id) === String(v));
+                      setLedgerFilterCompanyId(match ? String(match.id) : "");
+                      setLedgerFilterCompanyName(match ? match.name : v);
+                      applyLedgerFiltersOnly().catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  >
+                    <option value="">All</option>
+                    {(companyOptions || []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">Customer</span>
+                  <select
+                    value={ledgerFilterPartyName}
+                    onChange={(e) => {
+                      setLedgerFilterPartyName(e.target.value);
+                      applyLedgerFiltersOnly().catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  >
+                    <option value="">All</option>
+                    {(customerOptions || []).map((c) => (
+                      <option key={c._id || c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLedgerGenerateRange("all");
+                    setLedgerGenerateDate("");
+                    setLedgerGenerateStart("");
+                    setLedgerGenerateEnd("");
+                    setLedgerFilterAccountId("");
+                    setLedgerFilterCompanyId("");
+                    setLedgerFilterCompanyName("");
+                    setLedgerFilterPartyName("");
+                    setLedgerGenerateName(getSuggestedLedgerName({ range: "all", date: "", start: "", end: "" }));
+                    setLedgerNameTouched(false);
+                    applyLedgerFiltersOnly({ range: "all", date: "", start: "", end: "" }).catch(() => {});
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Clear Filters"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedLedgerName();
+                    setLedgerGenerateName(suggested);
+                    setLedgerNameTouched(false);
+                    setLedgerGenerateOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Printer size={16} /> Generate
+                </button>
+              </div>
+            </div>
+            {ledgerPreviewOpen && (
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-600">
+                  <span>Dr.</span>
+                  <span>Cr.</span>
+                </div>
+                <table className="w-full text-sm border border-gray-200 table-fixed">
+                  <thead className="bg-gray-50 text-gray-800">
+                    <tr>
+                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Particular</th>
+                      <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">J.R.</th>
+                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount Rs.</th>
+                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
+                      <th className="text-left font-semibold px-2 py-2 border border-gray-200">Particular</th>
+                      <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">J.R.</th>
+                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount Rs.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledgerPreviewRows.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Apply filters to preview ledger.
+                        </td>
+                      </tr>
+                    )}
+                    {ledgerPreviewRows.map((r, idx) => (
+                      <tr key={`ledger-row-${idx}`}>
+                        <td className="px-2 py-2 border border-gray-200 whitespace-pre-line">{r.drDate}</td>
+                        <td className="px-2 py-2 border border-gray-200">{r.drRef}</td>
+                        <td className="px-2 py-2 border border-gray-200">{r.drJr}</td>
+                        <td className="px-2 py-2 border border-gray-200 text-right">{r.drAmount}</td>
+                        <td className="px-2 py-2 border border-gray-200 whitespace-pre-line">{r.crDate}</td>
+                        <td className="px-2 py-2 border border-gray-200">{r.crRef}</td>
+                        <td className="px-2 py-2 border border-gray-200">{r.crJr}</td>
+                        <td className="px-2 py-2 border border-gray-200 text-right">{r.crAmount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 space-y-3">
+            <div className="text-sm font-semibold text-emerald-900">Generated Ledgers</div>
+            <div className="rounded-xl border border-emerald-100 overflow-x-auto">
+              <table className="w-full text-sm border border-emerald-100">
+                <thead className="bg-emerald-50 text-emerald-900">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 w-[70px] border border-gray-200">Sr No</th>
+                    <th className="text-left font-semibold px-3 py-2 border border-gray-200">Ledger Name</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[140px] border border-gray-200">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {generatedLedgerList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No generated ledgers yet.
+                      </td>
+                    </tr>
+                  )}
+                  {generatedLedgerList.map((j, idx) => (
+                    <tr key={j._id || j.id || idx}>
+                      <td className="px-3 py-2 border border-gray-200">{idx + 1}</td>
+                      <td className="px-3 py-2 border border-gray-200">{j.name}</td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleViewGeneratedLedger(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="View"
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadGeneratedLedger(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Download PDF"
+                          >
+                            <Download size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              api
+                                .delete(`/accounting/generated-journals/${j._id || j.id}`)
+                                .then(() => loadGeneratedLedgerList())
+                                .catch(() => {})
+                            }
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <Reports
+            embedded
+            initialTab="ledger"
+            allowedTabs={["ledger"]}
+            hideFilters
+            highlightId={ledgerHighlightId}
+          />
+
+          {/* Generated Ledgers list moved to Reports module */}
+        </div>
+      )}
+
+{["trial", "pl", "balance", "receivables", "payables"].includes(activeTab) && (
         <Reports
           embedded
           initialTab={activeTab}
-          allowedTabs={["ledger", "trial", "pl", "balance", "receivables", "payables"]}
+          allowedTabs={["trial", "pl", "balance", "receivables", "payables"]}
         />
       )}
 
@@ -4337,198 +5313,57 @@ export default function AccountingFinance() {
         </div>
       )}
 
-      {journalFilterOpen && (
+      {journalFilterOpen && null}
+
+      {ledgerGenerateOpen && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+          <div className="w-full max-w-lg bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-gray-900">Journal Filters</div>
+              <div className="text-sm font-semibold text-gray-900">Generate Ledger</div>
               <button
                 type="button"
-                onClick={() => setJournalFilterOpen(false)}
+                onClick={() => setLedgerGenerateOpen(false)}
                 className="p-2 rounded hover:bg-gray-100"
                 title="Close"
               >
                 <X size={16} />
               </button>
             </div>
-
-            <div className="grid md:grid-cols-4 gap-3 items-end">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Range</label>
-                <select
-                  value={journalGenerateRange}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setJournalGenerateRange(v);
-                    if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ range: v }));
-                  }}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                >
-                  <option value="all">All Dates</option>
-                  <option value="day">Day (Today)</option>
-                  <option value="particular">Particular Date</option>
-                  <option value="month">Month</option>
-                  <option value="year">Year</option>
-                  <option value="custom">Custom Range</option>
-                </select>
-              </div>
-
-              {(journalGenerateRange === "day" || journalGenerateRange === "particular") && (
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={journalGenerateDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setJournalGenerateDate(v);
-                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v }));
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              )}
-
-              {journalGenerateRange === "custom" && (
-                <>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Start</label>
-                    <input
-                      type="date"
-                      value={journalGenerateStart}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setJournalGenerateStart(v);
-                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ start: v, end: journalGenerateEnd }));
-                      }}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">End</label>
-                    <input
-                      type="date"
-                      value={journalGenerateEnd}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setJournalGenerateEnd(v);
-                        if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ start: journalGenerateStart, end: v }));
-                      }}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                </>
-              )}
-
-              {journalGenerateRange === "month" && (
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Month</label>
-                  <input
-                    type="month"
-                    value={journalGenerateDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setJournalGenerateDate(v);
-                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "month" }));
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              )}
-
-              {journalGenerateRange === "year" && (
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Year</label>
-                  <input
-                    type="number"
-                    min="1970"
-                    max="2100"
-                    value={journalGenerateDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setJournalGenerateDate(v);
-                      if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "year" }));
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    placeholder="2026"
-                  />
-                </div>
-              )}
-
-              <div className="md:col-span-2">
-                <label className="block text-xs text-gray-600 mb-1">Company</label>
-                  <select
-                    value={journalFilterCompanyName}
-                    onChange={(e) => handleJournalFilterCompanyDraft(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All companies</option>
-                    {companyOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-xs text-gray-600 mb-1">Customer</label>
-                  <select
-                    value={journalFilterCustomerName}
-                    onChange={(e) => setJournalFilterCustomerName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All customers</option>
-                    {customerOptions.map((c) => (
-                    <option key={c._id || c.name} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
-                  <select
-                    value={journalFilterVoucherType}
-                    onChange={(e) => setJournalFilterVoucherType(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                  <option value="">All</option>
-                  {VOUCHER_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Ledger name</label>
+              <input
+                value={ledgerGenerateName}
+                onChange={(e) => {
+                  setLedgerGenerateName(e.target.value);
+                  setLedgerNameTouched(true);
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                placeholder="Ledger name"
+              />
             </div>
-
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setJournalFilterOpen(false)}
+                onClick={() => setLedgerGenerateOpen(false)}
                 className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setJournalFilterOpen(false);
-                  applyJournalFiltersOnly();
-                  if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName());
-                }}
+                onClick={applyLedgerGenerateFilters}
                 className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
               >
-                Apply
+                Generate
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {journalPreviewOpen && (
+      {/* Ledger filters modal removed */}
+
+      {false && (
         <div
           className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
           onClick={() => setJournalPreviewOpen(false)}
@@ -4592,7 +5427,9 @@ export default function AccountingFinance() {
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
+                          >
+                            {entry.showDate ? entry.lf || "" : ""}
+                          </td>
                           <td
                             className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
@@ -4604,7 +5441,9 @@ export default function AccountingFinance() {
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
-                          ></td>
+                          >
+                            {entry.showDate ? entry.lf || "" : ""}
+                          </td>
                           <td
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
@@ -4640,7 +5479,10 @@ export default function AccountingFinance() {
                                 entry.side === "credit" ? "pl-4 text-gray-700" : ""
                               }`}
                             >
-                              <span className="truncate">{entry.account}</span>
+                            <span className="truncate">
+                              {entry.side === "credit" ? "To " : ""}
+                              {entry.account}
+                            </span>
                               {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
                             </div>
                           </td>

@@ -9,10 +9,13 @@ const AccountingGeneratedJournalSchema = new mongoose.Schema(
     endDate: { type: String, default: "" },
     companyId: { type: String, default: "" },
     companyName: { type: String, default: "" },
+    accountId: { type: String, default: "" },
+    accountName: { type: String, default: "" },
     partyName: { type: String, default: "" },
     itemId: { type: String, default: "" },
     itemName: { type: String, default: "" },
     voucherType: { type: String, default: "" },
+    reportKey: { type: String, default: "journal" },
   },
   { timestamps: true }
 );

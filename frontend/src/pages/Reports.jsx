@@ -19,6 +19,9 @@ import {
   Download,
   X,
   Printer,
+  Eye,
+  Trash2,
+  ChevronDown,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api from "../services/api";
@@ -27,20 +30,12 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const REPORT_TABS = [
-  { key: "ledger", label: "Ledger", icon: <BookCopy size={16} /> },
-  { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
-  { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
-  { key: "balance", label: "Balance Sheet", icon: <Landmark size={16} /> },
-  { key: "receivables", label: "Accounts Receivable", icon: <HandCoins size={16} /> },
-  { key: "payables", label: "Accounts Payable", icon: <HandCoins size={16} /> },
-  { key: "daybook", label: "Day Book", icon: <BookOpen size={16} /> },
-
+  { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
   { key: "stock", label: "Current Stock", icon: <Package size={16} /> },
   { key: "stock-movement", label: "Stock Movement", icon: <Activity size={16} /> },
   { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
   { key: "by-product", label: "By-Product Report", icon: <Boxes size={16} /> },
   { key: "production", label: "Production Detail", icon: <Factory size={16} /> },
-
   { key: "companies", label: "Company List", icon: <Building2 size={16} /> },
   { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
 ];
@@ -49,7 +44,7 @@ const REPORT_TAB_MAP = new Map(REPORT_TABS.map((t) => [t.key, t]));
 const REPORT_GROUPS = [
   {
     label: "Accounting",
-    tabs: ["ledger", "trial", "pl", "balance", "receivables", "payables", "daybook"],
+    tabs: ["acc-reports"],
   },
   {
     label: "Stock",
@@ -74,8 +69,17 @@ const RANGE_OPTIONS = [
   { value: "custom", label: "Custom Range" },
 ];
 
-const num = (v) => Math.round(Number(v || 0));
+const num = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n);
+};
 const fmt = (v) => `Rs ${num(v)}`;
+const shortEntryId = (value) => {
+  const raw = String(value || "").replace(/\D/g, "");
+  if (!raw) return "";
+  return raw.slice(-4);
+};
 const fmtDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
 const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
@@ -106,6 +110,12 @@ const MONTHS = [
 ];
 const n0 = (v) => (v === "" || v == null ? 0 : Number(v || 0) || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
+const ensureAccountSuffix = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/\bA\/C\b/i.test(text)) return text;
+  return `${text} A/C`;
+};
 
 function computeTotalsFromItems({ earnings, deductionsItems }) {
   const e = Array.isArray(earnings) ? earnings : [];
@@ -136,9 +146,11 @@ function defaultDeductions() {
   ];
 }
 
-export default function Reports({ embedded = false, initialTab = "", allowedTabs = null, hideFilters = false }) {
+export default function Reports({ embedded = false, initialTab = "", allowedTabs = null, hideFilters = false, highlightId = "" }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState("stock");
+  const [activeTab, setActiveTab] = useState(() =>
+    embedded && initialTab ? initialTab : "acc-reports"
+  );
   const [range, setRange] = useState("month");
   const [particularDate, setParticularDate] = useState(new Date().toISOString().slice(0, 10));
   const [startDate, setStartDate] = useState("");
@@ -160,6 +172,10 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [filterTemplates, setFilterTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateDialog, setTemplateDialog] = useState({ open: false, name: "" });
+  const [generatedJournalList, setGeneratedJournalList] = useState([]);
+  const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
+  const [generatedLoading, setGeneratedLoading] = useState(false);
+  const [ledgerRecordsOpen, setLedgerRecordsOpen] = useState(false);
 
   // Stock / Production filters
   const [invCompanies, setInvCompanies] = useState([]); // Company (party) list
@@ -216,10 +232,23 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     return 32;
   };
 
+  const openHtmlWindow = (html, { title = "Preview", autoPrint = false } = {}) => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.open();
+    w.document.write(`<!doctype html><html><head><title>${title}</title></head><body>${html}</body></html>`);
+    w.document.close();
+    if (autoPrint) {
+      w.focus();
+      w.print();
+    }
+  };
+
   const visibleTabs = useMemo(() => {
+    if (!embedded) return REPORT_TABS;
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
     return REPORT_TABS.filter((t) => allowedTabs.includes(t.key));
-  }, [allowedTabs]);
+  }, [allowedTabs, embedded]);
 
   const visibleTabMap = useMemo(() => new Map(visibleTabs.map((t) => [t.key, t])), [visibleTabs]);
 
@@ -240,7 +269,11 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       return;
     }
     const tab = searchParams.get("tab");
-    if (tab && visibleTabMap.has(tab)) setActiveTab(tab);
+    if (tab && visibleTabMap.has(tab)) {
+      setActiveTab(tab);
+    } else if (visibleTabs.length) {
+      setActiveTab(visibleTabs[0].key);
+    }
   }, [searchParams, embedded, initialTab, visibleTabs, visibleTabMap]);
 
   const loadPrintSettings = async () => {
@@ -319,6 +352,14 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const loadReport = async () => {
     try {
       setLoading(true);
+      if (activeTab === "journal") {
+        setRows([]);
+        return;
+      }
+      if (activeTab === "acc-reports") {
+        setRows([]);
+        return;
+      }
       if (activeTab === "customers") {
         setRows([]);
         return;
@@ -564,6 +605,17 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   }, [activeTab, params]);
 
   useEffect(() => {
+    if (activeTab === "acc-reports" || activeTab === "ledger") {
+      loadGeneratedList("ledger", setGeneratedLedgerList);
+    }
+    if (activeTab === "acc-reports") {
+      loadGeneratedList("journal", setGeneratedJournalList);
+    }
+  }, [activeTab]);
+
+
+
+  useEffect(() => {
     const loadPartyBuckets = async () => {
       if (activeTab !== "customers") return;
       try {
@@ -694,6 +746,32 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     return rows;
   };
 
+  const buildLedgerPreviewRows = (rows = []) => {
+    const debits = (rows || []).filter((r) => round2(n0(r.debit)) > 0);
+    const credits = (rows || []).filter((r) => round2(n0(r.credit)) > 0);
+    const max = Math.max(debits.length, credits.length, 1);
+    return Array.from({ length: max }).map((_, i) => {
+      const d = debits[i];
+      const c = credits[i];
+      return {
+        drDate: d?.date ? `${formatYear(d.date)}\n${formatMonthDay(d.date)}` : "",
+        drRef: (() => {
+          const text = ensureAccountSuffix(d?.references || d?.account || d?.description || "");
+          return text ? `To ${text}` : "";
+        })(),
+        drJr: shortEntryId(d?.voucherNo || d?.journalEntryId || ""),
+        drAmount: d ? `Rs. ${String(round2(n0(d.debit)))}` : "",
+        crDate: c?.date ? `${formatYear(c.date)}\n${formatMonthDay(c.date)}` : "",
+        crRef: (() => {
+          const text = ensureAccountSuffix(c?.references || c?.account || c?.description || "");
+          return text ? `By ${text}` : "";
+        })(),
+        crJr: shortEntryId(c?.voucherNo || c?.journalEntryId || ""),
+        crAmount: c ? `Rs. ${String(round2(n0(c.credit)))}` : "",
+      };
+    });
+  };
+
   const renderJournalEntryHtml = (entry) => {
     const dateYear = formatYear(entry.date);
     const dateMonthDay = formatMonthDay(entry.date);
@@ -781,6 +859,49 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           <tbody>
             ${linesHtml}
           </tbody>
+        </table>
+      </div>
+    `;
+  };
+
+  const renderLedgerHtml = ({ rows, title, entityLine = "" }) => {
+    const body = (rows || [])
+      .map(
+        (r) => `
+        <tr>
+          <td>${r.drDate || ""}</td>
+          <td>${r.drRef || ""}</td>
+          <td>${r.drJr || ""}</td>
+          <td style="text-align:right">${r.drAmount || ""}</td>
+          <td>${r.crDate || ""}</td>
+          <td>${r.crRef || ""}</td>
+          <td>${r.crJr || ""}</td>
+          <td style="text-align:right">${r.crAmount || ""}</td>
+        </tr>
+      `
+      )
+      .join("");
+    return `
+      <div style="font-family:Times New Roman, serif; font-size:12px;">
+        <div style="text-align:center; font-weight:bold; margin-bottom:4px;">${title}</div>
+        ${entityLine ? `<div style="text-align:center; margin-bottom:6px;">${entityLine}</div>` : ""}
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span>Dr.</span><span>Cr.</span>
+        </div>
+        <table style="width:100%; border-collapse:collapse;" border="1">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>References</th>
+              <th>J.R.</th>
+              <th>Amount Rs.</th>
+              <th>Date</th>
+              <th>References</th>
+              <th>J.R.</th>
+              <th>Amount Rs.</th>
+            </tr>
+          </thead>
+          <tbody>${body || ""}</tbody>
         </table>
       </div>
     `;
@@ -922,6 +1043,34 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       return [
         { key: "productTypeName", label: "Product" },
         { key: "outputKg", label: "Total Output (kg)" },
+      ];
+    }
+    if (activeTab === "ledger") {
+      return [
+        { key: "date", label: "Date", render: (v) => fmtDate(v) },
+        { key: "account", label: "Particular", filterOptions: (accAccounts || []).map((a) => a.name) },
+        { key: "voucherNo", label: "J.R.", render: (v) => shortEntryId(v) },
+        { key: "description", label: "Description" },
+        { key: "debit", label: "Debit (PKR)", render: (v) => fmt(v) },
+        { key: "credit", label: "Credit (PKR)", render: (v) => fmt(v) },
+        { key: "balance", label: "Balance (PKR)", render: (v) => fmt(v) },
+        {
+          key: "open",
+          label: "Open",
+          skipExport: true,
+          render: (_v, row) =>
+            row?.journalEntryId ? (
+              <button
+                type="button"
+                onClick={() => openVoucherDrill(row.journalEntryId)}
+                className="text-emerald-700 hover:underline text-xs"
+              >
+                Voucher
+              </button>
+            ) : (
+              "-"
+            ),
+        },
       ];
     }
     if (activeTab === "trial") {
@@ -1181,6 +1330,9 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
   const reportRowClass = (row) => {
     if (!row) return "";
+    if (activeTab === "ledger" && highlightId && String(row.journalEntryId) === String(highlightId)) {
+      return "bg-emerald-100 animate-pulse";
+    }
     if (activeTab === "ledger" && Number(row.balance || 0) < 0) return "text-red-700";
     if (activeTab === "stock-movement" && Number(row.balanceKg || 0) < 0) return "text-red-700";
     if ((activeTab === "receivables" || activeTab === "payables") && Number(row.balance || 0) < 0) return "text-red-700";
@@ -1351,6 +1503,233 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     doc.save(`balance_sheet_${asOfDate}.pdf`);
   };
 
+  const loadGeneratedList = async (reportKey, setter) => {
+    try {
+      setGeneratedLoading(true);
+      const res = await api.get("/accounting/generated-journals", { params: { reportKey } });
+      setter(res.data?.data || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load generated list.");
+      setter([]);
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const fetchGeneratedJournals = async (filters = {}) => {
+    const res = await api.get("/accounting/journal", { params: { ...filters } });
+    return res.data?.data || [];
+  };
+
+  const fetchGeneratedLedger = async (filters = {}) => {
+    const res = await api.get("/accounting/ledger", { params: { ...filters } });
+    return res.data?.data || [];
+  };
+
+  const filterJournalsBy = (entries = [], filters = {}) => {
+    const start = filters.startDate ? new Date(filters.startDate) : null;
+    const end = filters.endDate ? new Date(filters.endDate) : null;
+    const companyName = String(filters.companyName || "").trim();
+    const partyName = String(filters.partyName || "").trim();
+    const itemId = String(filters.itemId || "").trim();
+    const voucherType = String(filters.voucherType || "").trim();
+    return (entries || []).filter((e) => {
+      const d = e?.date ? new Date(e.date) : null;
+      if (start && d && d < start) return false;
+      if (end && d && d > end) return false;
+      if (companyName && String(e.companyName || "").trim() !== companyName) return false;
+      if (partyName && String(e.partyName || e.customerName || "").trim() !== partyName) return false;
+      if (itemId && String(e.itemId || "").trim() !== itemId) return false;
+      if (voucherType && String(e.voucherType || "").trim() !== voucherType) return false;
+      return true;
+    });
+  };
+
+  const buildJournalRangeLabel = ({ range = "", date = "", start = "", end = "" }) => {
+    if (range === "day" || range === "particular") return date || start || "";
+    if (range === "month") {
+      const base = date ? new Date(`${date}-01`) : start ? new Date(start) : null;
+      return base ? base.toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "";
+    }
+    if (range === "year") return date || (start ? new Date(start).getFullYear() : "");
+    if (range === "custom") {
+      if (start && end) return `${start} to ${end}`;
+      return start || end || "";
+    }
+    return "All Dates";
+  };
+
+  const handleViewGeneratedJournal = (j) => {
+    if (!j) return;
+    // Apply filters on-page instead of opening a popup
+    const range = j.range || "all";
+    setRange(range);
+    setParticularDate(j.rangeDate || "");
+    setStartDate(j.startDate || "");
+    setEndDate(j.endDate || "");
+    setAccCompanyId(j.companyId || "");
+    setAccCustomerNames(j.partyName ? [j.partyName] : []);
+    setAccProductName(j.itemName || "");
+    setAccVoucherTypes(j.voucherType ? [j.voucherType] : []);
+    setSearchParams({ tab: "journal" });
+    setActiveTab("journal");
+  };
+
+  const handleDownloadGeneratedJournal = async (j) => {
+    if (!j) return;
+    try {
+      setGeneratedLoading(true);
+      const data = await fetchGeneratedJournals({
+        range: j.range || "all",
+        rangeDate: j.rangeDate || "",
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        companyId: j.companyId || "",
+        companyName: j.companyName || "",
+        partyName: j.partyName || "",
+        itemId: j.itemId || "",
+        voucherType: j.voucherType || "",
+      });
+      const filtered = filterJournalsBy(data, {
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        companyName: j.companyName || "",
+        partyName: j.partyName || "",
+        itemId: j.itemId || "",
+        voucherType: j.voucherType || "",
+      });
+      if (!filtered.length) {
+        toast.error("No journals found for the selected filters.");
+        return;
+      }
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const centerX = doc.internal.pageSize.getWidth() / 2;
+      let headerY = 10;
+      doc.setFontSize(11);
+      doc.text(selectedCompanyName || "Business", centerX, headerY, { align: "center" });
+      headerY += 5;
+      const rangeLabel = buildJournalRangeLabel({
+        range: j.range || "all",
+        date: j.rangeDate || "",
+        start: j.startDate || "",
+        end: j.endDate || "",
+      });
+      doc.setFontSize(10);
+      doc.text("JOURNAL ENTRIES", centerX, headerY, { align: "center" });
+      headerY += 4;
+      doc.setFontSize(9);
+      doc.text(`For ${rangeLabel}`, centerX, headerY, { align: "center" });
+      const startY = headerY + 6;
+      const rows = filtered.flatMap((entry) =>
+        journalRowsForEntry(entry).map((r) => [
+          r.showDate ? `${formatYear(r.date)}\n${formatMonthDay(r.date)}` : "",
+          r.details,
+          "",
+          r.debit,
+          r.credit,
+        ])
+      );
+      autoTable(doc, {
+        head: [["Date", "Particulars", "L.F.", "Debit", "Credit"]],
+        body: rows,
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 3: { halign: "right" }, 4: { halign: "right" } },
+      });
+      doc.save(`${String(j.name || "journal").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download journal.");
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedJournal = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedList("journal", setGeneratedJournalList);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete journal.");
+    }
+  };
+
+  const handleViewGeneratedLedger = (j) => {
+    if (!j) return;
+    // Apply filters on-page instead of opening a popup
+    const range = j.range || "all";
+    setRange(range);
+    setParticularDate(j.rangeDate || "");
+    setStartDate(j.startDate || "");
+    setEndDate(j.endDate || "");
+    setAccCompanyId(j.companyId || "");
+    setAccAccountIds(j.accountId ? [j.accountId] : []);
+    setAccCustomerNames(j.partyName ? [j.partyName] : []);
+    setSearchParams({ tab: "ledger" });
+    setActiveTab("ledger");
+  };
+
+  const handleDownloadGeneratedLedger = async (j) => {
+    if (!j) return;
+    try {
+      setGeneratedLoading(true);
+      const data = await fetchGeneratedLedger({
+        range: j.range || "all",
+        rangeDate: j.rangeDate || "",
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        accountId: j.accountId || "",
+        companyId: j.companyId || "",
+        companyName: j.companyName || "",
+        party: j.partyName || "",
+      });
+      const rows = buildLedgerPreviewRows(data);
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const headerTitle = j.accountName ? `${j.accountName} Account in Ledger` : "Account in Ledger";
+      const entityLine = String(j.companyName || j.partyName || "").trim();
+      let headerY = 24;
+      doc.setFontSize(12);
+      doc.text(headerTitle, doc.internal.pageSize.getWidth() / 2, headerY, { align: "center" });
+      if (entityLine) {
+        headerY += 14;
+        doc.setFontSize(10);
+        doc.text(entityLine, doc.internal.pageSize.getWidth() / 2, headerY, { align: "center" });
+      }
+      const startY = headerY + 16;
+      doc.setFontSize(10);
+      doc.text("Dr.", 40, startY - 6);
+      doc.text("Cr.", doc.internal.pageSize.getWidth() - 40, startY - 6, { align: "right" });
+      autoTable(doc, {
+        head: [["Date", "References", "J.R.", "Amount Rs.", "Date", "References", "J.R.", "Amount Rs."]],
+        body: rows.map((r) => [r.drDate, r.drRef, r.drJr, r.drAmount, r.crDate, r.crRef, r.crJr, r.crAmount]),
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 3: { halign: "right" }, 7: { halign: "right" } },
+      });
+      doc.save(`${String(j.name || "ledger").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download ledger.");
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedLedger = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedList("ledger", setGeneratedLedgerList);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete ledger.");
+    }
+  };
+
   const downloadLedgerDrillPdf = () => {
     const debits = (drill.rows || []).filter((r) => Number(r.debit || 0) > 0);
     const credits = (drill.rows || []).filter((r) => Number(r.credit || 0) > 0);
@@ -1433,352 +1812,252 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
   return (
     <div className="space-y-4">
-      {!embedded && (
-      <div className="border-b border-emerald-200 pb-2">
-        {visibleGroups.map((group) => (
-          <div key={group.label} className="mb-2">
-            <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">{group.label}</div>
-            <div className="flex flex-wrap gap-2">
-              {group.tabs.map((key) => {
-                const tab = visibleTabMap.get(key);
-                if (!tab) return null;
-                const isActive = activeTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => {
-                      setActiveTab(tab.key);
-                      setSearchParams({ tab: tab.key });
-                    }}
-                    className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-t-lg border-b-2 transition whitespace-nowrap
-                    ${
-                      isActive
-                        ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
-                        : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
-                    }`}
-                  >
-                    {tab.icon}
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
+      {/* Accounting placeholder removed */}
+
+      {/* Filters panel removed as requested */}
+
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        {activeTab === "acc-reports" ? (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-gray-900">Generated Journals</div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-emerald-50 text-emerald-900">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                      <th className="text-left font-semibold px-3 py-2">Journal Name</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {generatedLoading && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Loading generated journals...
+                        </td>
+                      </tr>
+                    )}
+                    {!generatedLoading && generatedJournalList.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No generated journals yet.
+                        </td>
+                      </tr>
+                    )}
+                    {generatedJournalList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
+                        <td className="px-3 py-2">{idx + 1}</td>
+                        <td className="px-3 py-2">{j.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleViewGeneratedJournal(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="View"
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedJournal(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download PDF"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedJournal(j)}
+                              className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-gray-900">Generated Ledgers</div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-emerald-50 text-emerald-900">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                      <th className="text-left font-semibold px-3 py-2">Ledger Name</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {generatedLoading && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Loading generated ledgers...
+                        </td>
+                      </tr>
+                    )}
+                    {!generatedLoading && generatedLedgerList.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No generated ledgers yet.
+                        </td>
+                      </tr>
+                    )}
+                    {generatedLedgerList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
+                        <td className="px-3 py-2">{idx + 1}</td>
+                        <td className="px-3 py-2">{j.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleViewGeneratedLedger(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="View"
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedLedger(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download PDF"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedLedger(j)}
+                              className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
-      )}
+        ) : (
+          <>
+            {activeTab === "ledger" && (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setLedgerRecordsOpen((v) => !v)}
+                  className="flex items-center gap-2 text-sm font-semibold text-gray-900"
+                >
+                  <ChevronDown
+                    size={16}
+                    className={ledgerRecordsOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                  Ledger Records
+                </button>
+                {ledgerRecordsOpen && (
+                  <>
+                    {loading ? (
+                      <div className="text-sm text-gray-500">Loading ledger records...</div>
+                    ) : (
+                        <DataTable
+                          title="Ledger Records"
+                          columns={columns}
+                          data={rows}
+                          idKey="id"
+                          searchPlaceholder="Search ledger..."
+                          emptyMessage={emptyMessage}
+                          rowClassName={reportRowClass}
+                          highlightId={highlightId}
+                          highlightKey="journalEntryId"
+                          showExport
+                          showPrint
+                          showRecordCount={!(embedded && activeTab === "ledger")}
+                        />
+                    )}
+                  </>
+                )}
 
-      {!hideFilters && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-gray-700">Report Filters</div>
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((v) => !v)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
-              filtersOpen ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            <Filter size={16} />
-            {filtersOpen ? "Hide Filters" : "Show Filters"}
-          </button>
-        </div>
-      )}
-
-      {!hideFilters && filtersOpen && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-            <div className="text-sm">
-              <span className={filterLabelClass}>Range</span>
-              <select
-                value={range}
-                onChange={(e) => setRange(e.target.value)}
-                className={`${filterInputClass} w-full`}
-              >
-                {RANGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {range === "particular" && (
-              <div className="text-sm">
-                <span className={filterLabelClass}>Date</span>
-                <input
-                  type="date"
-                  value={particularDate}
-                  onChange={(e) => setParticularDate(e.target.value)}
-                  className={`${filterInputClass} w-full`}
-                />
+                {/* Generated ledgers list removed from ledger records */}
               </div>
             )}
 
-            {range === "custom" && (
+            {activeTab !== "ledger" && (
               <>
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Start Date</span>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className={`${filterInputClass} w-full`}
+                {loading ? (
+                  <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
+                ) : (
+                  <DataTable
+                    title={title}
+                    columns={columns}
+                    data={rows}
+                    idKey="id"
+                    searchPlaceholder={`Search ${title.toLowerCase()}...`}
+                    emptyMessage={emptyMessage}
+                    rowClassName={reportRowClass}
+                    showExport={!["trial", "pl", "balance"].includes(activeTab)}
+                    showPrint={!["trial", "pl", "balance"].includes(activeTab)}
+                    showRecordCount={!(embedded && activeTab === "ledger")}
+                    toolbarActions={
+                      ["trial", "pl", "balance"].includes(activeTab) ? (
+                        <div className="flex flex-wrap gap-2">
+                          {activeTab === "trial" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={downloadTrialPdf}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                              >
+                                <Download size={16} /> PDF
+                              </button>
+                              <button
+                                type="button"
+                                onClick={downloadTrialExcel}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                              >
+                                <Download size={16} /> Excel
+                              </button>
+                            </>
+                          )}
+                          {activeTab === "pl" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadPlPdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
+                              }
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <Download size={16} /> PDF
+                            </button>
+                          )}
+                          {activeTab === "balance" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadBalancePdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
+                              }
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <Download size={16} /> PDF
+                            </button>
+                          )}
+                        </div>
+                      ) : null
+                    }
                   />
-                </div>
-                <div className="text-sm">
-                  <span className={filterLabelClass}>End Date</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className={`${filterInputClass} w-full`}
-                  />
-                </div>
+                )}
               </>
             )}
-
-            {["trial", "pl", "balance", "receivables", "payables", "ledger"].includes(activeTab) && (
-              <>
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Company</span>
-                  <select
-                    value={accCompanyId}
-                    onChange={(e) => setAccCompanyId(e.target.value)}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    <option value="">All</option>
-                    {(accCompanies || []).map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Templates</span>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <select
-                      value={selectedTemplateId}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setSelectedTemplateId(v);
-                        applyTemplate(v);
-                      }}
-                      className={`${filterInputClass} w-full`}
-                    >
-                      <option value="">Select template</option>
-                      {(filterTemplates || []).map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={openSaveTemplate}
-                      className="px-3 py-2 rounded-lg border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
-                    >
-                      Save Template
-                    </button>
-                  </div>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Voucher Types</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={accVoucherTypes}
-                    onChange={(e) => setAccVoucherTypes(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {["JOURNAL", "PAYMENT", "RECEIPT"].map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Accounts</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={accAccountIds}
-                    onChange={(e) => setAccAccountIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {(accAccounts || []).filter((a) => a.isActive !== false).map((a) => (
-                      <option key={a._id} value={a._id}>
-                        {a.code} - {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Customers</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={accCustomerNames}
-                    onChange={(e) => setAccCustomerNames(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {(accCustomers || []).map((c) => (
-                      <option key={c._id || c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Product</span>
-                  <input
-                    value={accProductName}
-                    onChange={(e) => setAccProductName(e.target.value)}
-                    placeholder="Type product name"
-                    className={`${filterInputClass} w-full`}
-                  />
-                </div>
-              </>
-            )}
-
-            {["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab) && (
-              <>
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Company</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={invCompanyIds}
-                    onChange={(e) => setInvCompanyIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {(invCompanies || []).map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Product</span>
-                  <select
-                    multiple
-                    size={1}
-                    value={invProductTypeIds}
-                    onChange={(e) => setInvProductTypeIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    className={`${filterInputClass} w-full`}
-                  >
-                    {(invProducts || []).map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="text-sm">
-                  <span className={filterLabelClass}>Templates</span>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <select
-                      value={selectedTemplateId}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setSelectedTemplateId(v);
-                        applyTemplate(v);
-                      }}
-                      className={`${filterInputClass} w-full`}
-                    >
-                      <option value="">Select template</option>
-                      {(filterTemplates || []).map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={openSaveTemplate}
-                      className="px-3 py-2 rounded-lg border border-emerald-200 text-emerald-800 text-sm hover:bg-emerald-50"
-                    >
-                      Save Template
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="bg-white rounded-lg shadow-sm p-4">
-        {loading ? (
-          <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
-        ) : (
-            <DataTable
-              title={title}
-              columns={columns}
-              data={rows}
-              idKey="id"
-              searchPlaceholder={`Search ${title.toLowerCase()}...`}
-              emptyMessage={emptyMessage}
-            rowClassName={reportRowClass}
-            showExport={!["trial", "pl", "balance"].includes(activeTab)}
-            showPrint={!["trial", "pl", "balance"].includes(activeTab)}
-            toolbarActions={
-              ["trial", "pl", "balance"].includes(activeTab) ? (
-                <div className="flex flex-wrap gap-2">
-                  {activeTab === "trial" && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={downloadTrialPdf}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        <Download size={16} /> PDF
-                      </button>
-                      <button
-                        type="button"
-                        onClick={downloadTrialExcel}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        <Download size={16} /> Excel
-                      </button>
-                    </>
-                  )}
-                  {activeTab === "pl" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadPlPdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
-                      }
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Download size={16} /> PDF
-                    </button>
-                  )}
-                  {activeTab === "balance" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadBalancePdf().catch((e) => toast.error(e?.response?.data?.message || "Failed to download PDF."))
-                      }
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Download size={16} /> PDF
-                    </button>
-                  )}
-                </div>
-              ) : null
-            }
-          />
+          </>
         )}
       </div>
 

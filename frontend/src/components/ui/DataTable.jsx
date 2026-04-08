@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, Download, Printer, Filter, X, FileText, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import api from "../../services/api";
 import * as XLSX from "xlsx";
@@ -31,6 +31,7 @@ export default function DataTable({
   showSearch = true,
   showFilters = true,
   showClearFilters = true,
+  showRecordCount = true,
   showExport = true,
   showPrint = true,
   exportData,
@@ -39,6 +40,8 @@ export default function DataTable({
   onRowAction,
   toolbarActions,
   deleteAll,
+  highlightId = "",
+  highlightKey = "id",
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -54,6 +57,7 @@ export default function DataTable({
     confirming: false,
   });
   const [printHeader, setPrintHeader] = useState({ name: "", address: "", email: "", logoUrl: "" });
+  const tableBodyRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -130,6 +134,26 @@ export default function DataTable({
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const start = (currentPage - 1) * pageSize;
   const pageData = filteredData.slice(start, start + pageSize);
+  const highlightIndex = useMemo(() => {
+    if (!highlightId) return -1;
+    return filteredData.findIndex((row) => String(row?.[highlightKey]) === String(highlightId));
+  }, [filteredData, highlightId, highlightKey]);
+
+  useEffect(() => {
+    if (highlightIndex < 0) return;
+    const targetPage = Math.floor(highlightIndex / pageSize) + 1;
+    if (targetPage !== currentPage) {
+      setPage(targetPage);
+    }
+  }, [highlightIndex, pageSize, currentPage]);
+
+  useEffect(() => {
+    if (!highlightId) return;
+    const el = tableBodyRef.current?.querySelector("[data-highlight='true']");
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [highlightId, pageData]);
 
   const setFilter = (key, value) => {
     setFilters((prev) => (value ? { ...prev, [key]: value } : { ...prev, [key]: undefined }));
@@ -246,11 +270,13 @@ export default function DataTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-lg font-semibold text-gray-900">{title}</div>
-          <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
-        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-lg font-semibold text-gray-900">{title}</div>
+            {showRecordCount && (
+              <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
+            )}
+          </div>
         {hasActiveFilters && (
           <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
             Filters Applied
@@ -509,15 +535,21 @@ export default function DataTable({
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody ref={tableBodyRef}>
             {pageData.map((row, idx) => {
               const globalIndex = start + idx;
               const isActive = enableKeyboard && globalIndex === activeRowIndex;
+              const isHighlight = highlightId && String(row?.[highlightKey]) === String(highlightId);
               return (
               <tr
                 key={row[idKey] ?? idx}
                 onClick={() => setActiveRowIndex(globalIndex)}
-                className={`border-t border-gray-100 hover:bg-gray-50 ${isActive ? "bg-emerald-50" : ""} ${rowClassName ? rowClassName(row) : ""}`}
+                data-highlight={isHighlight ? "true" : undefined}
+                className={`border-t border-gray-100 hover:bg-gray-50 ${
+                  isActive ? "bg-emerald-50" : ""
+                } ${isHighlight ? "bg-emerald-50 ring-1 ring-emerald-500" : ""} ${
+                  rowClassName ? rowClassName(row) : ""
+                }`}
               >
                 {columns.map((col) => (
                   <td
