@@ -1,7 +1,7 @@
 // src/layouts/MainLayout.jsx
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { toast } from "react-hot-toast";
+import { toast, Toaster } from "react-hot-toast";
 import { Building2, Mail, ShieldCheck } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../services/api";
@@ -413,6 +413,7 @@ export default function MainLayout({ children }) {
 
   return (
     <div className="flex min-h-screen bg-gray-50 overflow-hidden">
+      <Toaster position="top-center" />
       {/* Sidebar */}
       <Sidebar
         isOpen={isOpen}

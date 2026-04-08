@@ -749,6 +749,24 @@ export default function SystemSettings() {
     }
   };
 
+  const downloadHistoryBackupFile = async (entry) => {
+    const fileName = String(entry?.fileName || "").trim();
+    if (!fileName) return;
+    try {
+      showBackupToast({ title: "Download started", detail: `Fetching ${fileName}...` });
+      const res = await api.get(`/settings/backup/history/download/${encodeURIComponent(fileName)}`, {
+        responseType: "blob",
+      });
+      const finalName = parseDownloadFilename(res.headers?.["content-disposition"], fileName);
+      triggerBlobDownload(res.data, finalName);
+      showBackupToast({ title: "Download ready", detail: "Backup file downloaded successfully.", tone: "success" });
+      toast.success("Backup downloaded");
+    } catch (err) {
+      showBackupToast({ title: "Download failed", detail: "Could not download backup file.", tone: "error" });
+      toast.error(err?.response?.data?.message || "Failed to download backup file");
+    }
+  };
+
   const downloadAllModules = async ({ includeDropdowns = true } = {}) => {
     if (!backupModules.length) return;
     const zip = new JSZip();
@@ -1042,6 +1060,7 @@ export default function SystemSettings() {
         entry.moduleName,
         entry.fileName,
         entry.action,
+        entry.trigger,
         entry.scope,
         entry.status,
       ]
@@ -1058,6 +1077,23 @@ export default function SystemSettings() {
     historyDateFrom,
     historyDateTo,
   ]);
+
+  const resolveHistoryTrigger = (entry) => {
+    const explicit = String(entry?.trigger || "").trim().toUpperCase();
+    if (explicit === "AUTO" || explicit === "MANUAL") return explicit;
+
+    const fileName = String(entry?.fileName || "").trim().toLowerCase();
+    const moduleName = String(entry?.moduleName || "").trim().toLowerCase();
+    if (fileName.startsWith("smj-scheduled-backup-") || moduleName.includes("scheduled")) return "AUTO";
+    return "MANUAL";
+  };
+
+  const canDownloadHistoryEntry = (entry) => {
+    if (String(entry?.action || "").toUpperCase() !== "BACKUP") return false;
+    if (String(entry?.status || "SUCCESS").toUpperCase() !== "SUCCESS") return false;
+    if (resolveHistoryTrigger(entry) !== "AUTO") return false;
+    return !!String(entry?.fileName || "").trim();
+  };
 
   const clearBackupHistory = async () => {
     setLoading(true);
@@ -1694,33 +1730,71 @@ export default function SystemSettings() {
                         <tr>
                           <th className="text-left px-4 py-3 font-semibold">Date</th>
                           <th className="text-left px-4 py-3 font-semibold">Action</th>
+                          <th className="text-left px-4 py-3 font-semibold">Mode</th>
                           <th className="text-left px-4 py-3 font-semibold">Scope</th>
                           <th className="text-left px-4 py-3 font-semibold">File</th>
                           <th className="text-left px-4 py-3 font-semibold">Records</th>
                           <th className="text-left px-4 py-3 font-semibold">Status</th>
+                          <th className="text-left px-4 py-3 font-semibold">Download</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white">
-                        {filteredHistory.slice(0, 12).map((entry, index) => (
-                          <tr key={`table-${entry.createdAt || "history"}-${entry.fileName || index}`} className="hover:bg-emerald-50/40">
-                            <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                                entry.action === "RESTORE" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"
-                              }`}>
-                                {entry.action}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-gray-700">{entry.scope === "full" ? "Full System" : "Module"}</td>
-                            <td className="px-4 py-3 text-gray-700 max-w-[280px] truncate">{entry.fileName || "backup.json"}</td>
-                            <td className="px-4 py-3 text-gray-700">{entry.recordCount || 0}</td>
-                            <td className="px-4 py-3">
-                              <span className="rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                {entry.status || "SUCCESS"}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                        {filteredHistory.slice(0, 12).map((entry, index) => {
+                          const trigger = resolveHistoryTrigger(entry);
+                          const canDownload = canDownloadHistoryEntry(entry);
+                          return (
+                            <tr
+                              key={`table-${entry.createdAt || "history"}-${entry.fileName || index}`}
+                              className="hover:bg-emerald-50/40"
+                            >
+                              <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                                    entry.action === "RESTORE"
+                                      ? "bg-rose-100 text-rose-700"
+                                      : "bg-sky-100 text-sky-700"
+                                  }`}
+                                >
+                                  {entry.action}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                                    trigger === "AUTO"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-gray-100 text-gray-700"
+                                  }`}
+                                >
+                                  {trigger === "AUTO" ? "Auto" : "Manual"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-gray-700">{entry.scope === "full" ? "Full System" : "Module"}</td>
+                              <td className="px-4 py-3 text-gray-700 max-w-[280px] truncate">{entry.fileName || "backup.json"}</td>
+                              <td className="px-4 py-3 text-gray-700">{entry.recordCount || 0}</td>
+                              <td className="px-4 py-3">
+                                <span className="rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                  {entry.status || "SUCCESS"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {canDownload ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadHistoryBackupFile(entry)}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+                                  >
+                                    <Download size={14} />
+                                    Download
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

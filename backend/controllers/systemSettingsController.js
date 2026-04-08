@@ -392,6 +392,7 @@ const resolveModuleCollectionStats = async (module) => {
 
 const appendBackupHistory = async ({
   action,
+  trigger = "MANUAL",
   scope = "module",
   moduleKey = "",
   moduleName = "",
@@ -404,6 +405,7 @@ const appendBackupHistory = async ({
   const history = Array.isArray(target.backupHistory) ? target.backupHistory.slice(0, 24) : [];
   history.unshift({
     action,
+    trigger,
     scope,
     moduleKey,
     moduleName,
@@ -459,6 +461,7 @@ const runScheduledBackupIfDue = async () => {
 
     await appendBackupHistory({
       action: "BACKUP",
+      trigger: "AUTO",
       scope: "full",
       moduleName: "Scheduled Daily Backup",
       fileName,
@@ -469,6 +472,7 @@ const runScheduledBackupIfDue = async () => {
     console.error("scheduled backup error:", err);
     await appendBackupHistory({
       action: "BACKUP",
+      trigger: "AUTO",
       scope: "full",
       moduleName: "Scheduled Daily Backup",
       fileName: "",
@@ -611,6 +615,7 @@ exports.exportBackup = async (req, res) => {
     );
     await appendBackupHistory({
       action: "BACKUP",
+      trigger: "MANUAL",
       scope: "full",
       moduleName: "Full System",
       fileName,
@@ -673,6 +678,38 @@ exports.clearBackupHistory = async (_req, res) => {
   }
 };
 
+exports.downloadBackupHistoryFile = async (req, res) => {
+  try {
+    const rawName = String(req.params?.fileName || "").trim();
+    if (!rawName) {
+      return res.status(400).json({ success: false, message: "Missing file name." });
+    }
+
+    const fileName = path.basename(rawName);
+    if (fileName !== rawName) {
+      return res.status(400).json({ success: false, message: "Invalid file name." });
+    }
+    if (!fileName.toLowerCase().endsWith(".json")) {
+      return res.status(400).json({ success: false, message: "Only JSON backup files are supported." });
+    }
+
+    ensureBackupFolder();
+    const backupRoot = path.resolve(BACKUP_FOLDER);
+    const absolutePath = path.resolve(BACKUP_FOLDER, fileName);
+    if (!absolutePath.startsWith(backupRoot + path.sep)) {
+      return res.status(400).json({ success: false, message: "Invalid backup path." });
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ success: false, message: "Backup file not found." });
+    }
+
+    res.setHeader("Content-Type", "application/json");
+    return res.download(absolutePath, fileName);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message || "Failed to download backup file." });
+  }
+};
+
 exports.exportModuleBackup = async (req, res) => {
   try {
     const moduleKey = String(req.params?.moduleKey || "").trim();
@@ -693,6 +730,7 @@ exports.exportModuleBackup = async (req, res) => {
     );
     await appendBackupHistory({
       action: "BACKUP",
+      trigger: "MANUAL",
       scope: "module",
       moduleKey: module.key,
       moduleName: module.name,
@@ -738,6 +776,7 @@ exports.restoreBackup = async (req, res) => {
     );
     await appendBackupHistory({
       action: "RESTORE",
+      trigger: "MANUAL",
       scope: "full",
       moduleName: "Full System",
       fileName: String(req.file?.originalname || req.file?.filename || "restore.json"),
@@ -787,6 +826,7 @@ exports.restoreModuleBackup = async (req, res) => {
     );
     await appendBackupHistory({
       action: "RESTORE",
+      trigger: "MANUAL",
       scope: "module",
       moduleKey: module.key,
       moduleName: module.name,

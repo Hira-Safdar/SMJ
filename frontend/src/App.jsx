@@ -27,6 +27,7 @@ export default function App() {
             element={
               <Reports
                 allowedTabs={[
+                  "acc-reports",
                   "stock",
                   "stock-movement",
                   "production-summary",

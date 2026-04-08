@@ -8,6 +8,11 @@ const backupHistoryEntrySchema = new mongoose.Schema(
       enum: ["BACKUP", "RESTORE"],
       required: true,
     },
+    trigger: {
+      type: String,
+      enum: ["MANUAL", "AUTO"],
+      default: "MANUAL",
+    },
     scope: {
       type: String,
       enum: ["full", "module"],

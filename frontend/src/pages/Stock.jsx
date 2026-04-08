@@ -13,7 +13,7 @@ import {
   Printer,
   Factory,
 } from "lucide-react";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 import Pin4Input from "../components/Pin4Input";
 import DataTable from "../components/ui/DataTable";
 import * as XLSX from "xlsx";
@@ -616,8 +616,6 @@ export default function Stock() {
   // --------------------------------------------------------------------
   return (
     <div className="space-y-6 w-full">
-      <Toaster />
-
           {/* HEADER */}
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>

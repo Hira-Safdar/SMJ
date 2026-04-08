@@ -245,7 +245,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   };
 
   const visibleTabs = useMemo(() => {
-    if (!embedded) return REPORT_TABS;
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
     return REPORT_TABS.filter((t) => allowedTabs.includes(t.key));
   }, [allowedTabs, embedded]);
@@ -1853,14 +1852,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => handleViewGeneratedJournal(j)}
-                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                              title="View"
-                            >
-                              <Eye size={14} />
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => handleDownloadGeneratedJournal(j)}
                               className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
                               title="Download PDF"
@@ -1916,14 +1907,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <td className="px-3 py-2">{j.name}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleViewGeneratedLedger(j)}
-                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                              title="View"
-                            >
-                              <Eye size={14} />
-                            </button>
                             <button
                               type="button"
                               onClick={() => handleDownloadGeneratedLedger(j)}

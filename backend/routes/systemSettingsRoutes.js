@@ -10,6 +10,7 @@ const {
   restoreBackup,
   getBackupModules,
   clearBackupHistory,
+  downloadBackupHistoryFile,
   exportModuleBackup,
   restoreModuleBackup,
   sendEmailOtp,
@@ -56,6 +57,7 @@ router.put("/", saveSettings); // SAVE (upsert)
 router.post("/logo", uploadLogoFile.single("logo"), uploadLogo); // upload logo
 router.get("/backup/modules", getBackupModules);
 router.delete("/backup/history", clearBackupHistory);
+router.get("/backup/history/download/:fileName", downloadBackupHistoryFile);
 router.get("/backup", exportBackup); // download backup JSON
 router.get("/backup/:moduleKey", exportModuleBackup);
 router.post("/restore", uploadRestoreFile.single("backup"), restoreBackup); // restore from JSON file
