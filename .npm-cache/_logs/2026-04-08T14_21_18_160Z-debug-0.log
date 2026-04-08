@@ -1,0 +1,604 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Users\hiras\AppData\Roaming\npm\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v24.11.0
+3 silly config load:file:C:\Users\hiras\AppData\Roaming\npm\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\hiras\Desktop\SMJ\frontend\.npmrc
+5 silly config load:file:C:\Users\hiras\.npmrc
+6 silly config load:file:C:\Users\hiras\Desktop\SMJ\frontend\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--prefix" "frontend"
+9 verbose logfile logs-max:10 dir:C:\Users\hiras\Desktop\SMJ\.npm-cache\_logs\2026-04-08T14_21_18_160Z-
+10 verbose logfile C:\Users\hiras\Desktop\SMJ\.npm-cache\_logs\2026-04-08T14_21_18_160Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+13 verbose shrinkwrap failed to load node_modules/.package-lock.json out of date, updated: node_modules
+14 silly idealTree buildDeps
+15 http fetch GET https://registry.npmjs.org/npm attempt 1 failed with EACCES
+16 silly reify mark retired [
+16 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\core-util-is'
+16 silly reify ]
+17 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\immediate' ]
+18 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\inherits' ]
+19 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\isarray' ]
+20 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\jszip' ]
+21 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\lie' ]
+22 silly reify mark retired [ 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\pako' ]
+23 silly reify mark retired [
+23 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\process-nextick-args'
+23 silly reify ]
+24 silly reify mark retired [
+24 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\readable-stream'
+24 silly reify ]
+25 silly reify mark retired [
+25 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\safe-buffer'
+25 silly reify ]
+26 silly reify mark retired [
+26 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\setimmediate'
+26 silly reify ]
+27 silly reify mark retired [
+27 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\string_decoder'
+27 silly reify ]
+28 silly reify moves {
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\core-util-is': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.core-util-is-b1jGqiSB',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\immediate': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.immediate-fnsYlzge',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\inherits': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.inherits-WxX37E4g',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\isarray': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.isarray-zx3j7Wpr',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\jszip': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.jszip-EA1hSn98',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\lie': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.lie-xbt8dO2d',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\pako': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.pako-X13RIDF7',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\process-nextick-args': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.process-nextick-args-k1OlLOJF',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\readable-stream': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.readable-stream-KP2bLtDu',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\safe-buffer': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.safe-buffer-dtiLqBUf',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\setimmediate': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.setimmediate-dxqUcqBR',
+28 silly reify   'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\string_decoder': 'C:\\Users\\hiras\\Desktop\\SMJ\\frontend\\node_modules\\.string_decoder-4mJDs28O'
+28 silly reify }
+29 silly audit bulk request {
+29 silly audit   '@alloc/quick-lru': [ '5.2.0' ],
+29 silly audit   '@babel/code-frame': [ '7.27.1' ],
+29 silly audit   '@babel/compat-data': [ '7.28.5' ],
+29 silly audit   '@babel/core': [ '7.28.5' ],
+29 silly audit   '@babel/generator': [ '7.28.5' ],
+29 silly audit   '@babel/helper-compilation-targets': [ '7.27.2' ],
+29 silly audit   '@babel/helper-globals': [ '7.28.0' ],
+29 silly audit   '@babel/helper-module-imports': [ '7.27.1' ],
+29 silly audit   '@babel/helper-module-transforms': [ '7.28.3' ],
+29 silly audit   '@babel/helper-plugin-utils': [ '7.27.1' ],
+29 silly audit   '@babel/helper-string-parser': [ '7.27.1' ],
+29 silly audit   '@babel/helper-validator-identifier': [ '7.28.5' ],
+29 silly audit   '@babel/helper-validator-option': [ '7.27.1' ],
+29 silly audit   '@babel/helpers': [ '7.28.4' ],
+29 silly audit   '@babel/parser': [ '7.28.5' ],
+29 silly audit   '@babel/plugin-transform-react-jsx-self': [ '7.27.1' ],
+29 silly audit   '@babel/plugin-transform-react-jsx-source': [ '7.27.1' ],
+29 silly audit   '@babel/runtime': [ '7.28.6' ],
+29 silly audit   '@babel/template': [ '7.27.2' ],
+29 silly audit   '@babel/traverse': [ '7.28.5' ],
+29 silly audit   '@babel/types': [ '7.28.5' ],
+29 silly audit   '@esbuild/aix-ppc64': [ '0.25.12' ],
+29 silly audit   '@esbuild/android-arm': [ '0.25.12' ],
+29 silly audit   '@esbuild/android-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/android-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/darwin-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/darwin-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/freebsd-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/freebsd-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-arm': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-ia32': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-loong64': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-mips64el': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-ppc64': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-riscv64': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-s390x': [ '0.25.12' ],
+29 silly audit   '@esbuild/linux-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/netbsd-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/netbsd-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/openbsd-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/openbsd-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/openharmony-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/sunos-x64': [ '0.25.12' ],
+29 silly audit   '@esbuild/win32-arm64': [ '0.25.12' ],
+29 silly audit   '@esbuild/win32-ia32': [ '0.25.12' ],
+29 silly audit   '@eslint-community/eslint-utils': [ '4.9.0' ],
+29 silly audit   'eslint-visitor-keys': [ '3.4.3', '4.2.1' ],
+29 silly audit   '@eslint-community/regexpp': [ '4.12.2' ],
+29 silly audit   '@eslint/config-array': [ '0.21.1' ],
+29 silly audit   '@eslint/config-helpers': [ '0.4.2' ],
+29 silly audit   '@eslint/core': [ '0.17.0' ],
+29 silly audit   '@eslint/eslintrc': [ '3.3.1' ],
+29 silly audit   globals: [ '14.0.0', '16.5.0' ],
+29 silly audit   '@eslint/js': [ '9.39.1' ],
+29 silly audit   '@eslint/object-schema': [ '2.1.7' ],
+29 silly audit   '@eslint/plugin-kit': [ '0.4.1' ],
+29 silly audit   '@floating-ui/core': [ '1.7.3' ],
+29 silly audit   '@floating-ui/dom': [ '1.7.4' ],
+29 silly audit   '@floating-ui/react': [ '0.27.16' ],
+29 silly audit   '@floating-ui/react-dom': [ '2.1.6' ],
+29 silly audit   '@floating-ui/utils': [ '0.2.10' ],
+29 silly audit   '@humanfs/core': [ '0.19.1' ],
+29 silly audit   '@humanfs/node': [ '0.16.7' ],
+29 silly audit   '@humanwhocodes/module-importer': [ '1.0.1' ],
+29 silly audit   '@humanwhocodes/retry': [ '0.4.3' ],
+29 silly audit   '@isaacs/cliui': [ '8.0.2' ],
+29 silly audit   '@jridgewell/gen-mapping': [ '0.3.13' ],
+29 silly audit   '@jridgewell/remapping': [ '2.3.5' ],
+29 silly audit   '@jridgewell/resolve-uri': [ '3.1.2' ],
+29 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.5' ],
+29 silly audit   '@jridgewell/trace-mapping': [ '0.3.31' ],
+29 silly audit   '@nodelib/fs.scandir': [ '2.1.5' ],
+29 silly audit   '@nodelib/fs.stat': [ '2.0.5' ],
+29 silly audit   '@nodelib/fs.walk': [ '1.2.8' ],
+29 silly audit   '@pkgjs/parseargs': [ '0.11.0' ],
+29 silly audit   '@radix-ui/primitive': [ '1.1.3' ],
+29 silly audit   '@radix-ui/react-arrow': [ '1.1.7' ],
+29 silly audit   '@radix-ui/react-compose-refs': [ '1.1.2' ],
+29 silly audit   '@radix-ui/react-context': [ '1.1.2' ],
+29 silly audit   '@radix-ui/react-dialog': [ '1.1.15' ],
+29 silly audit   '@radix-ui/react-dismissable-layer': [ '1.1.11' ],
+29 silly audit   '@radix-ui/react-focus-guards': [ '1.1.3' ],
+29 silly audit   '@radix-ui/react-focus-scope': [ '1.1.7' ],
+29 silly audit   '@radix-ui/react-id': [ '1.1.1' ],
+29 silly audit   '@radix-ui/react-popover': [ '1.1.15' ],
+29 silly audit   '@radix-ui/react-popper': [ '1.2.8' ],
+29 silly audit   '@radix-ui/react-portal': [ '1.1.9' ],
+29 silly audit   '@radix-ui/react-presence': [ '1.1.5' ],
+29 silly audit   '@radix-ui/react-primitive': [ '2.1.3' ],
+29 silly audit   '@radix-ui/react-slot': [ '1.2.3' ],
+29 silly audit   '@radix-ui/react-use-callback-ref': [ '1.1.1' ],
+29 silly audit   '@radix-ui/react-use-controllable-state': [ '1.2.2' ],
+29 silly audit   '@radix-ui/react-use-effect-event': [ '0.0.2' ],
+29 silly audit   '@radix-ui/react-use-escape-keydown': [ '1.1.1' ],
+29 silly audit   '@radix-ui/react-use-layout-effect': [ '1.1.1' ],
+29 silly audit   '@radix-ui/react-use-rect': [ '1.1.1' ],
+29 silly audit   '@radix-ui/react-use-size': [ '1.1.1' ],
+29 silly audit   '@radix-ui/rect': [ '1.1.1' ],
+29 silly audit   '@reduxjs/toolkit': [ '2.10.1' ],
+29 silly audit   '@rolldown/pluginutils': [ '1.0.0-beta.43' ],
+29 silly audit   '@rollup/rollup-android-arm-eabi': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-android-arm64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-darwin-arm64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-darwin-x64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-freebsd-arm64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-freebsd-x64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-arm-gnueabihf': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-arm-musleabihf': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-arm64-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-arm64-musl': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-loong64-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-ppc64-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-riscv64-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-riscv64-musl': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-s390x-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-x64-gnu': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-linux-x64-musl': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-openharmony-arm64': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-win32-arm64-msvc': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-win32-ia32-msvc': [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-win32-x64-gnu': [ '4.53.1' ],
+29 silly audit   '@standard-schema/spec': [ '1.0.0' ],
+29 silly audit   '@standard-schema/utils': [ '0.3.0' ],
+29 silly audit   '@types/babel__core': [ '7.20.5' ],
+29 silly audit   '@types/babel__generator': [ '7.27.0' ],
+29 silly audit   '@types/babel__template': [ '7.4.4' ],
+29 silly audit   '@types/babel__traverse': [ '7.28.0' ],
+29 silly audit   '@types/d3-array': [ '3.2.2' ],
+29 silly audit   '@types/d3-color': [ '3.1.3' ],
+29 silly audit   '@types/d3-ease': [ '3.0.2' ],
+29 silly audit   '@types/d3-interpolate': [ '3.0.4' ],
+29 silly audit   '@types/d3-path': [ '3.1.1' ],
+29 silly audit   '@types/d3-scale': [ '4.0.9' ],
+29 silly audit   '@types/d3-shape': [ '3.1.7' ],
+29 silly audit   '@types/d3-time': [ '3.0.4' ],
+29 silly audit   '@types/d3-timer': [ '3.0.2' ],
+29 silly audit   '@types/estree': [ '1.0.8' ],
+29 silly audit   '@types/json-schema': [ '7.0.15' ],
+29 silly audit   '@types/raf': [ '3.4.3' ],
+29 silly audit   '@types/react': [ '19.2.2' ],
+29 silly audit   '@types/react-dom': [ '19.2.2' ],
+29 silly audit   '@types/use-sync-external-store': [ '0.0.6' ],
+29 silly audit   '@vitejs/plugin-react': [ '5.1.0' ],
+29 silly audit   acorn: [ '8.15.0' ],
+29 silly audit   'acorn-jsx': [ '5.3.2' ],
+29 silly audit   'adler-32': [ '1.3.1' ],
+29 silly audit   ajv: [ '6.12.6' ],
+29 silly audit   'ansi-regex': [ '6.2.2', '5.0.1' ],
+29 silly audit   'ansi-styles': [ '4.3.0', '6.2.3' ],
+29 silly audit   'any-promise': [ '1.3.0' ],
+29 silly audit   anymatch: [ '3.1.3' ],
+29 silly audit   picomatch: [ '2.3.1', '4.0.3' ],
+29 silly audit   arg: [ '5.0.2' ],
+29 silly audit   argparse: [ '2.0.1' ],
+29 silly audit   'aria-hidden': [ '1.2.6' ],
+29 silly audit   asynckit: [ '0.4.0' ],
+29 silly audit   atob: [ '2.1.2' ],
+29 silly audit   autoprefixer: [ '10.4.21' ],
+29 silly audit   axios: [ '1.13.2' ],
+29 silly audit   'balanced-match': [ '1.0.2' ],
+29 silly audit   'base64-arraybuffer': [ '1.0.2' ],
+29 silly audit   'baseline-browser-mapping': [ '2.8.25' ],
+29 silly audit   'binary-extensions': [ '2.3.0' ],
+29 silly audit   'brace-expansion': [ '1.1.12', '2.0.2' ],
+29 silly audit   braces: [ '3.0.3' ],
+29 silly audit   browserslist: [ '4.27.0' ],
+29 silly audit   btoa: [ '1.2.1' ],
+29 silly audit   'call-bind-apply-helpers': [ '1.0.2' ],
+29 silly audit   callsites: [ '3.1.0' ],
+29 silly audit   'camelcase-css': [ '2.0.1' ],
+29 silly audit   'caniuse-lite': [ '1.0.30001754' ],
+29 silly audit   canvg: [ '3.0.11' ],
+29 silly audit   cfb: [ '1.2.2' ],
+29 silly audit   chalk: [ '4.1.2' ],
+29 silly audit   chokidar: [ '3.6.0' ],
+29 silly audit   'glob-parent': [ '5.1.2', '6.0.2' ],
+29 silly audit   clsx: [ '2.1.1' ],
+29 silly audit   codepage: [ '1.15.0' ],
+29 silly audit   'color-convert': [ '2.0.1' ],
+29 silly audit   'color-name': [ '1.1.4' ],
+29 silly audit   'combined-stream': [ '1.0.8' ],
+29 silly audit   commander: [ '4.1.1' ],
+29 silly audit   'concat-map': [ '0.0.1' ],
+29 silly audit   'convert-source-map': [ '2.0.0' ],
+29 silly audit   cookie: [ '1.0.2' ],
+29 silly audit   'core-js': [ '3.48.0' ],
+29 silly audit   'core-util-is': [ '1.0.3' ],
+29 silly audit   'crc-32': [ '1.2.2' ],
+29 silly audit   'cross-spawn': [ '7.0.6' ],
+29 silly audit   'css-line-break': [ '2.1.0' ],
+29 silly audit   cssesc: [ '3.0.0' ],
+29 silly audit   csstype: [ '3.1.3' ],
+29 silly audit   'd3-array': [ '3.2.4' ],
+29 silly audit   'd3-color': [ '3.1.0' ],
+29 silly audit   'd3-ease': [ '3.0.1' ],
+29 silly audit   'd3-format': [ '3.1.0' ],
+29 silly audit   'd3-interpolate': [ '3.0.1' ],
+29 silly audit   'd3-path': [ '3.1.0' ],
+29 silly audit   'd3-scale': [ '4.0.2' ],
+29 silly audit   'd3-shape': [ '3.2.0' ],
+29 silly audit   'd3-time': [ '3.1.0' ],
+29 silly audit   'd3-time-format': [ '4.1.0' ],
+29 silly audit   'd3-timer': [ '3.0.1' ],
+29 silly audit   'date-fns': [ '4.1.0' ],
+29 silly audit   debug: [ '4.4.3' ],
+29 silly audit   'decimal.js-light': [ '2.5.1' ],
+29 silly audit   'deep-is': [ '0.1.4' ],
+29 silly audit   'delayed-stream': [ '1.0.0' ],
+29 silly audit   'detect-node-es': [ '1.1.0' ],
+29 silly audit   didyoumean: [ '1.2.2' ],
+29 silly audit   dlv: [ '1.1.3' ],
+29 silly audit   dompurify: [ '2.5.8' ],
+29 silly audit   'dunder-proto': [ '1.0.1' ],
+29 silly audit   eastasianwidth: [ '0.2.0' ],
+29 silly audit   'electron-to-chromium': [ '1.5.248' ],
+29 silly audit   'emoji-regex': [ '9.2.2', '8.0.0' ],
+29 silly audit   'es-define-property': [ '1.0.1' ],
+29 silly audit   'es-errors': [ '1.3.0' ],
+29 silly audit   'es-object-atoms': [ '1.1.1' ],
+29 silly audit   'es-set-tostringtag': [ '2.1.0' ],
+29 silly audit   'es-toolkit': [ '1.42.0' ],
+29 silly audit   esbuild: [ '0.25.12' ],
+29 silly audit   '@esbuild/win32-x64': [ '0.25.12' ],
+29 silly audit   escalade: [ '3.2.0' ],
+29 silly audit   'escape-string-regexp': [ '4.0.0' ],
+29 silly audit   eslint: [ '9.39.1' ],
+29 silly audit   'eslint-plugin-react-hooks': [ '5.2.0' ],
+29 silly audit   'eslint-plugin-react-perf': [ '3.3.3' ],
+29 silly audit   'eslint-plugin-react-refresh': [ '0.4.24' ],
+29 silly audit   'eslint-scope': [ '8.4.0' ],
+29 silly audit   espree: [ '10.4.0' ],
+29 silly audit   esquery: [ '1.6.0' ],
+29 silly audit   esrecurse: [ '4.3.0' ],
+29 silly audit   estraverse: [ '5.3.0' ],
+29 silly audit   esutils: [ '2.0.3' ],
+29 silly audit   eventemitter3: [ '5.0.1' ],
+29 silly audit   'fast-deep-equal': [ '3.1.3' ],
+29 silly audit   'fast-glob': [ '3.3.3' ],
+29 silly audit   'fast-json-stable-stringify': [ '2.1.0' ],
+29 silly audit   'fast-levenshtein': [ '2.0.6' ],
+29 silly audit   fastq: [ '1.19.1' ],
+29 silly audit   fdir: [ '6.5.0' ],
+29 silly audit   fflate: [ '0.8.2' ],
+29 silly audit   'file-entry-cache': [ '8.0.0' ],
+29 silly audit   'fill-range': [ '7.1.1' ],
+29 silly audit   'find-up': [ '5.0.0' ],
+29 silly audit   'flat-cache': [ '4.0.1' ],
+29 silly audit   flatted: [ '3.3.3' ],
+29 silly audit   'follow-redirects': [ '1.15.11' ],
+29 silly audit   'foreground-child': [ '3.3.1' ],
+29 silly audit   'form-data': [ '4.0.4' ],
+29 silly audit   frac: [ '1.1.2' ],
+29 silly audit   'fraction.js': [ '4.3.7' ],
+29 silly audit   fsevents: [ '2.3.3' ],
+29 silly audit   'function-bind': [ '1.1.2' ],
+29 silly audit   gensync: [ '1.0.0-beta.2' ],
+29 silly audit   'get-intrinsic': [ '1.3.0' ],
+29 silly audit   'get-nonce': [ '1.0.1' ],
+29 silly audit   'get-proto': [ '1.0.1' ],
+29 silly audit   glob: [ '10.5.0' ],
+29 silly audit   minimatch: [ '9.0.5', '3.1.2' ],
+29 silly audit   goober: [ '2.1.18' ],
+29 silly audit   gopd: [ '1.2.0' ],
+29 silly audit   'has-flag': [ '4.0.0' ],
+29 silly audit   'has-symbols': [ '1.1.0' ],
+29 silly audit   'has-tostringtag': [ '1.0.2' ],
+29 silly audit   hasown: [ '2.0.2' ],
+29 silly audit   html2canvas: [ '1.4.1' ],
+29 silly audit   ignore: [ '5.3.2' ],
+29 silly audit   immediate: [ '3.0.6' ],
+29 silly audit   immer: [ '10.2.0' ],
+29 silly audit   'import-fresh': [ '3.3.1' ],
+29 silly audit   imurmurhash: [ '0.1.4' ],
+29 silly audit   inherits: [ '2.0.4' ],
+29 silly audit   internmap: [ '2.0.3' ],
+29 silly audit   'is-binary-path': [ '2.1.0' ],
+29 silly audit   'is-core-module': [ '2.16.1' ],
+29 silly audit   'is-extglob': [ '2.1.1' ],
+29 silly audit   'is-fullwidth-code-point': [ '3.0.0' ],
+29 silly audit   'is-glob': [ '4.0.3' ],
+29 silly audit   'is-number': [ '7.0.0' ],
+29 silly audit   isarray: [ '1.0.0' ],
+29 silly audit   isexe: [ '2.0.0' ],
+29 silly audit   jackspeak: [ '3.4.3' ],
+29 silly audit   jiti: [ '1.21.7' ],
+29 silly audit   'js-tokens': [ '4.0.0' ],
+29 silly audit   'js-yaml': [ '4.1.1' ],
+29 silly audit   jsesc: [ '3.1.0' ],
+29 silly audit   'json-buffer': [ '3.0.1' ],
+29 silly audit   'json-schema-traverse': [ '0.4.1' ],
+29 silly audit   'json-stable-stringify-without-jsonify': [ '1.0.1' ],
+29 silly audit   json5: [ '2.2.3' ],
+29 silly audit   jspdf: [ '2.5.2' ],
+29 silly audit   'jspdf-autotable': [ '3.8.4' ],
+29 silly audit   jszip: [ '3.10.1' ],
+29 silly audit   keyv: [ '4.5.4' ],
+29 silly audit   levn: [ '0.4.1' ],
+29 silly audit   lie: [ '3.3.0' ],
+29 silly audit   lilconfig: [ '2.1.0', '3.1.3' ],
+29 silly audit   'lines-and-columns': [ '1.2.4' ],
+29 silly audit   'locate-path': [ '6.0.0' ],
+29 silly audit   'lodash.merge': [ '4.6.2' ],
+29 silly audit   'lru-cache': [ '5.1.1', '10.4.3' ],
+29 silly audit   'lucide-react': [ '0.553.0' ],
+29 silly audit   'math-intrinsics': [ '1.1.0' ],
+29 silly audit   merge2: [ '1.4.1' ],
+29 silly audit   micromatch: [ '4.0.8' ],
+29 silly audit   'mime-db': [ '1.52.0' ],
+29 silly audit   'mime-types': [ '2.1.35' ],
+29 silly audit   minipass: [ '7.1.2' ],
+29 silly audit   ms: [ '2.1.3' ],
+29 silly audit   mz: [ '2.7.0' ],
+29 silly audit   nanoid: [ '3.3.11' ],
+29 silly audit   'natural-compare': [ '1.4.0' ],
+29 silly audit   'node-releases': [ '2.0.27' ],
+29 silly audit   'normalize-path': [ '3.0.0' ],
+29 silly audit   'normalize-range': [ '0.1.2' ],
+29 silly audit   'object-assign': [ '4.1.1' ],
+29 silly audit   'object-hash': [ '3.0.0' ],
+29 silly audit   optionator: [ '0.9.4' ],
+29 silly audit   'p-limit': [ '3.1.0' ],
+29 silly audit   'p-locate': [ '5.0.0' ],
+29 silly audit   'package-json-from-dist': [ '1.0.1' ],
+29 silly audit   pako: [ '1.0.11' ],
+29 silly audit   'parent-module': [ '1.0.1' ],
+29 silly audit   'path-exists': [ '4.0.0' ],
+29 silly audit   'path-key': [ '3.1.1' ],
+29 silly audit   'path-parse': [ '1.0.7' ],
+29 silly audit   'path-scurry': [ '1.11.1' ],
+29 silly audit   'performance-now': [ '2.1.0' ],
+29 silly audit   picocolors: [ '1.1.1' ],
+29 silly audit   pify: [ '2.3.0' ],
+29 silly audit   pirates: [ '4.0.7' ],
+29 silly audit   postcss: [ '8.5.6' ],
+29 silly audit   'postcss-import': [ '15.1.0' ],
+29 silly audit   'postcss-js': [ '4.1.0' ],
+29 silly audit   'postcss-load-config': [ '4.0.2' ],
+29 silly audit   'postcss-nested': [ '6.2.0' ],
+29 silly audit   'postcss-selector-parser': [ '6.1.2' ],
+29 silly audit   'postcss-value-parser': [ '4.2.0' ],
+29 silly audit   'prelude-ls': [ '1.2.1' ],
+29 silly audit   'process-nextick-args': [ '2.0.1' ],
+29 silly audit   'proxy-from-env': [ '1.1.0' ],
+29 silly audit   punycode: [ '2.3.1' ],
+29 silly audit   'queue-microtask': [ '1.2.3' ],
+29 silly audit   raf: [ '3.4.1' ],
+29 silly audit   react: [ '19.2.0' ],
+29 silly audit   'react-datepicker': [ '8.8.0' ],
+29 silly audit   'react-dom': [ '19.2.0' ],
+29 silly audit   'react-hot-toast': [ '2.6.0' ],
+29 silly audit   'react-is': [ '19.2.0' ],
+29 silly audit   'react-redux': [ '9.2.0' ],
+29 silly audit   'react-refresh': [ '0.18.0' ],
+29 silly audit   'react-remove-scroll': [ '2.7.1' ],
+29 silly audit   'react-remove-scroll-bar': [ '2.3.8' ],
+29 silly audit   'react-router': [ '7.9.5' ],
+29 silly audit   'react-router-dom': [ '7.9.5' ],
+29 silly audit   'react-style-singleton': [ '2.2.3' ],
+29 silly audit   'read-cache': [ '1.0.0' ],
+29 silly audit   'readable-stream': [ '2.3.8' ],
+29 silly audit   readdirp: [ '3.6.0' ],
+29 silly audit   recharts: [ '3.5.0' ],
+29 silly audit   redux: [ '5.0.1' ],
+29 silly audit   'redux-thunk': [ '3.1.0' ],
+29 silly audit   'regenerator-runtime': [ '0.13.11' ],
+29 silly audit   reselect: [ '5.1.1' ],
+29 silly audit   resolve: [ '1.22.11' ],
+29 silly audit   'resolve-from': [ '4.0.0' ],
+29 silly audit   reusify: [ '1.1.0' ],
+29 silly audit   rgbcolor: [ '1.0.1' ],
+29 silly audit   rollup: [ '4.53.1' ],
+29 silly audit   '@rollup/rollup-win32-x64-msvc': [ '4.53.1' ],
+29 silly audit   'run-parallel': [ '1.2.0' ],
+29 silly audit   'safe-buffer': [ '5.1.2' ],
+29 silly audit   scheduler: [ '0.27.0' ],
+29 silly audit   semver: [ '6.3.1' ],
+29 silly audit   'set-cookie-parser': [ '2.7.2' ],
+29 silly audit   setimmediate: [ '1.0.5' ],
+29 silly audit   'shebang-command': [ '2.0.0' ],
+29 silly audit   'shebang-regex': [ '3.0.0' ],
+29 silly audit   'signal-exit': [ '4.1.0' ],
+29 silly audit   'source-map-js': [ '1.2.1' ],
+29 silly audit   ssf: [ '0.11.2' ],
+29 silly audit   'stackblur-canvas': [ '2.7.0' ],
+29 silly audit   string_decoder: [ '1.1.1' ],
+29 silly audit   'string-width': [ '5.1.2', '4.2.3' ],
+29 silly audit   'strip-ansi': [ '6.0.1', '7.1.2' ],
+29 silly audit   'strip-json-comments': [ '3.1.1' ],
+29 silly audit   sucrase: [ '3.35.0' ],
+29 silly audit   'supports-color': [ '7.2.0' ],
+29 silly audit   'supports-preserve-symlinks-flag': [ '1.0.0' ],
+29 silly audit   'svg-pathdata': [ '6.0.3' ],
+29 silly audit   tabbable: [ '6.3.0' ],
+29 silly audit   'tailwind-merge': [ '3.4.0' ],
+29 silly audit   tailwindcss: [ '3.4.14' ],
+29 silly audit   'text-segmentation': [ '1.0.3' ],
+29 silly audit   thenify: [ '3.3.1' ],
+29 silly audit   'thenify-all': [ '1.6.0' ],
+29 silly audit   'tiny-invariant': [ '1.3.3' ],
+29 silly audit   tinyglobby: [ '0.2.15' ],
+29 silly audit   'to-regex-range': [ '5.0.1' ],
+29 silly audit   'ts-interface-checker': [ '0.1.13' ],
+29 silly audit   tslib: [ '2.8.1' ],
+29 silly audit   'type-check': [ '0.4.0' ],
+29 silly audit   'update-browserslist-db': [ '1.1.4' ],
+29 silly audit   'uri-js': [ '4.4.1' ],
+29 silly audit   'use-callback-ref': [ '1.3.3' ],
+29 silly audit   'use-sidecar': [ '1.1.3' ],
+29 silly audit   'use-sync-external-store': [ '1.6.0' ],
+29 silly audit   'util-deprecate': [ '1.0.2' ],
+29 silly audit   utrie: [ '1.0.2' ],
+29 silly audit   'victory-vendor': [ '37.3.6' ],
+29 silly audit   vite: [ '7.2.2' ],
+29 silly audit   which: [ '2.0.2' ],
+29 silly audit   wmf: [ '1.0.2' ],
+29 silly audit   word: [ '0.3.0' ],
+29 silly audit   'word-wrap': [ '1.2.5' ],
+29 silly audit   'wrap-ansi': [ '8.1.0', '7.0.0' ],
+29 silly audit   xlsx: [ '0.18.5' ],
+29 silly audit   yallist: [ '3.1.1' ],
+29 silly audit   yaml: [ '2.8.1' ],
+29 silly audit   'yocto-queue': [ '0.1.0' ]
+29 silly audit }
+30 http cache setimmediate@https://registry.npmjs.org/setimmediate/-/setimmediate-1.0.5.tgz 3ms (cache hit)
+31 http cache string_decoder@https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz 0ms (cache hit)
+32 http cache readable-stream@https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz 0ms (cache hit)
+33 http cache safe-buffer@https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz 0ms (cache hit)
+34 http cache process-nextick-args@https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz 0ms (cache hit)
+35 http cache pako@https://registry.npmjs.org/pako/-/pako-1.0.11.tgz 0ms (cache hit)
+36 http cache lie@https://registry.npmjs.org/lie/-/lie-3.3.0.tgz 0ms (cache hit)
+37 http cache jszip@https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz 0ms (cache hit)
+38 http cache isarray@https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz 0ms (cache hit)
+39 http cache inherits@https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz 0ms (cache hit)
+40 http cache immediate@https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz 0ms (cache hit)
+41 http cache core-util-is@https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz 0ms (cache hit)
+42 silly tarball no local data for setimmediate@https://registry.npmjs.org/setimmediate/-/setimmediate-1.0.5.tgz. Extracting by manifest.
+43 silly tarball no local data for string_decoder@https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz. Extracting by manifest.
+44 silly tarball no local data for readable-stream@https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz. Extracting by manifest.
+45 silly tarball no local data for safe-buffer@https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz. Extracting by manifest.
+46 silly tarball no local data for process-nextick-args@https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz. Extracting by manifest.
+47 silly tarball no local data for pako@https://registry.npmjs.org/pako/-/pako-1.0.11.tgz. Extracting by manifest.
+48 silly tarball no local data for lie@https://registry.npmjs.org/lie/-/lie-3.3.0.tgz. Extracting by manifest.
+49 silly tarball no local data for jszip@https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz. Extracting by manifest.
+50 silly tarball no local data for isarray@https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz. Extracting by manifest.
+51 silly tarball no local data for inherits@https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz. Extracting by manifest.
+52 silly tarball no local data for immediate@https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz. Extracting by manifest.
+53 silly tarball no local data for core-util-is@https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz. Extracting by manifest.
+54 verbose audit error FetchError: request to https://registry.npmjs.org/-/npm/v1/security/advisories/bulk failed, reason: 
+54 verbose audit error     at ClientRequest.<anonymous> (C:\Users\hiras\AppData\Roaming\npm\node_modules\npm\node_modules\minipass-fetch\lib\index.js:130:14)
+54 verbose audit error     at ClientRequest.emit (node:events:508:28)
+54 verbose audit error     at emitErrorEvent (node:_http_client:107:11)
+54 verbose audit error     at _destroy (node:_http_client:954:9)
+54 verbose audit error     at onSocketNT (node:_http_client:974:5)
+54 verbose audit error     at process.processTicksAndRejections (node:internal/process/task_queues:91:21) {
+54 verbose audit error   code: 'EACCES',
+54 verbose audit error   errno: 'EACCES',
+54 verbose audit error   type: 'system'
+54 verbose audit error }
+55 silly audit error undefined
+56 silly audit report null
+57 http fetch GET https://registry.npmjs.org/setimmediate/-/setimmediate-1.0.5.tgz attempt 1 failed with EACCES
+58 http fetch GET https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz attempt 1 failed with EACCES
+59 http fetch GET https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz attempt 1 failed with EACCES
+60 http fetch GET https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz attempt 1 failed with EACCES
+61 http fetch GET https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz attempt 1 failed with EACCES
+62 http fetch GET https://registry.npmjs.org/pako/-/pako-1.0.11.tgz attempt 1 failed with EACCES
+63 http fetch GET https://registry.npmjs.org/lie/-/lie-3.3.0.tgz attempt 1 failed with EACCES
+64 http fetch GET https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz attempt 1 failed with EACCES
+65 http fetch GET https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz attempt 1 failed with EACCES
+66 http fetch GET https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz attempt 1 failed with EACCES
+67 http fetch GET https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz attempt 1 failed with EACCES
+68 http fetch GET https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz attempt 1 failed with EACCES
+69 http fetch GET https://registry.npmjs.org/npm attempt 2 failed with EACCES
+70 http fetch GET https://registry.npmjs.org/setimmediate/-/setimmediate-1.0.5.tgz attempt 2 failed with EACCES
+71 http fetch GET https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz attempt 2 failed with EACCES
+72 http fetch GET https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz attempt 2 failed with EACCES
+73 http fetch GET https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz attempt 2 failed with EACCES
+74 http fetch GET https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz attempt 2 failed with EACCES
+75 http fetch GET https://registry.npmjs.org/pako/-/pako-1.0.11.tgz attempt 2 failed with EACCES
+76 http fetch GET https://registry.npmjs.org/lie/-/lie-3.3.0.tgz attempt 2 failed with EACCES
+77 http fetch GET https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz attempt 2 failed with EACCES
+78 http fetch GET https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz attempt 2 failed with EACCES
+79 http fetch GET https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz attempt 2 failed with EACCES
+80 http fetch GET https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz attempt 2 failed with EACCES
+81 http fetch GET https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz attempt 2 failed with EACCES
+82 http fetch GET https://registry.npmjs.org/npm attempt 3 failed with EACCES
+83 http fetch GET https://registry.npmjs.org/setimmediate/-/setimmediate-1.0.5.tgz attempt 3 failed with EACCES
+84 http fetch GET https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz attempt 3 failed with EACCES
+85 http fetch GET https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz attempt 3 failed with EACCES
+86 http fetch GET https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz attempt 3 failed with EACCES
+87 http fetch GET https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz attempt 3 failed with EACCES
+88 http fetch GET https://registry.npmjs.org/pako/-/pako-1.0.11.tgz attempt 3 failed with EACCES
+89 http fetch GET https://registry.npmjs.org/lie/-/lie-3.3.0.tgz attempt 3 failed with EACCES
+90 http fetch GET https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz attempt 3 failed with EACCES
+91 http fetch GET https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz attempt 3 failed with EACCES
+92 http fetch GET https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz attempt 3 failed with EACCES
+93 http fetch GET https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz attempt 3 failed with EACCES
+94 http fetch GET https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz attempt 3 failed with EACCES
+95 verbose type system
+96 verbose stack FetchError: request to https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz failed, reason: 
+96 verbose stack     at ClientRequest.<anonymous> (C:\Users\hiras\AppData\Roaming\npm\node_modules\npm\node_modules\minipass-fetch\lib\index.js:130:14)
+96 verbose stack     at ClientRequest.emit (node:events:508:28)
+96 verbose stack     at emitErrorEvent (node:_http_client:107:11)
+96 verbose stack     at _destroy (node:_http_client:954:9)
+96 verbose stack     at onSocketNT (node:_http_client:974:5)
+96 verbose stack     at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+97 error code EACCES
+98 error errno EACCES
+99 error FetchError: request to https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz failed, reason: 
+99 error     at ClientRequest.<anonymous> (C:\Users\hiras\AppData\Roaming\npm\node_modules\npm\node_modules\minipass-fetch\lib\index.js:130:14)
+99 error     at ClientRequest.emit (node:events:508:28)
+99 error     at emitErrorEvent (node:_http_client:107:11)
+99 error     at _destroy (node:_http_client:954:9)
+99 error     at onSocketNT (node:_http_client:974:5)
+99 error     at process.processTicksAndRejections (node:internal/process/task_queues:91:21) {
+99 error   code: 'EACCES',
+99 error   errno: 'EACCES',
+99 error   type: 'system'
+99 error }
+100 error
+100 error The operation was rejected by your operating system.
+100 error It's possible that the file was already in use (by a text editor or antivirus),
+100 error or that you lack permissions to access it.
+100 error
+100 error If you believe this might be a permissions issue, please double-check the
+100 error permissions of the file and its containing directories, or try running
+100 error the command again as root/Administrator.
+101 silly unfinished npm timer reify 1775658080685
+102 silly unfinished npm timer reify:unpack 1775658081628
+103 silly unfinished npm timer reifyNode:node_modules/string_decoder 1775658081628
+104 silly unfinished npm timer reifyNode:node_modules/setimmediate 1775658081628
+105 silly unfinished npm timer reifyNode:node_modules/safe-buffer 1775658081629
+106 silly unfinished npm timer reifyNode:node_modules/readable-stream 1775658081629
+107 silly unfinished npm timer reifyNode:node_modules/process-nextick-args 1775658081629
+108 silly unfinished npm timer reifyNode:node_modules/pako 1775658081629
+109 silly unfinished npm timer reifyNode:node_modules/lie 1775658081629
+110 silly unfinished npm timer reifyNode:node_modules/jszip 1775658081629
+111 silly unfinished npm timer reifyNode:node_modules/isarray 1775658081629
+112 silly unfinished npm timer reifyNode:node_modules/inherits 1775658081629
+113 silly unfinished npm timer reifyNode:node_modules/immediate 1775658081629
+114 silly unfinished npm timer reifyNode:node_modules/core-util-is 1775658081629
+115 verbose cwd C:\Users\hiras\Desktop\SMJ
+116 verbose os Windows_NT 10.0.19045
+117 verbose node v24.11.0
+118 verbose npm  v11.6.2
+119 verbose exit 1
+120 verbose code 1
+121 error A complete log of this run can be found in: C:\Users\hiras\Desktop\SMJ\.npm-cache\_logs\2026-04-08T14_21_18_160Z-debug-0.log

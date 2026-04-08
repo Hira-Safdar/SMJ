@@ -1802,6 +1802,7 @@ export default function AccountingFinance() {
         })(),
         drJr: shortVoucherSeq(d?.voucherNo || d?.journalEntryId || ""),
         drAmount: d ? `Rs. ${String(round2(n0(d.debit)))}` : "",
+        drEntryId: d?.journalEntryId || "",
         crDate: c?.date ? `${formatYear(c.date)}\n${formatMonthDay(c.date)}` : "",
         crRef: (() => {
           const text = ensureAccountSuffix(c?.references || c?.account || c?.description || "");
@@ -1809,6 +1810,7 @@ export default function AccountingFinance() {
         })(),
         crJr: shortVoucherSeq(c?.voucherNo || c?.journalEntryId || ""),
         crAmount: c ? `Rs. ${String(round2(n0(c.credit)))}` : "",
+        crEntryId: c?.journalEntryId || "",
       };
     });
   };
@@ -3856,18 +3858,26 @@ export default function AccountingFinance() {
                         </td>
                       </tr>
                     )}
-                    {ledgerPreviewRows.map((r, idx) => (
-                      <tr key={`ledger-row-${idx}`}>
-                        <td className="px-2 py-2 border border-gray-200 whitespace-pre-line">{r.drDate}</td>
-                        <td className="px-2 py-2 border border-gray-200">{r.drRef}</td>
-                        <td className="px-2 py-2 border border-gray-200">{r.drJr}</td>
-                        <td className="px-2 py-2 border border-gray-200 text-right">{r.drAmount}</td>
-                        <td className="px-2 py-2 border border-gray-200 whitespace-pre-line">{r.crDate}</td>
-                        <td className="px-2 py-2 border border-gray-200">{r.crRef}</td>
-                        <td className="px-2 py-2 border border-gray-200">{r.crJr}</td>
-                        <td className="px-2 py-2 border border-gray-200 text-right">{r.crAmount}</td>
-                      </tr>
-                    ))}
+                    {ledgerPreviewRows.map((r, idx) => {
+                      const isHighlight =
+                        ledgerHighlightId &&
+                        (String(r.drEntryId || "") === String(ledgerHighlightId) ||
+                          String(r.crEntryId || "") === String(ledgerHighlightId));
+                      const cellBorder = isHighlight ? "border-emerald-400" : "border-gray-200";
+                      const cellBg = isHighlight ? "bg-emerald-50" : "";
+                      return (
+                        <tr key={`ledger-row-${idx}`}>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} whitespace-pre-line`}>{r.drDate}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.drRef}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.drJr}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} text-right`}>{r.drAmount}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} whitespace-pre-line`}>{r.crDate}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.crRef}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.crJr}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} text-right`}>{r.crAmount}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
