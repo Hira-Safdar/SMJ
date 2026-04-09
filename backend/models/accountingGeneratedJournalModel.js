@@ -16,6 +16,7 @@ const AccountingGeneratedJournalSchema = new mongoose.Schema(
     itemName: { type: String, default: "" },
     voucherType: { type: String, default: "" },
     reportKey: { type: String, default: "journal" },
+    customLayout: { type: mongoose.Schema.Types.Mixed, default: [] },
   },
   { timestamps: true }
 );

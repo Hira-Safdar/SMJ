@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Package,
@@ -20,6 +20,7 @@ import {
   X,
   Printer,
   Eye,
+  Pencil,
   Trash2,
   ChevronDown,
 } from "lucide-react";
@@ -147,6 +148,7 @@ function defaultDeductions() {
 }
 
 export default function Reports({ embedded = false, initialTab = "", allowedTabs = null, hideFilters = false, highlightId = "" }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() =>
     embedded && initialTab ? initialTab : "acc-reports"
@@ -174,6 +176,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [templateDialog, setTemplateDialog] = useState({ open: false, name: "" });
   const [generatedJournalList, setGeneratedJournalList] = useState([]);
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
+  const [generatedTrialList, setGeneratedTrialList] = useState([]);
   const [generatedLoading, setGeneratedLoading] = useState(false);
   const [ledgerRecordsOpen, setLedgerRecordsOpen] = useState(false);
 
@@ -609,6 +612,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
     if (activeTab === "acc-reports") {
       loadGeneratedList("journal", setGeneratedJournalList);
+      loadGeneratedList("trial", setGeneratedTrialList);
     }
   }, [activeTab]);
 
@@ -1578,6 +1582,131 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (!j) return;
     try {
       setGeneratedLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (custom.length) {
+        const groupedBody = custom.map((r) => ({
+          date: String(r.date || ""),
+          lf: String(r.lf || ""),
+          particulars: Array.isArray(r.particulars) ? r.particulars : Array.isArray(r._particularsLines) ? r._particularsLines : [],
+          debitLines: Array.isArray(r.debitLines) ? r.debitLines : Array.isArray(r._debitLines) ? r._debitLines : [],
+          creditLines: Array.isArray(r.creditLines) ? r.creditLines : Array.isArray(r._creditLines) ? r._creditLines : [],
+        }));
+        const doc = new jsPDF();
+        doc.setFont("times", "normal");
+        const centerX = doc.internal.pageSize.getWidth() / 2;
+        let headerY = 10;
+        doc.setFontSize(11);
+        doc.text(selectedCompanyName || "Business", centerX, headerY, { align: "center" });
+        headerY += 5;
+        const rangeLabel = buildJournalRangeLabel({
+          range: j.range || "all",
+          date: j.rangeDate || "",
+          start: j.startDate || "",
+          end: j.endDate || "",
+        });
+        doc.setFontSize(10);
+        doc.text("JOURNAL ENTRIES", centerX, headerY, { align: "center" });
+        headerY += 4;
+        doc.setFontSize(9);
+        doc.text(`For ${rangeLabel || "All Dates"}`, centerX, headerY, { align: "center" });
+        const startY = headerY + 8;
+
+        const groupedTable = groupedBody.map((row) => ({
+          date: row.date,
+          particularsText: "",
+          lf: row.lf || "",
+          debit: "",
+          credit: "",
+          _particularsLines: row.particulars,
+          _debitLines: row.debitLines,
+          _creditLines: row.creditLines,
+        }));
+
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const marginX = 14;
+        const usableWidth = pageWidth - marginX * 2;
+        const measureLines = (lines = []) =>
+          (lines || []).reduce((m, t) => Math.max(m, doc.getTextWidth(String(t || ""))), 0);
+        const maxDate = Math.max(22, ...groupedTable.map((r) => doc.getTextWidth(String(r.date || "").split("\n")[0] || "")));
+        const maxLf = Math.max(18, doc.getTextWidth("L.F.") + 6);
+        const maxDebit = Math.max(24, ...groupedTable.map((r) => measureLines(r._debitLines)));
+        const maxCredit = Math.max(24, ...groupedTable.map((r) => measureLines(r._creditLines)));
+        const fixed = maxDate + maxLf + maxDebit + maxCredit + 8;
+        const particularsWidth = Math.max(50, usableWidth - fixed);
+
+        autoTable(doc, {
+          startY,
+          head: [["Date", "Particulars", "L.F.", "Debit Amount (Rs.)", "Credit Amount (Rs.)"]],
+          body: groupedTable,
+          columns: [
+            { header: "Date", dataKey: "date" },
+            { header: "Particulars", dataKey: "particularsText" },
+            { header: "L.F.", dataKey: "lf" },
+            { header: "Debit Amount (Rs.)", dataKey: "debit" },
+            { header: "Credit Amount (Rs.)", dataKey: "credit" },
+          ],
+          styles: { font: "times", fontSize: 9, cellPadding: 2, lineColor: [90, 90, 90], lineWidth: 0.1, textColor: [30, 30, 30] },
+          headStyles: { fillColor: [255, 255, 255], textColor: [20, 20, 20], lineColor: [90, 90, 90], lineWidth: 0.2, fontStyle: "bold" },
+          columnStyles: {
+            0: { cellWidth: maxDate },
+            1: { cellWidth: particularsWidth },
+            2: { cellWidth: maxLf },
+            3: { cellWidth: maxDebit, halign: "right" },
+            4: { cellWidth: maxCredit, halign: "right" },
+          },
+          theme: "grid",
+          didParseCell: (data) => {
+            if (data.section !== "body") return;
+            if (data.column.dataKey === "particularsText" || data.column.dataKey === "debit" || data.column.dataKey === "credit") {
+              data.cell.text = "";
+            }
+            const row = data.row?.raw || {};
+            const maxLines = Math.max((row._particularsLines || []).length, (row._debitLines || []).length, (row._creditLines || []).length, 1);
+            const lineHeight = 4;
+            data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight || 0, maxLines * lineHeight + 2);
+          },
+          didDrawCell: (data) => {
+            if (data.section !== "body") return;
+            const row = data.row?.raw || {};
+            const lineHeight = 4;
+            const baseX = data.cell.x + 2;
+            let baseY = data.cell.y + 4;
+            if (data.column.dataKey === "particularsText") {
+              const parts = row._particularsLines || [];
+              parts.forEach((p) => {
+                const indent = p.indent ? 4 : 0;
+                if (p.style === "italic") {
+                  doc.setFont("times", "italic");
+                  doc.setTextColor(120, 120, 120);
+                } else {
+                  doc.setFont("times", "normal");
+                  doc.setTextColor(30, 30, 30);
+                }
+                doc.text(String(p.text || ""), baseX + indent, baseY);
+                baseY += lineHeight;
+              });
+              doc.setFont("times", "normal");
+              doc.setTextColor(30, 30, 30);
+            }
+            if (data.column.dataKey === "debit") {
+              const lines = row._debitLines || [];
+              lines.forEach((txt) => {
+                if (txt) doc.text(String(txt), data.cell.x + data.cell.width - 2, baseY, { align: "right" });
+                baseY += lineHeight;
+              });
+            }
+            if (data.column.dataKey === "credit") {
+              const lines = row._creditLines || [];
+              lines.forEach((txt) => {
+                if (txt) doc.text(String(txt), data.cell.x + data.cell.width - 2, baseY, { align: "right" });
+                baseY += lineHeight;
+              });
+            }
+          },
+        });
+        doc.save(`${String(j.name || "journal").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+        return;
+      }
       const data = await fetchGeneratedJournals({
         range: j.range || "all",
         rangeDate: j.rangeDate || "",
@@ -1675,17 +1804,21 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (!j) return;
     try {
       setGeneratedLoading(true);
-      const data = await fetchGeneratedLedger({
-        range: j.range || "all",
-        rangeDate: j.rangeDate || "",
-        startDate: j.startDate || "",
-        endDate: j.endDate || "",
-        accountId: j.accountId || "",
-        companyId: j.companyId || "",
-        companyName: j.companyName || "",
-        party: j.partyName || "",
-      });
-      const rows = buildLedgerPreviewRows(data);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      const rows = custom.length
+        ? custom
+        : buildLedgerPreviewRows(
+            await fetchGeneratedLedger({
+              range: j.range || "all",
+              rangeDate: j.rangeDate || "",
+              startDate: j.startDate || "",
+              endDate: j.endDate || "",
+              accountId: j.accountId || "",
+              companyId: j.companyId || "",
+              companyName: j.companyName || "",
+              party: j.partyName || "",
+            })
+          );
       const doc = new jsPDF();
       doc.setFont("times", "normal");
       const headerTitle = j.accountName ? `${j.accountName} Account in Ledger` : "Account in Ledger";
@@ -1726,6 +1859,98 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       loadGeneratedList("ledger", setGeneratedLedgerList);
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete ledger.");
+    }
+  };
+
+  const handleDownloadGeneratedTrial = async (j) => {
+    if (!j) return;
+    try {
+      setGeneratedLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      let layoutRows = custom;
+      let totals = null;
+      if (!layoutRows.length) {
+        const res = await api.get("/accounting/trial-balance", {
+          params: {
+            range: "custom",
+            startDate: j.startDate || "",
+            endDate: j.endDate || "",
+          },
+        });
+        const trialRows = res.data?.data || [];
+        totals = res.data?.totals || { totalDebit: 0, totalCredit: 0 };
+        if (!trialRows.length) {
+          toast.error("No trial balance rows found for the selected range.");
+          return;
+        }
+        layoutRows = trialRows.map((r, idx) => ({
+          type: "line",
+          srNo: idx + 1,
+          account: r.account || r.line || "-",
+          code: r.code || "",
+          debit: r.debit || 0,
+          credit: r.credit || 0,
+        }));
+        layoutRows.push({
+          type: "total",
+          srNo: "",
+          account: "",
+          code: "Total",
+          debit: totals.totalDebit,
+          credit: totals.totalCredit,
+        });
+      } else {
+        const linesOnly = layoutRows.filter((r) => String(r.type || "") === "line");
+        const totalDebit = linesOnly.reduce((s, r) => s + Number(r.debit || 0), 0);
+        const totalCredit = linesOnly.reduce((s, r) => s + Number(r.credit || 0), 0);
+        totals = { totalDebit, totalCredit };
+        if (!layoutRows.some((r) => String(r.type || "") === "total")) {
+          layoutRows = [
+            ...layoutRows,
+            { type: "total", srNo: "", account: "", code: "Total", debit: totalDebit, credit: totalCredit },
+          ];
+        }
+      }
+
+      const asAt = String(j.endDate || "").trim() || new Date().toISOString().slice(0, 10);
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const startY = addPdfHeader(doc, "TRIAL BALANCE", `as at ${asAt}`);
+
+      const body = layoutRows.map((r, idx) => {
+        const type = String(r.type || "");
+        if (type === "spacer") return ["", "", "", "", ""];
+        if (type === "heading") return ["", String(r.account || ""), "", "", ""];
+        if (type === "total")
+          return ["", "", "Total", fmtAmt(r.debit ?? totals.totalDebit), fmtAmt(r.credit ?? totals.totalCredit)];
+        return [String(r.srNo || idx + 1), r.account || r.line || "-", String(r.code || ""), fmtAmt(r.debit), fmtAmt(r.credit)];
+      });
+
+      autoTable(doc, {
+        head: [["S. No", "Account Names", "A/c No.", "Debit", "Credit"]],
+        body,
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 0: { cellWidth: 14 }, 2: { cellWidth: 22 }, 3: { halign: "right" }, 4: { halign: "right" } },
+      });
+
+      doc.save(`${String(j.name || "trial_balance").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download trial balance.");
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedTrial = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedList("trial", setGeneratedTrialList);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete trial balance.");
     }
   };
 
@@ -1852,6 +2077,16 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="flex gap-2">
                             <button
                               type="button"
+                              onClick={() => {
+                                navigate(`/accounting-finance?tab=journal-report&edit=journal&id=${j._id || j.id}`);
+                              }}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Edit"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDownloadGeneratedJournal(j)}
                               className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
                               title="Download PDF"
@@ -1909,6 +2144,16 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="flex gap-2">
                             <button
                               type="button"
+                              onClick={() => {
+                                navigate(`/accounting-finance?tab=ledger&edit=ledger&id=${j._id || j.id}`);
+                              }}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Edit"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDownloadGeneratedLedger(j)}
                               className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
                               title="Download PDF"
@@ -1918,6 +2163,73 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             <button
                               type="button"
                               onClick={() => handleDeleteGeneratedLedger(j)}
+                              className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-gray-900">Generated Trial Balances</div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-emerald-50 text-emerald-900">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                      <th className="text-left font-semibold px-3 py-2">Trial Balance Name</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {generatedLoading && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Loading generated trial balances...
+                        </td>
+                      </tr>
+                    )}
+                    {!generatedLoading && generatedTrialList.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No generated trial balances yet.
+                        </td>
+                      </tr>
+                    )}
+                    {generatedTrialList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
+                        <td className="px-3 py-2">{idx + 1}</td>
+                        <td className="px-3 py-2">{j.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigate(`/accounting-finance?tab=trial&edit=trial&id=${j._id || j.id}`);
+                              }}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Edit"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedTrial(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download PDF"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedTrial(j)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >

@@ -39,6 +39,7 @@ router.delete("/templates/:id", acc.deleteFilterTemplate);
 
 router.get("/generated-journals", acc.getGeneratedJournals);
 router.post("/generated-journals", acc.createGeneratedJournal);
+router.put("/generated-journals/:id", acc.updateGeneratedJournal);
 router.delete("/generated-journals/:id", acc.deleteGeneratedJournal);
 
 // Vouchers / Journal CRUD (manual only)

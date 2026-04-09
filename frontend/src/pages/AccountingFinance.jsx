@@ -15,6 +15,9 @@ import {
   Save,
   X,
   Pencil,
+  PlusCircle,
+  ArrowUp,
+  ArrowDown,
   Eye,
   Trash2,
   Printer,
@@ -289,6 +292,7 @@ export default function AccountingFinance() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("coa");
   const [loading, setLoading] = useState(false);
+  const editDeepLinkRef = useRef("");
 
   const [accounts, setAccounts] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -368,6 +372,42 @@ export default function AccountingFinance() {
   const [ledgerHighlightId, setLedgerHighlightId] = useState("");
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
   const [activeGeneratedLedgerId, setActiveGeneratedLedgerId] = useState("");
+
+  const [trialGenerateOpen, setTrialGenerateOpen] = useState(false);
+  const [trialGenerateName, setTrialGenerateName] = useState("");
+  const [trialNameTouched, setTrialNameTouched] = useState(false);
+  const [trialGenerateRange, setTrialGenerateRange] = useState("custom");
+  const [trialGenerateDate, setTrialGenerateDate] = useState("");
+  const [trialGenerateStart, setTrialGenerateStart] = useState("");
+  const [trialGenerateEnd, setTrialGenerateEnd] = useState("");
+  const [trialPreviewOpen, setTrialPreviewOpen] = useState(true);
+  const [trialRows, setTrialRows] = useState([]);
+  const [trialLayoutRows, setTrialLayoutRows] = useState([]);
+  const [trialTotals, setTrialTotals] = useState({ totalDebit: 0, totalCredit: 0 });
+  const [generatedTrialList, setGeneratedTrialList] = useState([]);
+  const [activeGeneratedTrialId, setActiveGeneratedTrialId] = useState("");
+
+  const [plGenerateOpen, setPlGenerateOpen] = useState(false);
+  const [plGenerateName, setPlGenerateName] = useState("");
+  const [plNameTouched, setPlNameTouched] = useState(false);
+  const [plGenerateStart, setPlGenerateStart] = useState("");
+  const [plGenerateEnd, setPlGenerateEnd] = useState("");
+  const [plPreviewOpen, setPlPreviewOpen] = useState(true);
+  const [plPreviewRows, setPlPreviewRows] = useState([]);
+  const [plTotals, setPlTotals] = useState({
+    incomeTotal: 0,
+    cogsTotal: 0,
+    expenseTotal: 0,
+    grossProfit: 0,
+    profit: 0,
+  });
+  const [generatedPlList, setGeneratedPlList] = useState([]);
+  const [activeGeneratedPlId, setActiveGeneratedPlId] = useState("");
+  const [plEditDialog, setPlEditDialog] = useState({ open: false, rows: [], sourceId: "" });
+
+  const [ledgerEditDialog, setLedgerEditDialog] = useState({ open: false, rows: [], sourceId: "" });
+  const [trialEditDialog, setTrialEditDialog] = useState({ open: false, rows: [], sourceId: "" });
+  const [journalEditDialog, setJournalEditDialog] = useState({ open: false, rows: [], sourceId: "" });
   const [printSettings, setPrintSettings] = useState({});
   const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
 
@@ -397,6 +437,103 @@ export default function AccountingFinance() {
     }
     if (tab && TABS.some((t) => t.key === tab)) setActiveTab(tab);
   }, [searchParams, navigate]);
+
+  useEffect(() => {
+    const edit = String(searchParams.get("edit") || "").trim();
+    const id = String(searchParams.get("id") || "").trim();
+    if (!edit || !id) return;
+    const key = `${edit}:${id}`;
+    if (editDeepLinkRef.current === key) return;
+    editDeepLinkRef.current = key;
+
+    (async () => {
+      try {
+        if (edit === "journal") setActiveTab("journal-report");
+        if (edit === "ledger") setActiveTab("ledger");
+        if (edit === "trial") setActiveTab("trial");
+
+        const reportKey = edit === "journal" ? "journal" : edit === "ledger" ? "ledger" : edit === "trial" ? "trial" : "";
+        if (!reportKey) return;
+        const res = await api.get("/accounting/generated-journals", { params: { reportKey } });
+        const list = res.data?.data || [];
+        const doc = list.find((x) => String(x._id || x.id) === id);
+        if (!doc) {
+          toast.error("Generated report not found.");
+          return;
+        }
+
+        if (edit === "trial") {
+          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
+          if (custom.length) {
+            openTrialEditor({ rows: custom, sourceId: id });
+            return;
+          }
+          const { rows, totals } = await fetchTrialByFilters({ startDate: doc.startDate || "", endDate: doc.endDate || "" });
+          openTrialEditor({ rows: buildTrialLayoutRows({ rows, totals }), sourceId: id });
+          return;
+        }
+
+        if (edit === "ledger") {
+          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
+          if (custom.length) {
+            openLedgerEditor({ rows: custom, sourceId: id });
+            return;
+          }
+          const data = await fetchLedgerByFilters({
+            startDate: doc.startDate || "",
+            endDate: doc.endDate || "",
+            companyId: doc.companyId || "",
+            companyName: doc.companyName || "",
+            accountId: doc.accountId || "",
+            partyName: doc.partyName || "",
+          });
+          openLedgerEditor({ rows: buildLedgerPreviewRows(data), sourceId: id });
+          return;
+        }
+
+        if (edit === "journal") {
+          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
+          if (custom.length) {
+            openJournalEditor({ rows: custom, sourceId: id });
+            return;
+          }
+          const filterPayload = {
+            startDate: doc.startDate || "",
+            endDate: doc.endDate || "",
+            companyName: doc.companyName || "",
+            partyName: doc.partyName || "",
+            itemId: doc.itemId || "",
+            itemName: doc.itemName || "",
+            voucherType: doc.voucherType || "",
+          };
+          const data = await fetchGeneratedJournals({
+            startDate: filterPayload.startDate || undefined,
+            endDate: filterPayload.endDate || undefined,
+            companyName: filterPayload.companyName || undefined,
+            partyName: filterPayload.partyName || undefined,
+            itemId: filterPayload.itemId || undefined,
+            itemName: filterPayload.itemName || undefined,
+            voucherType: filterPayload.voucherType || undefined,
+          });
+          const filtered = filterJournalsBy(data || [], filterPayload);
+          if (!filtered.length) {
+            toast.error("No journals found for the selected filters.");
+            return;
+          }
+          openJournalEditor({ rows: buildGroupedJournalRows(filtered), sourceId: id });
+        }
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to open editor.");
+      } finally {
+        setSearchParams((prev) => {
+          const p = new URLSearchParams(prev);
+          p.delete("edit");
+          p.delete("id");
+          return p;
+        });
+      }
+    })();
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     setSearchParams((prev) => {
@@ -1037,6 +1174,40 @@ export default function AccountingFinance() {
     if (activeTab !== "ledger") return;
     applyLedgerFiltersOnly().catch(() => {});
   }, [activeTab, ledgerFilterAccountId, ledgerFilterCompanyId, ledgerFilterCompanyName, ledgerFilterPartyName]);
+
+  useEffect(() => {
+    if (activeTab !== "trial") return;
+    loadGeneratedTrialList().catch(() => {});
+    const now = new Date();
+    const defaultStartDate = (() => {
+      const y = new Date(now);
+      y.setFullYear(y.getFullYear() - 1);
+      return y.toISOString().slice(0, 10);
+    })();
+    const start = trialGenerateStart || defaultStartDate;
+    if (!trialGenerateStart) setTrialGenerateStart(start);
+    if (!trialNameTouched) setTrialGenerateName(getSuggestedTrialName({ range: "custom", start }));
+    applyTrialFiltersOnly({ range: "custom", start }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "pl") return;
+    loadGeneratedPlList().catch(() => {});
+    const now = new Date();
+    const defaultStartDate = (() => {
+      const y = new Date(now);
+      y.setFullYear(y.getFullYear() - 1);
+      return y.toISOString().slice(0, 10);
+    })();
+    const start = plGenerateStart || defaultStartDate;
+    if (!plGenerateStart) setPlGenerateStart(start);
+    const end = resolveOneYearEnd(start);
+    setPlGenerateEnd(end);
+    if (!plNameTouched) setPlGenerateName(getSuggestedPlName({ start }));
+    applyPlFiltersOnly({ start }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "journal-entry") return;
@@ -1918,6 +2089,865 @@ export default function AccountingFinance() {
     setGeneratedLedgerList(res.data?.data || []);
   };
 
+  const fetchTrialByFilters = async (filters = {}) => {
+    const resolvedStart = typeof filters.startDate !== "undefined" ? filters.startDate : "";
+    const resolvedEnd = typeof filters.endDate !== "undefined" ? filters.endDate : "";
+    const ignoreDate = resolvedStart || resolvedEnd ? undefined : "1";
+    const params = {
+      startDate: resolvedStart || undefined,
+      endDate: resolvedEnd || undefined,
+      ignoreDate,
+      range: "custom",
+    };
+    const res = await api.get("/accounting/trial-balance", { params });
+    return {
+      rows: res.data?.data || [],
+      totals: res.data?.totals || { totalDebit: 0, totalCredit: 0 },
+    };
+  };
+
+  const resolveOneYearEnd = (startIso) => {
+    const s = String(startIso || "").trim();
+    if (!s) return "";
+    const [yy, mm, dd] = s.split("-").map((x) => Number(x));
+    if (!yy || !mm || !dd) return "";
+    const start = new Date(yy, mm - 1, dd);
+    if (!Number.isFinite(start.getTime())) return "";
+    const targetYear = yy + 1;
+    const tentative = new Date(targetYear, mm - 1, dd);
+    if (tentative.getMonth() !== mm - 1) {
+      // Handle dates like 29-Feb: clamp to last day of the month.
+      const last = new Date(targetYear, mm, 0);
+      return last.toISOString().slice(0, 10);
+    }
+    return tentative.toISOString().slice(0, 10);
+  };
+
+  const buildTrialLayoutRows = ({ rows = [], totals = null }) => {
+    const list = Array.isArray(rows) ? rows : [];
+    const t = totals || { totalDebit: 0, totalCredit: 0 };
+    const out = list.map((r, idx) => ({
+      type: "line",
+      srNo: idx + 1,
+      account: r.account || r.line || "-",
+      code: r.code || "",
+      debit: round2(n0(r.debit)),
+      credit: round2(n0(r.credit)),
+    }));
+    out.push({
+      type: "total",
+      srNo: "",
+      account: "",
+      code: "Total",
+      debit: round2(n0(t.totalDebit)),
+      credit: round2(n0(t.totalCredit)),
+    });
+    return out;
+  };
+
+  const trialToEditable = (layoutRows) => {
+    const list = Array.isArray(layoutRows) ? layoutRows : [];
+    return list
+      .filter((r) => String(r.type || "") !== "total")
+      .map((r) => ({
+        type: String(r.type || "line"),
+        account: String(r.account || ""),
+        code: String(r.code || ""),
+        debit: Number(r.debit || 0) || 0,
+        credit: Number(r.credit || 0) || 0,
+      }));
+  };
+
+  const trialFromEditable = (editableRows) => {
+    const list = Array.isArray(editableRows) ? editableRows : [];
+    const out = [];
+    let sr = 1;
+    list.forEach((r) => {
+      const type = String(r.type || "line");
+      if (type === "spacer") {
+        out.push({ type: "spacer", srNo: "", account: "", code: "", debit: "", credit: "" });
+        return;
+      }
+      if (type === "heading") {
+        out.push({ type: "heading", srNo: "", account: String(r.account || ""), code: "", debit: "", credit: "" });
+        return;
+      }
+      const debit = round2(n0(r.debit));
+      const credit = round2(n0(r.credit));
+      out.push({
+        type: "line",
+        srNo: sr,
+        account: String(r.account || ""),
+        code: String(r.code || ""),
+        debit,
+        credit,
+      });
+      sr += 1;
+    });
+    const totalDebit = round2(out.reduce((s, r) => s + n0(r.debit), 0));
+    const totalCredit = round2(out.reduce((s, r) => s + n0(r.credit), 0));
+    out.push({ type: "total", srNo: "", account: "", code: "Total", debit: totalDebit, credit: totalCredit });
+    return { layoutRows: out, totals: { totalDebit, totalCredit } };
+  };
+
+  const getSuggestedTrialName = (opts = {}) => {
+    const start = opts.start || trialGenerateStart || "";
+    const end = resolveOneYearEnd(start);
+    const rangeLabel = buildJournalRangeLabel({ range: "custom", start, end });
+    const parts = ["Trial Balance", rangeLabel].filter(Boolean);
+    return parts.join(" - ");
+  };
+
+  const applyTrialFiltersOnly = async (override = {}) => {
+    const nextStart = String(override.start ?? trialGenerateStart ?? "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+    setTrialGenerateStart(nextStart);
+    setTrialGenerateEnd(nextEnd);
+    const { rows, totals } = await fetchTrialByFilters({ startDate: nextStart, endDate: nextEnd });
+    setTrialRows(rows);
+    setTrialTotals({
+      totalDebit: Number(totals?.totalDebit || 0),
+      totalCredit: Number(totals?.totalCredit || 0),
+    });
+    setTrialLayoutRows(buildTrialLayoutRows({ rows, totals }));
+  };
+
+  const loadGeneratedTrialList = async () => {
+    const res = await api.get("/accounting/generated-journals", {
+      params: { reportKey: "trial" },
+    });
+    setGeneratedTrialList(res.data?.data || []);
+  };
+
+  const downloadTrialBalancePdf = ({ name, rows, endDate, totals, layoutRows }) => {
+    const safeName = String(name || "Trial Balance").replace(/[\\/:*?"<>|]/g, "_");
+    const asOf = endDate ? new Date(endDate) : new Date();
+    const asOfDate = asOf.toISOString().slice(0, 10);
+    const t = totals || { totalDebit: 0, totalCredit: 0 };
+
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.setFontSize(14);
+    doc.text("TRIAL BALANCE", 105, 18, { align: "center" });
+    doc.setFontSize(10);
+    doc.text(`as at ${asOfDate}`, 105, 24, { align: "center" });
+
+    const layout =
+      Array.isArray(layoutRows) && layoutRows.length ? layoutRows : buildTrialLayoutRows({ rows: rows || [], totals: t });
+    const body = (layout || []).map((r, idx) => {
+      const type = String(r.type || "");
+      if (type === "spacer") return ["", "", "", "", ""];
+      if (type === "heading") return ["", String(r.account || ""), "", "", ""];
+      if (type === "total") {
+        return [
+          "",
+          "",
+          "Total",
+          String(round2(n0(r.debit ?? t.totalDebit)).toLocaleString()),
+          String(round2(n0(r.credit ?? t.totalCredit)).toLocaleString()),
+        ];
+      }
+      return [
+        String(r.srNo || idx + 1),
+        String(r.account || r.line || "-"),
+        String(r.code || ""),
+        String(round2(n0(r.debit)).toLocaleString()),
+        String(round2(n0(r.credit)).toLocaleString()),
+      ];
+    });
+
+    autoTable(doc, {
+      head: [["S. No", "Account Names", "A/c No.", "Debit", "Credit"]],
+      body,
+      startY: 30,
+      styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: "bold" },
+      theme: "grid",
+      columnStyles: { 0: { cellWidth: 14 }, 2: { cellWidth: 22 }, 3: { halign: "right" }, 4: { halign: "right" } },
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        const row = (layout || [])[data.row.index] || {};
+        const type = String(row.type || "");
+        if (type === "heading") data.cell.styles.fontStyle = "bold";
+        if (type === "total" || data.row.index === body.length - 1) data.cell.styles.fontStyle = "bold";
+      },
+    });
+
+    doc.save(`${safeName}.pdf`);
+  };
+
+  const applyTrialGenerateFilters = async () => {
+    const nextStart = String(trialGenerateStart || "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+
+    const finalName = String(trialGenerateName || "").trim() || getSuggestedTrialName();
+    const payload = {
+      name: finalName,
+      range: "custom",
+      rangeDate: "",
+      startDate: nextStart,
+      endDate: nextEnd,
+      reportKey: "trial",
+    };
+
+    const { rows, totals } = await fetchTrialByFilters({ startDate: nextStart, endDate: nextEnd });
+    if (!rows.length) {
+      toast.error("No trial balance rows found for the selected range.");
+      return;
+    }
+
+    await api.post("/accounting/generated-journals", payload);
+    await loadGeneratedTrialList();
+    setActiveGeneratedTrialId("");
+    setTrialGenerateOpen(false);
+    setTrialGenerateStart(nextStart);
+    setTrialGenerateEnd(nextEnd);
+    setTrialRows(rows);
+    setTrialTotals({
+      totalDebit: Number(totals?.totalDebit || 0),
+      totalCredit: Number(totals?.totalCredit || 0),
+    });
+    setTrialLayoutRows(buildTrialLayoutRows({ rows, totals }));
+    setTrialPreviewOpen(true);
+  };
+
+  const fetchPlByFilters = async ({ startDate, endDate }) => {
+    const params = {
+      range: "custom",
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    };
+    const res = await api.get("/accounting/pl", { params });
+    return res.data?.data || {};
+  };
+
+  const buildPlPreviewRows = (payload) => {
+    const income = Array.isArray(payload?.income) ? payload.income : [];
+    const cogs = Array.isArray(payload?.cogs) ? payload.cogs : [];
+    const expenses = Array.isArray(payload?.expenses) ? payload.expenses : [];
+    const totals = payload?.totals || {};
+
+    const up = (v) => String(v || "").trim().toUpperCase();
+
+    const incomeSales = income.filter((r) => up(r.subType) === "SALES");
+    const incomeOther = income.filter((r) => up(r.subType) !== "SALES");
+
+    const expensePurchase = expenses.filter((r) => up(r.subType) === "PURCHASE");
+    const expenseOther = expenses.filter((r) => up(r.subType) !== "PURCHASE");
+
+    const officeAdmin = expenseOther.filter((r) => ["OPERATING", "PAYROLL"].includes(up(r.subType)));
+    const sellingDist = expenseOther.filter((r) => ["SELLING", "DISTRIBUTION"].includes(up(r.subType)));
+    const financialOther = expenseOther.filter(
+      (r) =>
+        !["OPERATING", "PAYROLL", "SELLING", "DISTRIBUTION"].includes(up(r.subType))
+    );
+
+    const mapItem = (r) => ({ label: String(r.account || ""), amount: round2(n0(r.amount)) });
+
+    const grossProfit = round2(n0(totals.grossProfit));
+    const profit = round2(n0(totals.profit));
+
+    const tradingDr = [...cogs.map(mapItem), ...expensePurchase.map(mapItem)].filter((x) => x.label || x.amount);
+    const tradingCr = incomeSales.map(mapItem).filter((x) => x.label || x.amount);
+
+    if (grossProfit > 0) tradingDr.push({ label: "To Gross Profit (transferred)", amount: grossProfit });
+    else if (grossProfit < 0) tradingCr.push({ label: "By Gross Loss (transferred)", amount: Math.abs(grossProfit) });
+
+    const plDr = [];
+    const plCr = [];
+    if (grossProfit > 0) plCr.push({ label: "By Gross Profit b/d", amount: grossProfit });
+    else if (grossProfit < 0) plDr.push({ label: "To Gross Loss b/d", amount: Math.abs(grossProfit) });
+
+    const pushHeading = (heading) =>
+      ({ drParticular: heading, drAmount: "", crParticular: "", crAmount: "", isHeading: true });
+
+    const plDrItems = [];
+    if (officeAdmin.length) {
+      plDrItems.push({ heading: "OFFICE & ADMINISTRATION EXPENSES:" });
+      officeAdmin.forEach((r) => plDrItems.push(mapItem(r)));
+    }
+    if (sellingDist.length) {
+      plDrItems.push({ heading: "SELLING & DISTRIBUTION EXPENSES:" });
+      sellingDist.forEach((r) => plDrItems.push(mapItem(r)));
+    }
+    if (financialOther.length) {
+      plDrItems.push({ heading: "FINANCIAL AND OTHER EXPENSES:" });
+      financialOther.forEach((r) => plDrItems.push(mapItem(r)));
+    }
+
+    plDrItems.forEach((it) => {
+      if (it.heading) plDr.push({ label: it.heading, amount: 0, isHeading: true });
+      else plDr.push(it);
+    });
+
+    incomeOther.map(mapItem).forEach((it) => plCr.push(it));
+
+    if (profit > 0) plDr.push({ label: "To Net Profit transferred to Capital A/c", amount: profit });
+    else if (profit < 0) plCr.push({ label: "By Net Loss transferred to Capital A/c", amount: Math.abs(profit) });
+
+    const rows = [];
+
+    const pushSection = (left, right) =>
+      rows.push({
+        drParticular: left,
+        drAmount: "",
+        crParticular: right || "",
+        crAmount: "",
+        isSection: true,
+      });
+
+    const pairToRows = (leftItems, rightItems) => {
+      const max = Math.max(leftItems.length, rightItems.length, 1);
+      for (let i = 0; i < max; i += 1) {
+        const l = leftItems[i];
+        const r = rightItems[i];
+        const lIsHeading = !!l?.isHeading;
+        rows.push({
+          drParticular: lIsHeading ? String(l.label || "") : String(l?.label || ""),
+          drAmount: l && !lIsHeading ? `Rs. ${String(round2(n0(l.amount)).toLocaleString())}` : "",
+          crParticular: String(r?.label || ""),
+          crAmount: r ? `Rs. ${String(round2(n0(r.amount)).toLocaleString())}` : "",
+          isHeading: lIsHeading,
+        });
+      }
+    };
+
+    pushSection("Trading A/c", "Trading A/c");
+    pairToRows(tradingDr, tradingCr);
+
+    rows.push({ drParticular: "", drAmount: "", crParticular: "", crAmount: "", isSpacer: true });
+
+    pushSection("Profit and Loss A/c", "Profit and Loss A/c");
+    pairToRows(plDr, plCr);
+
+    const drTotal = [...tradingDr, ...plDr].filter((x) => !x.isHeading).reduce((s, r) => s + n0(r.amount), 0);
+    const crTotal = [...tradingCr, ...plCr].reduce((s, r) => s + n0(r.amount), 0);
+    rows.push({
+      drParticular: "",
+      drAmount: `Rs. ${String(round2(drTotal).toLocaleString())}`,
+      crParticular: "",
+      crAmount: `Rs. ${String(round2(crTotal).toLocaleString())}`,
+      isTotal: true,
+    });
+
+    return { rows, totals: { ...totals, grossProfit, profit } };
+  };
+
+  const parseRs = (value) => {
+    const raw = String(value || "").replace(/Rs\.?/gi, "").replace(/,/g, "").trim();
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const formatRs = (amount) => {
+    const n = round2(n0(amount));
+    if (!n) return "";
+    return `Rs. ${n.toLocaleString()}`;
+  };
+
+  const plRowType = (row) => {
+    if (!row) return "line";
+    if (row.isSpacer) return "spacer";
+    if (row.isTotal) return "total";
+    if (row.isSection) return "section";
+    if (row.isHeading) return "heading";
+    return "line";
+  };
+
+  const plToEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      type: plRowType(r),
+      drParticular: String(r.drParticular || ""),
+      drAmount: parseRs(r.drAmount),
+      crParticular: String(r.crParticular || ""),
+      crAmount: parseRs(r.crAmount),
+    }));
+  };
+
+  const plFromEditable = (editableRows) => {
+    const list = Array.isArray(editableRows) ? editableRows : [];
+    const out = [];
+    list.forEach((r) => {
+      const type = String(r.type || "line");
+      if (type === "spacer") {
+        out.push({ drParticular: "", drAmount: "", crParticular: "", crAmount: "", isSpacer: true });
+        return;
+      }
+      if (type === "section") {
+        out.push({
+          drParticular: String(r.drParticular || ""),
+          drAmount: "",
+          crParticular: String(r.crParticular || ""),
+          crAmount: "",
+          isSection: true,
+        });
+        return;
+      }
+      if (type === "heading") {
+        out.push({
+          drParticular: String(r.drParticular || ""),
+          drAmount: "",
+          crParticular: "",
+          crAmount: "",
+          isHeading: true,
+        });
+        return;
+      }
+      if (type === "total") return;
+
+      out.push({
+        drParticular: String(r.drParticular || ""),
+        drAmount: formatRs(r.drAmount),
+        crParticular: String(r.crParticular || ""),
+        crAmount: formatRs(r.crAmount),
+      });
+    });
+
+    const drTotal = out.reduce((s, r) => s + parseRs(r.drAmount), 0);
+    const crTotal = out.reduce((s, r) => s + parseRs(r.crAmount), 0);
+    out.push({
+      drParticular: "",
+      drAmount: formatRs(drTotal),
+      crParticular: "",
+      crAmount: formatRs(crTotal),
+      isTotal: true,
+    });
+    return out;
+  };
+
+  const getSuggestedPlName = (opts = {}) => {
+    const start = opts.start || plGenerateStart || "";
+    const end = resolveOneYearEnd(start);
+    const rangeLabel = buildJournalRangeLabel({ range: "custom", start, end });
+    const parts = ["Profit & Loss", rangeLabel].filter(Boolean);
+    return parts.join(" - ");
+  };
+
+  const applyPlFiltersOnly = async ({ start } = {}) => {
+    const nextStart = String(start ?? plGenerateStart ?? "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+    setPlGenerateStart(nextStart);
+    setPlGenerateEnd(nextEnd);
+    const payload = await fetchPlByFilters({ startDate: nextStart, endDate: nextEnd });
+    const built = buildPlPreviewRows(payload);
+    setPlPreviewRows(built.rows);
+    const t = built.totals || {};
+    setPlTotals({
+      incomeTotal: Number(t.incomeTotal || 0),
+      cogsTotal: Number(t.cogsTotal || 0),
+      expenseTotal: Number(t.expenseTotal || 0),
+      grossProfit: Number(t.grossProfit || 0),
+      profit: Number(t.profit || 0),
+    });
+  };
+
+  const loadGeneratedPlList = async () => {
+    const res = await api.get("/accounting/generated-journals", { params: { reportKey: "pl" } });
+    setGeneratedPlList(res.data?.data || []);
+  };
+
+  const applyPlGenerateFilters = async () => {
+    const nextStart = String(plGenerateStart || "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+    const finalName = String(plGenerateName || "").trim() || getSuggestedPlName({ start: nextStart });
+
+    const payload = {
+      name: finalName,
+      range: "custom",
+      rangeDate: "",
+      startDate: nextStart,
+      endDate: nextEnd,
+      reportKey: "pl",
+    };
+
+    const data = await fetchPlByFilters({ startDate: nextStart, endDate: nextEnd });
+    const built = buildPlPreviewRows(data);
+    if (!built.rows?.length) {
+      toast.error("No P&L data found for the selected range.");
+      return;
+    }
+
+    await api.post("/accounting/generated-journals", payload);
+    await loadGeneratedPlList();
+    setActiveGeneratedPlId("");
+    setPlGenerateOpen(false);
+    setPlPreviewOpen(true);
+    setPlPreviewRows(built.rows);
+    const t = built.totals || {};
+    setPlTotals({
+      incomeTotal: Number(t.incomeTotal || 0),
+      cogsTotal: Number(t.cogsTotal || 0),
+      expenseTotal: Number(t.expenseTotal || 0),
+      grossProfit: Number(t.grossProfit || 0),
+      profit: Number(t.profit || 0),
+    });
+  };
+
+  const openPlEditor = ({ rows, sourceId = "" }) => {
+    setPlEditDialog({ open: true, rows: plToEditable(rows), sourceId });
+  };
+
+  const closePlEditor = () => setPlEditDialog({ open: false, rows: [], sourceId: "" });
+
+  const applyPlEditor = async () => {
+    const nextRows = plFromEditable(plEditDialog.rows);
+    setPlPreviewRows(nextRows);
+    closePlEditor();
+    if (plEditDialog.sourceId) {
+      try {
+        await api.put(`/accounting/generated-journals/${plEditDialog.sourceId}`, {
+          customLayout: nextRows,
+        });
+        await loadGeneratedPlList();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to save P&L edits.");
+      }
+    }
+  };
+
+  const openTrialEditor = ({ rows, sourceId = "" }) => {
+    setTrialEditDialog({ open: true, rows: trialToEditable(rows), sourceId });
+  };
+
+  const closeTrialEditor = () => setTrialEditDialog({ open: false, rows: [], sourceId: "" });
+
+  const computeTrialTotalsFromLayout = (layoutRows = []) => {
+    const list = Array.isArray(layoutRows) ? layoutRows : [];
+    const totalDebit = round2(
+      list.reduce((s, r) => s + (String(r.type || "") === "line" ? n0(r.debit) : 0), 0)
+    );
+    const totalCredit = round2(
+      list.reduce((s, r) => s + (String(r.type || "") === "line" ? n0(r.credit) : 0), 0)
+    );
+    return { totalDebit, totalCredit };
+  };
+
+  const applyTrialEditor = async () => {
+    const built = trialFromEditable(trialEditDialog.rows);
+    setTrialLayoutRows(built.layoutRows);
+    setTrialTotals(built.totals);
+    closeTrialEditor();
+    if (trialEditDialog.sourceId) {
+      try {
+        await api.put(`/accounting/generated-journals/${trialEditDialog.sourceId}`, {
+          customLayout: built.layoutRows,
+        });
+        await loadGeneratedTrialList();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to save trial balance edits.");
+      }
+    }
+  };
+
+  const ledgerToEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      drDate: String(r.drDate || ""),
+      drRef: String(r.drRef || ""),
+      drJr: String(r.drJr || ""),
+      drAmount: String(r.drAmount || ""),
+      crDate: String(r.crDate || ""),
+      crRef: String(r.crRef || ""),
+      crJr: String(r.crJr || ""),
+      crAmount: String(r.crAmount || ""),
+    }));
+  };
+
+  const ledgerFromEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      drDate: String(r.drDate || ""),
+      drRef: String(r.drRef || ""),
+      drJr: String(r.drJr || ""),
+      drAmount: String(r.drAmount || ""),
+      crDate: String(r.crDate || ""),
+      crRef: String(r.crRef || ""),
+      crJr: String(r.crJr || ""),
+      crAmount: String(r.crAmount || ""),
+    }));
+  };
+
+  const openLedgerEditor = ({ rows, sourceId = "" }) => {
+    setLedgerEditDialog({ open: true, rows: ledgerToEditable(rows), sourceId });
+  };
+
+  const closeLedgerEditor = () => setLedgerEditDialog({ open: false, rows: [], sourceId: "" });
+
+  const applyLedgerEditor = async () => {
+    const nextRows = ledgerFromEditable(ledgerEditDialog.rows);
+    setLedgerPreviewRows(nextRows);
+    closeLedgerEditor();
+    if (ledgerEditDialog.sourceId) {
+      try {
+        await api.put(`/accounting/generated-journals/${ledgerEditDialog.sourceId}`, {
+          customLayout: nextRows,
+        });
+        await loadGeneratedLedgerList();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to save ledger edits.");
+      }
+    }
+  };
+
+  const splitLines = (value = "") =>
+    String(value || "")
+      .split(/\r?\n/)
+      .map((s) => s.replace(/\s+$/g, ""))
+      .filter((s, idx, arr) => !(idx === arr.length - 1 && !s));
+
+  const journalGroupedToEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      date: String(r.date || ""),
+      lf: String(r.lf || ""),
+      particulars: Array.isArray(r.particulars) ? r.particulars.map((p) => String(p?.text || "")).join("\n") : "",
+      debit: Array.isArray(r.debitLines) ? r.debitLines.map((t) => String(t || "")).join("\n") : "",
+      credit: Array.isArray(r.creditLines) ? r.creditLines.map((t) => String(t || "")).join("\n") : "",
+    }));
+  };
+
+  const journalGroupedFromEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => {
+      const particularsText = String(r.particulars || "");
+      const debitText = String(r.debit || "");
+      const creditText = String(r.credit || "");
+
+      const particularsLines = splitLines(particularsText);
+      const debitLines = splitLines(debitText);
+      const creditLines = splitLines(creditText);
+
+      const particulars = particularsLines.map((line) => {
+        const trimmed = String(line || "").trim();
+        const isItalic = trimmed.startsWith("(") && trimmed.endsWith(")");
+        const indent = trimmed.startsWith("To ") ? 1 : 0;
+        return { text: trimmed, style: isItalic ? "italic" : "normal", indent };
+      });
+
+      const targetLen = Math.max(particulars.length, debitLines.length, creditLines.length, 1);
+      while (debitLines.length < targetLen) debitLines.push("");
+      while (creditLines.length < targetLen) creditLines.push("");
+      while (particulars.length < targetLen) particulars.push({ text: "", style: "normal", indent: 0 });
+
+      return {
+        date: String(r.date || ""),
+        lf: String(r.lf || ""),
+        particulars,
+        debitLines,
+        creditLines,
+      };
+    });
+  };
+
+  const openJournalEditor = ({ rows, sourceId = "" }) => {
+    setJournalEditDialog({ open: true, rows: journalGroupedToEditable(rows), sourceId });
+  };
+
+  const closeJournalEditor = () => setJournalEditDialog({ open: false, rows: [], sourceId: "" });
+
+  const applyJournalEditor = async () => {
+    const nextRows = journalGroupedFromEditable(journalEditDialog.rows);
+    closeJournalEditor();
+    if (journalEditDialog.sourceId) {
+      try {
+        await api.put(`/accounting/generated-journals/${journalEditDialog.sourceId}`, {
+          customLayout: nextRows,
+        });
+        await loadGeneratedJournalList();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to save journal edits.");
+      }
+    } else {
+      toast.success("Edits applied for this session.");
+    }
+  };
+
+  const printPlRows = ({ name, startDate, endDate, rows }) => {
+    const title = "Profit and Loss A/c for the year ended";
+    const safeTitle = String(name || "Profit & Loss");
+    const htmlRows = (rows || [])
+      .map((r) => {
+        if (r.isSpacer) {
+          return `<tr><td class="cell" colspan="4" style="height:10px;border-left:1px solid #111;border-right:1px solid #111;"></td></tr>`;
+        }
+        if (r.isSection) {
+          return `<tr>
+            <td class="cell section">${escapeHtml(r.drParticular || "")}</td>
+            <td class="cell section right"></td>
+            <td class="cell section">${escapeHtml(r.crParticular || "")}</td>
+            <td class="cell section right"></td>
+          </tr>`;
+        }
+        const cls = r.isTotal ? "total" : r.isHeading ? "heading" : "";
+        return `<tr>
+          <td class="cell ${cls}">${escapeHtml(r.drParticular || "")}</td>
+          <td class="cell right ${cls}">${escapeHtml(r.drAmount || "")}</td>
+          <td class="cell ${cls}">${escapeHtml(r.crParticular || "")}</td>
+          <td class="cell right ${cls}">${escapeHtml(r.crAmount || "")}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(safeTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: "Times New Roman", serif; color:#111; padding: 24px; }
+            .header { text-align:center; margin-bottom: 8px; }
+            .header .title { font-size: 14px; font-weight: 700; }
+            .header .sub { font-size: 12px; margin-top: 2px; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #111; padding: 4px 6px; font-size: 12px; vertical-align: top; }
+            th { font-weight: 700; background: #fff; }
+            .right { text-align: right; }
+            .section { font-weight: 700; text-transform: none; }
+            .heading { font-weight: 700; text-transform: uppercase; }
+            .total { font-weight: 700; }
+            .meta-row th { border-bottom: 0; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="sub">${escapeHtml(String(endDate || ""))}</div>
+          </div>
+          <table>
+            <thead>
+              <tr class="meta-row">
+                <th style="width:45%;">Dr.</th>
+                <th class="right" style="width:10%;">Rs.</th>
+                <th style="width:45%;">Cr.</th>
+                <th class="right" style="width:10%;">Rs.</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${htmlRows}
+            </tbody>
+          </table>
+        </body>
+      </html>`;
+
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) {
+      toast.error("Popup blocked. Please allow popups to print.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    w.print();
+  };
+
+  const escapeHtml = (value = "") =>
+    String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const handleDownloadGeneratedPl = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      const rowsToPrint =
+        custom.length > 0
+          ? custom
+          : (() => {
+              // fallback to auto layout
+              return null;
+            })();
+
+      let finalRows = rowsToPrint;
+      if (!finalRows) {
+        const data = await fetchPlByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        const built = buildPlPreviewRows(data);
+        finalRows = built.rows;
+      }
+      if (!finalRows?.length) {
+        toast.error("No P&L data found for the selected range.");
+        return;
+      }
+      printPlRows({ name: j.name || "Profit & Loss", startDate: j.startDate || "", endDate: j.endDate || "", rows: finalRows });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to print P&L.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedPl = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedPlList().catch(() => {});
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete P&L.");
+    }
+  };
+
+  const handleViewGeneratedTrial = async (j) => {
+    if (!j) return;
+    setActiveGeneratedTrialId(String(j._id || j.id || ""));
+    setTrialGenerateRange(j.range || "all");
+    setTrialGenerateDate(j.rangeDate || "");
+    setTrialGenerateStart(j.startDate || "");
+    setTrialGenerateEnd(j.endDate || "");
+    setTrialGenerateName(j.name || "");
+    setTrialNameTouched(true);
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      setTrialLayoutRows(custom);
+      setTrialTotals(computeTrialTotalsFromLayout(custom));
+      setTrialRows([]);
+    } else {
+      const { rows, totals } = await fetchTrialByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+      setTrialRows(rows);
+      setTrialTotals({
+        totalDebit: Number(totals?.totalDebit || 0),
+        totalCredit: Number(totals?.totalCredit || 0),
+      });
+      setTrialLayoutRows(buildTrialLayoutRows({ rows, totals }));
+    }
+    setTrialPreviewOpen(true);
+  };
+
+  const handleDownloadGeneratedTrial = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (custom.length) {
+        const totals = computeTrialTotalsFromLayout(custom);
+        const linesOnly = custom.filter((r) => String(r.type || "") === "line");
+        downloadTrialBalancePdf({
+          name: j.name || "Trial Balance",
+          rows: linesOnly,
+          endDate: j.endDate || "",
+          totals,
+          layoutRows: custom,
+        });
+      } else {
+        const { rows, totals } = await fetchTrialByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        if (!rows.length) {
+          toast.error("No trial balance rows found for the selected range.");
+          return;
+        }
+        downloadTrialBalancePdf({ name: j.name || "Trial Balance", rows, endDate: j.endDate || "", totals });
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download trial balance.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const applyLedgerGenerateFilters = async () => {
     const range = ledgerGenerateRange;
     const now = new Date();
@@ -1991,22 +3021,10 @@ export default function AccountingFinance() {
     setLedgerGenerateDate(j.rangeDate || "");
     setLedgerGenerateStart(j.startDate || "");
     setLedgerGenerateEnd(j.endDate || "");
-    const data = await fetchLedgerByFilters({
-      startDate: j.startDate || "",
-      endDate: j.endDate || "",
-      companyId: j.companyId || "",
-      companyName: j.companyName || "",
-      accountId: j.accountId || "",
-      partyName: j.partyName || "",
-    });
-    setLedgerPreviewRows(buildLedgerPreviewRows(data));
-    setLedgerPreviewOpen(true);
-  };
-
-  const handleDownloadGeneratedLedger = async (j) => {
-    if (!j) return;
-    try {
-      setLoading(true);
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      setLedgerPreviewRows(custom);
+    } else {
       const data = await fetchLedgerByFilters({
         startDate: j.startDate || "",
         endDate: j.endDate || "",
@@ -2015,7 +3033,28 @@ export default function AccountingFinance() {
         accountId: j.accountId || "",
         partyName: j.partyName || "",
       });
-      const rows = buildLedgerPreviewRows(data);
+      setLedgerPreviewRows(buildLedgerPreviewRows(data));
+    }
+    setLedgerPreviewOpen(true);
+  };
+
+  const handleDownloadGeneratedLedger = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      const rows = custom.length
+        ? custom
+        : buildLedgerPreviewRows(
+            await fetchLedgerByFilters({
+              startDate: j.startDate || "",
+              endDate: j.endDate || "",
+              companyId: j.companyId || "",
+              companyName: j.companyName || "",
+              accountId: j.accountId || "",
+              partyName: j.partyName || "",
+            })
+          );
       if (!rows.length) {
         toast.error("No ledger rows found for the selected filters.");
         return;
@@ -2114,6 +3153,7 @@ export default function AccountingFinance() {
       if (!j) return;
       try {
         setLoading(true);
+        const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
         const filterPayload = {
           startDate: j.startDate || reportRangeStart || "",
           endDate: j.endDate || reportRangeEnd || "",
@@ -2123,21 +3163,24 @@ export default function AccountingFinance() {
           itemName: j.itemName || reportFilterProductLabel || "",
           voucherType: j.voucherType || reportFilterVoucherType || "",
         };
-        const data = await fetchGeneratedJournals({
-          startDate: filterPayload.startDate || undefined,
-          endDate: filterPayload.endDate || undefined,
-          companyName: filterPayload.companyName || undefined,
-          partyName: filterPayload.partyName || undefined,
-          itemId: filterPayload.itemId || undefined,
-          itemName: filterPayload.itemName || undefined,
-          voucherType: filterPayload.voucherType || undefined,
-        });
-        const filtered = filterJournalsBy(data || [], filterPayload);
-        if (!filtered.length) {
-          toast.error("No journals found for the selected filters.");
-          return;
+        let groupedBody = custom;
+        if (!groupedBody.length) {
+          const data = await fetchGeneratedJournals({
+            startDate: filterPayload.startDate || undefined,
+            endDate: filterPayload.endDate || undefined,
+            companyName: filterPayload.companyName || undefined,
+            partyName: filterPayload.partyName || undefined,
+            itemId: filterPayload.itemId || undefined,
+            itemName: filterPayload.itemName || undefined,
+            voucherType: filterPayload.voucherType || undefined,
+          });
+          const filtered = filterJournalsBy(data || [], filterPayload);
+          if (!filtered.length) {
+            toast.error("No journals found for the selected filters.");
+            return;
+          }
+          groupedBody = buildGroupedJournalRows(filtered);
         }
-        const groupedBody = buildGroupedJournalRows(filtered);
         const doc = new jsPDF();
         const baseRangeLabel = buildJournalRangeLabel({
           range: j.range || "all",
@@ -2191,8 +3234,8 @@ export default function AccountingFinance() {
           ...groupedTable.map((r) => doc.getTextWidth(String(r.date || "").split("\n")[0] || ""))
         );
         const maxLf = Math.max(18, doc.getTextWidth("L.F.") + 6);
-        const maxDebit = Math.max(24, ...groupedBody.map((r) => measureLines(r._debitLines)));
-        const maxCredit = Math.max(24, ...groupedBody.map((r) => measureLines(r._creditLines)));
+        const maxDebit = Math.max(24, ...groupedBody.map((r) => measureLines(r?.debitLines || [])));
+        const maxCredit = Math.max(24, ...groupedBody.map((r) => measureLines(r?.creditLines || [])));
         const fixed = maxDate + maxLf + maxDebit + maxCredit + 8;
         const particularsWidth = Math.max(50, usableWidth - fixed);
 
@@ -3373,6 +4416,54 @@ export default function AccountingFinance() {
                   )}
                 <button
                   type="button"
+                  onClick={async () => {
+                    const sourceId = String(activeGeneratedJournalId || "");
+                    const selected = sourceId
+                      ? generatedJournalList.find((x) => String(x._id || x.id) === sourceId)
+                      : null;
+                    const custom = selected && Array.isArray(selected.customLayout) ? selected.customLayout : [];
+                    if (custom.length) {
+                      openJournalEditor({ rows: custom, sourceId });
+                      return;
+                    }
+                    try {
+                      const filterPayload = {
+                        startDate: reportRangeStart || "",
+                        endDate: reportRangeEnd || "",
+                        companyName: reportFilterCompanyName || "",
+                        partyName: reportFilterCustomerName || "",
+                        itemId: reportFilterProductId || "",
+                        itemName: reportFilterProductLabel || "",
+                        voucherType: reportFilterVoucherType || "",
+                      };
+                      const data = await fetchGeneratedJournals({
+                        startDate: filterPayload.startDate || undefined,
+                        endDate: filterPayload.endDate || undefined,
+                        companyName: filterPayload.companyName || undefined,
+                        partyName: filterPayload.partyName || undefined,
+                        itemId: filterPayload.itemId || undefined,
+                        itemName: filterPayload.itemName || undefined,
+                        voucherType: filterPayload.voucherType || undefined,
+                      });
+                      const filtered = filterJournalsBy(data || [], filterPayload);
+                      if (!filtered.length) {
+                        toast.error("No journals found for the selected filters.");
+                        return;
+                      }
+                      const grouped = buildGroupedJournalRows(filtered);
+                      openJournalEditor({ rows: grouped, sourceId });
+                    } catch (err) {
+                      toast.error(err?.response?.data?.message || "Failed to load journal for editing.");
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Edit layout"
+                  disabled={reportPreviewEntries.length === 0}
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedJournalName();
                   setJournalGenerateName(suggested);
@@ -3581,6 +4672,50 @@ export default function AccountingFinance() {
                                 <ChevronDown size={14} />
                               </button>
                             </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const sourceId = String(j._id || j.id || "");
+                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+                              if (custom.length) {
+                                openJournalEditor({ rows: custom, sourceId });
+                                return;
+                              }
+                              try {
+                                const filterPayload = {
+                                  startDate: j.startDate || "",
+                                  endDate: j.endDate || "",
+                                  companyName: j.companyName || "",
+                                  partyName: j.partyName || "",
+                                  itemId: j.itemId || "",
+                                  itemName: j.itemName || "",
+                                  voucherType: j.voucherType || "",
+                                };
+                                const data = await fetchGeneratedJournals({
+                                  startDate: filterPayload.startDate || undefined,
+                                  endDate: filterPayload.endDate || undefined,
+                                  companyName: filterPayload.companyName || undefined,
+                                  partyName: filterPayload.partyName || undefined,
+                                  itemId: filterPayload.itemId || undefined,
+                                  itemName: filterPayload.itemName || undefined,
+                                  voucherType: filterPayload.voucherType || undefined,
+                                });
+                                const filtered = filterJournalsBy(data || [], filterPayload);
+                                if (!filtered.length) {
+                                  toast.error("No journals found for the selected filters.");
+                                  return;
+                                }
+                                const grouped = buildGroupedJournalRows(filtered);
+                                openJournalEditor({ rows: grouped, sourceId });
+                              } catch (err) {
+                                toast.error(err?.response?.data?.message || "Failed to load journal for editing.");
+                              }
+                            }}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <button
                             type="button"
                             onClick={() =>
@@ -3819,6 +4954,15 @@ export default function AccountingFinance() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => openLedgerEditor({ rows: ledgerPreviewRows, sourceId: activeGeneratedLedgerId || "" })}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Edit layout"
+                  disabled={ledgerPreviewRows.length === 0}
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedLedgerName();
                     setLedgerGenerateName(suggested);
@@ -3927,6 +5071,34 @@ export default function AccountingFinance() {
                           </button>
                           <button
                             type="button"
+                            onClick={async () => {
+                              const sourceId = String(j._id || j.id || "");
+                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+                              if (custom.length) {
+                                openLedgerEditor({ rows: custom, sourceId });
+                                return;
+                              }
+                              try {
+                                const data = await fetchLedgerByFilters({
+                                  startDate: j.startDate || "",
+                                  endDate: j.endDate || "",
+                                  companyId: j.companyId || "",
+                                  companyName: j.companyName || "",
+                                  accountId: j.accountId || "",
+                                  partyName: j.partyName || "",
+                                });
+                                openLedgerEditor({ rows: buildLedgerPreviewRows(data), sourceId });
+                              } catch {
+                                toast.error("Failed to load ledger for editing.");
+                              }
+                            }}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() =>
                               api
                                 .delete(`/accounting/generated-journals/${j._id || j.id}`)
@@ -3959,11 +5131,498 @@ export default function AccountingFinance() {
         </div>
       )}
 
-{["trial", "pl", "balance", "receivables", "payables"].includes(activeTab) && (
+      {activeTab === "trial" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTrialPreviewOpen((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={trialPreviewOpen ? "Hide preview" : "Show preview"}
+                >
+                  <ChevronDown
+                    size={16}
+                    className={trialPreviewOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                </button>
+                Trial Balance Preview
+              </div>
+              <div className="flex-1 flex justify-center gap-2">
+                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">From</span>
+                  <input
+                    type="date"
+                    value={trialGenerateStart}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setTrialGenerateStart(v);
+                      const end = resolveOneYearEnd(v);
+                      setTrialGenerateEnd(end);
+                      if (!trialNameTouched) setTrialGenerateName(getSuggestedTrialName({ range: "custom", start: v }));
+                      applyTrialFiltersOnly({ range: "custom", start: v }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  />
+                  <span className="text-xs text-gray-600">To</span>
+                  <input
+                    type="date"
+                    value={trialGenerateEnd}
+                    disabled
+                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    title="Auto calculated (1 year range)"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const y = new Date(now);
+                    y.setFullYear(y.getFullYear() - 1);
+                    const start = y.toISOString().slice(0, 10);
+                    const end = resolveOneYearEnd(start);
+                    setTrialGenerateRange("custom");
+                    setTrialGenerateDate("");
+                    setTrialGenerateStart(start);
+                    setTrialGenerateEnd(end);
+                    setActiveGeneratedTrialId("");
+                    setTrialGenerateName(getSuggestedTrialName({ range: "custom", start }));
+                    setTrialNameTouched(false);
+                    applyTrialFiltersOnly({ range: "custom", start }).catch(() => {});
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Clear Filters"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const base =
+                      trialLayoutRows.length > 0
+                        ? trialLayoutRows
+                        : buildTrialLayoutRows({ rows: trialRows, totals: trialTotals });
+                    openTrialEditor({ rows: base, sourceId: activeGeneratedTrialId || "" });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Edit layout"
+                  disabled={trialRows.length === 0 && trialLayoutRows.length === 0}
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedTrialName();
+                    setTrialGenerateName(suggested);
+                    setTrialNameTouched(false);
+                    setTrialGenerateOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Printer size={16} /> Generate
+                </button>
+              </div>
+            </div>
+
+            {trialPreviewOpen && (
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[720px] w-full text-sm border border-gray-200">
+                  <thead className="bg-gray-50 text-gray-800">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px] border border-gray-200">S. No</th>
+                      <th className="text-left font-semibold px-3 py-2 border border-gray-200">Account Names</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[90px] border border-gray-200">A/c No.</th>
+                      <th className="text-right font-semibold px-3 py-2 w-[140px] border border-gray-200">Debit</th>
+                      <th className="text-right font-semibold px-3 py-2 w-[140px] border border-gray-200">Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {trialRows.length === 0 && trialLayoutRows.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Select a range to preview trial balance.
+                        </td>
+                      </tr>
+                    )}
+                    {(trialLayoutRows.length > 0
+                      ? trialLayoutRows
+                      : trialRows.length
+                        ? buildTrialLayoutRows({ rows: trialRows, totals: trialTotals })
+                        : []
+                    ).map((r, idx) => {
+                      const type = String(r.type || "");
+                      if (type === "spacer") {
+                        return (
+                          <tr key={`spacer-${idx}`}>
+                            <td className="px-3 py-2 border border-gray-200" colSpan={5}></td>
+                          </tr>
+                        );
+                      }
+                      if (type === "heading") {
+                        return (
+                          <tr key={`heading-${idx}`} className="bg-gray-50/60">
+                            <td className="px-3 py-2 border border-gray-200" colSpan={5}>
+                              <span className="font-semibold">{String(r.account || "")}</span>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      if (type === "total") {
+                        return (
+                          <tr key={`total-${idx}`} className="bg-emerald-50/60">
+                            <td className="px-3 py-2 border border-gray-200 font-semibold" colSpan={3}>
+                              Total
+                            </td>
+                            <td className="px-3 py-2 border border-gray-200 text-right font-semibold">
+                              {round2(n0(r.debit ?? trialTotals.totalDebit)).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 border border-gray-200 text-right font-semibold">
+                              {round2(n0(r.credit ?? trialTotals.totalCredit)).toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return (
+                        <tr key={`${r.code}-${idx}`}>
+                          <td className="px-3 py-2 border border-gray-200">{r.srNo || idx + 1}</td>
+                          <td className="px-3 py-2 border border-gray-200">{r.account || r.line || "-"}</td>
+                          <td className="px-3 py-2 border border-gray-200">{r.code || ""}</td>
+                          <td className="px-3 py-2 border border-gray-200 text-right">
+                            {round2(n0(r.debit)).toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2 border border-gray-200 text-right">
+                            {round2(n0(r.credit)).toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 space-y-3">
+            <div className="text-sm font-semibold text-emerald-900">Generated Trial Balances</div>
+            <div className="rounded-xl border border-emerald-100 overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm border border-emerald-100">
+                <thead className="bg-emerald-50 text-emerald-900">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                    <th className="text-left font-semibold px-3 py-2">Trial Balance Name</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {generatedTrialList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No generated trial balances yet.
+                      </td>
+                    </tr>
+                  )}
+                  {generatedTrialList.map((j, idx) => (
+                    <tr
+                      key={j._id || j.id}
+                      className={String(activeGeneratedTrialId) === String(j._id || j.id) ? "bg-emerald-50/60" : ""}
+                    >
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2">{j.name}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadGeneratedTrial(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Download PDF"
+                          >
+                            <Download size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+                              if (custom.length) {
+                                openTrialEditor({ rows: custom, sourceId: String(j._id || j.id || "") });
+                                return;
+                              }
+                              try {
+                                const { rows, totals } = await fetchTrialByFilters({
+                                  startDate: j.startDate || "",
+                                  endDate: j.endDate || "",
+                                });
+                                const built = buildTrialLayoutRows({ rows, totals });
+                                openTrialEditor({ rows: built, sourceId: String(j._id || j.id || "") });
+                              } catch {
+                                toast.error("Failed to load trial balance for editing.");
+                              }
+                            }}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              api
+                                .delete(`/accounting/generated-journals/${j._id || j.id}`)
+                                .then(() => loadGeneratedTrialList())
+                                .catch(() => {})
+                            }
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "pl" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPlPreviewOpen((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={plPreviewOpen ? "Hide preview" : "Show preview"}
+                >
+                  <ChevronDown
+                    size={16}
+                    className={plPreviewOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                </button>
+                Profit &amp; Loss Preview
+              </div>
+
+              <div className="flex-1 flex justify-center">
+                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">From</span>
+                  <input
+                    type="date"
+                    value={plGenerateStart}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPlGenerateStart(v);
+                      const end = resolveOneYearEnd(v);
+                      setPlGenerateEnd(end);
+                      if (!plNameTouched) setPlGenerateName(getSuggestedPlName({ start: v }));
+                      applyPlFiltersOnly({ start: v }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  />
+                  <span className="text-xs text-gray-600">To</span>
+                  <input
+                    type="date"
+                    value={plGenerateEnd}
+                    disabled
+                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    title="Auto calculated (1 year range)"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const y = new Date(now);
+                    y.setFullYear(y.getFullYear() - 1);
+                    const start = y.toISOString().slice(0, 10);
+                    const end = resolveOneYearEnd(start);
+                    setPlGenerateStart(start);
+                    setPlGenerateEnd(end);
+                    setActiveGeneratedPlId("");
+                    setPlGenerateName(getSuggestedPlName({ start }));
+                    setPlNameTouched(false);
+                    applyPlFiltersOnly({ start }).catch(() => {});
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Clear Filters"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedPlName({ start: plGenerateStart });
+                    setPlGenerateName(suggested);
+                    setPlNameTouched(false);
+                    setPlGenerateOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Printer size={16} /> Generate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPlEditor({ rows: plPreviewRows })}
+                  disabled={!plPreviewRows.length}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+              </div>
+            </div>
+
+            {plPreviewOpen && (
+              <div className="rounded-xl border border-gray-200 overflow-x-auto" style={{ fontFamily: '"Times New Roman", serif' }}>
+                <div className="px-3 pt-3 pb-1 text-center">
+                  <div className="text-sm font-bold text-gray-900">
+                    Profit and Loss A/c for the year ended
+                  </div>
+                  <div className="text-xs text-gray-700">{plGenerateEnd}</div>
+                </div>
+                <table className="w-full text-sm border border-black table-fixed">
+                  <thead className="bg-white text-gray-900">
+                    <tr>
+                      <th className="text-left font-semibold px-2 py-2 border border-black">Dr.</th>
+                      <th className="text-right font-semibold px-2 py-2 w-[140px] border border-black">Rs.</th>
+                      <th className="text-left font-semibold px-2 py-2 border border-black">Cr.</th>
+                      <th className="text-right font-semibold px-2 py-2 w-[140px] border border-black">Rs.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plPreviewRows.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Select a range to preview profit &amp; loss.
+                        </td>
+                      </tr>
+                    )}
+                    {plPreviewRows.map((r, idx) => {
+                      if (r.isSpacer) {
+                        return (
+                          <tr key={`pl-spacer-${idx}`}>
+                            <td colSpan={4} className="border-l border-r border-black h-3" />
+                          </tr>
+                        );
+                      }
+                      const isTotal = !!r.isTotal;
+                      const isHeading = !!r.isHeading;
+                      const isSection = !!r.isSection;
+                      const cellBorder = "border-black";
+                      const cellBg = isTotal ? "bg-emerald-50/60" : "";
+                      const weight = isTotal || isHeading || isSection ? "font-semibold" : "";
+                      const upper = isHeading ? "uppercase" : "";
+                      return (
+                        <tr key={`pl-row-${idx}`}>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} ${weight} ${upper}`}>{r.drParticular}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} ${weight} text-right`}>{r.drAmount}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} ${weight} ${upper}`}>{r.crParticular}</td>
+                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} ${weight} text-right`}>{r.crAmount}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 space-y-3">
+            <div className="text-sm font-semibold text-emerald-900">Generated Profit &amp; Loss</div>
+            <div className="rounded-xl border border-emerald-100 overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm border border-emerald-100">
+                <thead className="bg-emerald-50 text-emerald-900">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                    <th className="text-left font-semibold px-3 py-2">Name</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {generatedPlList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No generated profit &amp; loss yet.
+                      </td>
+                    </tr>
+                  )}
+                  {generatedPlList.map((j, idx) => (
+                    <tr
+                      key={j._id || j.id}
+                      className={String(activeGeneratedPlId) === String(j._id || j.id) ? "bg-emerald-50/60" : ""}
+                    >
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2">{j.name}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadGeneratedPl(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Print / Save PDF"
+                          >
+                            <Printer size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setActiveGeneratedPlId(String(j._id || j.id || ""));
+                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+                              if (custom.length) {
+                                openPlEditor({ rows: custom, sourceId: String(j._id || j.id || "") });
+                                return;
+                              }
+                              try {
+                                setLoading(true);
+                                const data = await fetchPlByFilters({
+                                  startDate: j.startDate || "",
+                                  endDate: j.endDate || "",
+                                });
+                                const built = buildPlPreviewRows(data);
+                                openPlEditor({ rows: built.rows, sourceId: String(j._id || j.id || "") });
+                              } catch (err) {
+                                toast.error(err?.response?.data?.message || "Failed to open editor.");
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit layout"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGeneratedPl(j)}
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {["balance", "receivables", "payables"].includes(activeTab) && (
         <Reports
           embedded
           initialTab={activeTab}
-          allowedTabs={["trial", "pl", "balance", "receivables", "payables"]}
+          allowedTabs={["balance", "receivables", "payables"]}
         />
       )}
 
@@ -5365,6 +7024,962 @@ export default function AccountingFinance() {
                 className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
               >
                 Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {trialGenerateOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Generate Trial Balance</div>
+              <button
+                type="button"
+                onClick={() => setTrialGenerateOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Trial Balance name</label>
+              <input
+                value={trialGenerateName}
+                onChange={(e) => {
+                  setTrialGenerateName(e.target.value);
+                  setTrialNameTouched(true);
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                placeholder="Trial balance name"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTrialGenerateOpen(false)}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyTrialGenerateFilters}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {plGenerateOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Generate Profit &amp; Loss</div>
+              <button
+                type="button"
+                onClick={() => setPlGenerateOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Name</label>
+              <input
+                value={plGenerateName}
+                onChange={(e) => {
+                  setPlGenerateName(e.target.value);
+                  setPlNameTouched(true);
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                placeholder="Profit & Loss name"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPlGenerateOpen(false)}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyPlGenerateFilters}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {plEditDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Edit Profit &amp; Loss Layout</div>
+              <button type="button" onClick={closePlEditor} className="p-2 rounded hover:bg-gray-100" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[980px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">Type</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Dr Particular</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[140px] border border-gray-200">Dr Amount</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Cr Particular</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[140px] border border-gray-200">Cr Amount</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[170px] border border-gray-200">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plEditDialog.rows.map((row, idx) => {
+                    const type = String(row.type || "line");
+                    const isTotal = type === "total";
+                    const disableAmounts = isTotal || type === "heading" || type === "section" || type === "spacer";
+                    const disableCrText = isTotal || type === "heading" || type === "spacer";
+                    const disableDrText = isTotal || type === "spacer";
+                    return (
+                      <tr key={`pledit-${idx}`} className={isTotal ? "bg-emerald-50/60" : ""}>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <select
+                            value={type}
+                            disabled={isTotal}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPlEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], type: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs bg-white"
+                          >
+                            <option value="line">Line</option>
+                            <option value="heading">Heading</option>
+                            <option value="section">Section</option>
+                            <option value="spacer">Spacer</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            value={row.drParticular}
+                            disabled={disableDrText}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPlEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], drParticular: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-60"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200 text-right">
+                          <input
+                            type="number"
+                            value={row.drAmount}
+                            disabled={disableAmounts}
+                            onChange={(e) => {
+                              const v = Number(e.target.value || 0);
+                              setPlEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], drAmount: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right disabled:opacity-60"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            value={row.crParticular}
+                            disabled={disableCrText}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPlEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], crParticular: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-60"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200 text-right">
+                          <input
+                            type="number"
+                            value={row.crAmount}
+                            disabled={disableAmounts}
+                            onChange={(e) => {
+                              const v = Number(e.target.value || 0);
+                              setPlEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], crAmount: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right disabled:opacity-60"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  const insertAt = Math.max(0, idx);
+                                  next.splice(insertAt, 0, {
+                                    type: "line",
+                                    drParticular: "",
+                                    drAmount: 0,
+                                    crParticular: "",
+                                    crAmount: 0,
+                                  });
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Add row"
+                              disabled={isTotal}
+                            >
+                              <PlusCircle size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  if (idx <= 0) return p;
+                                  const tmp = next[idx - 1];
+                                  next[idx - 1] = next[idx];
+                                  next[idx] = tmp;
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              title="Move up"
+                              disabled={isTotal || idx === 0}
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  if (idx >= next.length - 1) return p;
+                                  const tmp = next[idx + 1];
+                                  next[idx + 1] = next[idx];
+                                  next[idx] = tmp;
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              title="Move down"
+                              disabled={isTotal || idx >= plEditDialog.rows.length - 1}
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next.splice(idx, 1);
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              title="Delete row"
+                              disabled={isTotal}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  // reset to current auto layout
+                  applyPlFiltersOnly({ start: plGenerateStart }).catch(() => {});
+                  closePlEditor();
+                }}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Reset to Auto
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={closePlEditor}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyPlEditor}
+                  className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  Apply Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {trialEditDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Edit Trial Balance Layout</div>
+              <button type="button" onClick={closeTrialEditor} className="p-2 rounded hover:bg-gray-100" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[980px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">Type</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Account</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">A/c No.</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[140px] border border-gray-200">Debit</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[140px] border border-gray-200">Credit</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[170px] border border-gray-200">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trialEditDialog.rows.map((row, idx) => {
+                    const type = String(row.type || "line");
+                    const isSpacer = type === "spacer";
+                    const isHeading = type === "heading";
+                    return (
+                      <tr key={`trial-edit-${idx}`}>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <select
+                            value={type}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setTrialEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], type: v };
+                                if (v === "spacer") next[idx] = { type: "spacer", account: "", code: "", debit: 0, credit: 0 };
+                                if (v === "heading") next[idx] = { type: "heading", account: next[idx].account || "", code: "", debit: 0, credit: 0 };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                          >
+                            <option value="line">Line</option>
+                            <option value="heading">Heading</option>
+                            <option value="spacer">Spacer</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            value={String(row.account || "")}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setTrialEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], account: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-60"
+                            disabled={isSpacer}
+                            placeholder={isHeading ? "Heading text" : "Account name"}
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            value={String(row.code || "")}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setTrialEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], code: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-60"
+                            disabled={isSpacer || isHeading}
+                            placeholder="Code"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            type="number"
+                            value={Number(row.debit || 0)}
+                            onChange={(e) => {
+                              const v = Number(e.target.value || 0);
+                              setTrialEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], debit: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right disabled:opacity-60"
+                            disabled={isSpacer || isHeading}
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <input
+                            type="number"
+                            value={Number(row.credit || 0)}
+                            onChange={(e) => {
+                              const v = Number(e.target.value || 0);
+                              setTrialEditDialog((p) => {
+                                const next = [...p.rows];
+                                next[idx] = { ...next[idx], credit: v };
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right disabled:opacity-60"
+                            disabled={isSpacer || isHeading}
+                          />
+                        </td>
+                        <td className="px-2 py-2 border border-gray-200">
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTrialEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next.splice(Math.max(0, idx), 0, { type: "line", account: "", code: "", debit: 0, credit: 0 });
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Add row"
+                            >
+                              <PlusCircle size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTrialEditDialog((p) => {
+                                  if (idx <= 0) return p;
+                                  const next = [...p.rows];
+                                  const tmp = next[idx - 1];
+                                  next[idx - 1] = next[idx];
+                                  next[idx] = tmp;
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              title="Move up"
+                              disabled={idx === 0}
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTrialEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  if (idx >= next.length - 1) return p;
+                                  const tmp = next[idx + 1];
+                                  next[idx + 1] = next[idx];
+                                  next[idx] = tmp;
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              title="Move down"
+                              disabled={idx >= trialEditDialog.rows.length - 1}
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTrialEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next.splice(idx, 1);
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                              className="p-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              title="Delete row"
+                              disabled={trialEditDialog.rows.length <= 1}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeTrialEditor}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyTrialEditor}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ledgerEditDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-6xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Edit Ledger Layout</div>
+              <button type="button" onClick={closeLedgerEditor} className="p-2 rounded hover:bg-gray-100" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[1120px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">Dr Date</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Dr Particular</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[70px] border border-gray-200">J.R.</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[120px] border border-gray-200">Amount</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">Cr Date</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Cr Particular</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[70px] border border-gray-200">J.R.</th>
+                    <th className="text-right font-semibold px-2 py-2 w-[120px] border border-gray-200">Amount</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[160px] border border-gray-200">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledgerEditDialog.rows.map((row, idx) => (
+                    <tr key={`ledger-edit-${idx}`}>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.drDate || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], drDate: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-10"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.drRef || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], drRef: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.drJr || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], drJr: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.drAmount || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], drAmount: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.crDate || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], crDate: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-10"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.crRef || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], crRef: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.crJr || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], crJr: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.crAmount || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setLedgerEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], crAmount: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs text-right"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLedgerEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(Math.max(0, idx), 0, { drDate: "", drRef: "", drJr: "", drAmount: "", crDate: "", crRef: "", crJr: "", crAmount: "" });
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Add row"
+                          >
+                            <PlusCircle size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLedgerEditDialog((p) => {
+                                if (idx <= 0) return p;
+                                const next = [...p.rows];
+                                const tmp = next[idx - 1];
+                                next[idx - 1] = next[idx];
+                                next[idx] = tmp;
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            title="Move up"
+                            disabled={idx === 0}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLedgerEditDialog((p) => {
+                                const next = [...p.rows];
+                                if (idx >= next.length - 1) return p;
+                                const tmp = next[idx + 1];
+                                next[idx + 1] = next[idx];
+                                next[idx] = tmp;
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            title="Move down"
+                            disabled={idx >= ledgerEditDialog.rows.length - 1}
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLedgerEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(idx, 1);
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+                            title="Delete row"
+                            disabled={ledgerEditDialog.rows.length <= 1}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeLedgerEditor}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyLedgerEditor}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {journalEditDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-6xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Edit Journal Layout</div>
+              <button type="button" onClick={closeJournalEditor} className="p-2 rounded hover:bg-gray-100" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[1040px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-2 w-[120px] border border-gray-200">Date</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[70px] border border-gray-200">L.F.</th>
+                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Particulars</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[140px] border border-gray-200">Debit</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[140px] border border-gray-200">Credit</th>
+                    <th className="text-left font-semibold px-2 py-2 w-[160px] border border-gray-200">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {journalEditDialog.rows.map((row, idx) => (
+                    <tr key={`journal-edit-${idx}`}>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.date || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setJournalEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], date: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-10"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <input
+                          value={String(row.lf || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setJournalEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], lf: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.particulars || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setJournalEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], particulars: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-24"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.debit || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setJournalEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], debit: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-24"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <textarea
+                          value={String(row.credit || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setJournalEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], credit: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-xs resize-none h-24"
+                        />
+                      </td>
+                      <td className="px-2 py-2 border border-gray-200">
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setJournalEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(Math.max(0, idx), 0, { date: "", lf: "", particulars: "", debit: "", credit: "" });
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Add row"
+                          >
+                            <PlusCircle size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setJournalEditDialog((p) => {
+                                if (idx <= 0) return p;
+                                const next = [...p.rows];
+                                const tmp = next[idx - 1];
+                                next[idx - 1] = next[idx];
+                                next[idx] = tmp;
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            title="Move up"
+                            disabled={idx === 0}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setJournalEditDialog((p) => {
+                                const next = [...p.rows];
+                                if (idx >= next.length - 1) return p;
+                                const tmp = next[idx + 1];
+                                next[idx + 1] = next[idx];
+                                next[idx] = tmp;
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            title="Move down"
+                            disabled={idx >= journalEditDialog.rows.length - 1}
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setJournalEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(idx, 1);
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+                            title="Delete row"
+                            disabled={journalEditDialog.rows.length <= 1}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeJournalEditor}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyJournalEditor}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Apply Changes
               </button>
             </div>
           </div>

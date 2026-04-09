@@ -408,10 +408,27 @@ exports.createGeneratedJournal = async (req, res) => {
       itemName: String(payload.itemName || ""),
       voucherType: String(payload.voucherType || ""),
       reportKey: String(payload.reportKey || "journal"),
+      customLayout: payload.customLayout ?? [],
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to create generated journal." });
+  }
+};
+
+exports.updateGeneratedJournal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const payload = req.body || {};
+    const patch = {};
+    if (payload.name != null) patch.name = String(payload.name || "").trim();
+    if (payload.customLayout != null) patch.customLayout = payload.customLayout;
+
+    const doc = await AccountingGeneratedJournal.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Generated report not found." });
+    return res.json({ success: true, data: doc });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message || "Unable to update generated report." });
   }
 };
 
@@ -527,7 +544,7 @@ exports.getLedger = async (req, res) => {
 
 exports.getTrialBalance = async (req, res) => {
   try {
-    const { end } = parseRange(req);
+    const { start, end } = parseRange(req);
     const companyId = String(req.query.companyId || "").trim();
     const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
     const bookTypes = parseListParam(req.query.bookType || req.query.bookTypes);
@@ -535,14 +552,12 @@ exports.getTrialBalance = async (req, res) => {
     const voucherNo = String(req.query.voucherNo || "").trim();
     const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
 
-    const entryFilter = { date: { $lte: end }, status: "POSTED" };
+    const entryFilter = { date: { $gte: start, $lte: end }, status: "POSTED" };
     if (companyId) entryFilter.companyId = companyId;
     if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
     if (bookTypes.length) entryFilter.bookType = { $in: bookTypes };
     if (companyName) entryFilter.companyName = new RegExp(escRe(companyName), "i");
     if (voucherNo) entryFilter.voucherNo = new RegExp(escRe(voucherNo), "i");
-    if (bookTypes.length) entryFilter.bookType = { $in: bookTypes };
-    if (companyName) entryFilter.companyName = new RegExp(escRe(companyName), "i");
     const entries = await JournalEntry.find(entryFilter).lean();
     const lines = await getLinesForEntries(entries.map((e) => e._id), {
       ...(accountIds.length ? { accountId: { $in: accountIds } } : {}),
@@ -570,7 +585,14 @@ exports.getTrialBalance = async (req, res) => {
     });
 
     const data = Array.from(bucket.values())
-      .map((r) => ({ ...r, debit: round2(r.debit), credit: round2(r.credit) }))
+      .map((r) => {
+        const debitTotal = toNum(r.debit);
+        const creditTotal = toNum(r.credit);
+        const balance = debitTotal - creditTotal;
+        const debit = balance > 0 ? balance : 0;
+        const credit = balance < 0 ? Math.abs(balance) : 0;
+        return { ...r, debit: round2(debit), credit: round2(credit) };
+      })
       .sort((a, b) => String(a.code).localeCompare(String(b.code)));
 
     const totalDebit = round2(data.reduce((s, r) => s + toNum(r.debit), 0));
@@ -615,6 +637,8 @@ exports.getProfitLoss = async (req, res) => {
         code: acc.code,
         account: acc.name,
         type: acc.type,
+        subType: acc.subType || "",
+        tags: Array.isArray(acc.tags) ? acc.tags : [],
         debit: 0,
         credit: 0,
       };
