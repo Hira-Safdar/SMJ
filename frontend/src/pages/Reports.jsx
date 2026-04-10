@@ -9,7 +9,6 @@ import {
   TrendingUp,
   Scale,
   Landmark,
-  HandCoins,
   BookOpen,
   BookCopy,
   FileText,
@@ -18,8 +17,6 @@ import {
   Filter,
   Download,
   X,
-  Printer,
-  Eye,
   Pencil,
   Trash2,
   ChevronDown,
@@ -177,6 +174,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [generatedJournalList, setGeneratedJournalList] = useState([]);
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
   const [generatedTrialList, setGeneratedTrialList] = useState([]);
+  const [generatedPlList, setGeneratedPlList] = useState([]);
   const [generatedLoading, setGeneratedLoading] = useState(false);
   const [ledgerRecordsOpen, setLedgerRecordsOpen] = useState(false);
 
@@ -317,8 +315,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       "trial",
       "pl",
       "balance",
-      "receivables",
-      "payables",
       "ledger",
     ].includes(activeTab);
 
@@ -522,26 +518,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         setRows([...assets, ...liabilities, ...equity, ...summary]);
         return;
       }
-      if (activeTab === "receivables") {
-        const res = await api.get("/accounting/outstanding/receivables", params);
-        setRows(
-          (res.data?.data || []).map((r, idx) => ({
-            id: `${idx}-${r.party}`,
-            ...r,
-          }))
-        );
-        return;
-      }
-      if (activeTab === "payables") {
-        const res = await api.get("/accounting/outstanding/payables", params);
-        setRows(
-          (res.data?.data || []).map((r, idx) => ({
-            id: `${idx}-${r.party}`,
-            ...r,
-          }))
-        );
-        return;
-      }
       if (activeTab === "ledger") {
         const res = await api.get("/accounting/ledger", params);
         setRows(
@@ -613,6 +589,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (activeTab === "acc-reports") {
       loadGeneratedList("journal", setGeneratedJournalList);
       loadGeneratedList("trial", setGeneratedTrialList);
+      loadGeneratedList("pl", setGeneratedPlList);
     }
   }, [activeTab]);
 
@@ -1132,14 +1109,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         },
       ];
     }
-    if (activeTab === "receivables" || activeTab === "payables") {
-      return [
-        { key: "party", label: "Party" },
-        { key: "totalDebit", label: "Total Debit (PKR)", render: (v) => fmt(v) },
-        { key: "totalCredit", label: "Total Credit (PKR)", render: (v) => fmt(v) },
-        { key: "balance", label: "Balance (PKR)", render: (v) => fmt(v) },
-      ];
-    }
     if (activeTab === "daybook") {
       return [
         { key: "date", label: "Date", render: (v) => fmtDate(v) },
@@ -1338,7 +1307,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
     if (activeTab === "ledger" && Number(row.balance || 0) < 0) return "text-red-700";
     if (activeTab === "stock-movement" && Number(row.balanceKg || 0) < 0) return "text-red-700";
-    if ((activeTab === "receivables" || activeTab === "payables") && Number(row.balance || 0) < 0) return "text-red-700";
     return "";
   };
 
@@ -1954,6 +1922,79 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   };
 
+  const handleDownloadGeneratedPl = async (j) => {
+    if (!j) return;
+    try {
+      setGeneratedLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      let body = [];
+      if (custom.length) {
+        body = custom.map((r) => [r.drParticular || "", r.drAmount || "", r.crParticular || "", r.crAmount || ""]);
+      } else {
+        const res = await api.get("/accounting/pl", {
+          params: {
+            range: "custom",
+            startDate: j.startDate || "",
+            endDate: j.endDate || "",
+          },
+        });
+        const p = res.data?.data || {};
+        const income = p.income || [];
+        const cogs = p.cogs || [];
+        const expenses = p.expenses || [];
+        const totals = p.totals || {};
+
+        const dr = [
+          ...cogs.map((r) => ({ label: r.account, amount: num(r.amount) })),
+          ...expenses.map((r) => ({ label: r.account, amount: num(r.amount) })),
+        ];
+        const cr = income.map((r) => ({ label: r.account, amount: num(r.amount) }));
+
+        const max = Math.max(dr.length, cr.length);
+        body = Array.from({ length: max }).map((_, i) => [
+          dr[i]?.label || "",
+          dr[i] ? fmtAmt(dr[i].amount) : "",
+          cr[i]?.label || "",
+          cr[i] ? fmtAmt(cr[i].amount) : "",
+        ]);
+
+        body.push(["", "", "", ""]);
+        body.push(["Gross Profit / (Loss)", fmtAmt(num(totals.grossProfit)), "", ""]);
+        body.push(["Net Profit / (Loss)", fmtAmt(num(totals.profit)), "", ""]);
+      }
+
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const startY = addPdfHeader(doc, "Profit and Loss A/c for the year ended", selectedCompanyName);
+
+      autoTable(doc, {
+        head: [["Dr.", "Rs.", "Cr.", "Rs."]],
+        body,
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+      });
+
+      doc.save(`${String(j.name || "profit_loss").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download profit & loss.");
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedPl = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedList("pl", setGeneratedPlList);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete profit & loss.");
+    }
+  };
+
   const downloadLedgerDrillPdf = () => {
     const debits = (drill.rows || []).filter((r) => Number(r.debit || 0) > 0);
     const credits = (drill.rows || []).filter((r) => Number(r.credit || 0) > 0);
@@ -2230,6 +2271,63 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             <button
                               type="button"
                               onClick={() => handleDeleteGeneratedTrial(j)}
+                              className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-gray-900">Generated Profit &amp; Loss</div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-emerald-50 text-emerald-900">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                      <th className="text-left font-semibold px-3 py-2">P&amp;L Name</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {generatedLoading && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Loading generated profit &amp; loss...
+                        </td>
+                      </tr>
+                    )}
+                    {!generatedLoading && generatedPlList.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No generated profit &amp; loss yet.
+                        </td>
+                      </tr>
+                    )}
+                    {generatedPlList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
+                        <td className="px-3 py-2">{idx + 1}</td>
+                        <td className="px-3 py-2">{j.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedPl(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download PDF"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedPl(j)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >

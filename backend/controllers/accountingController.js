@@ -744,6 +744,105 @@ exports.getBalanceSheet = async (req, res) => {
   }
 };
 
+exports.getCashFlow = async (req, res) => {
+  try {
+    await ensureDefaultAccounts();
+    const { start, end } = parseRange(req);
+    const companyId = String(req.query.companyId || "").trim();
+    const companyName = String(req.query.companyName || "").trim();
+
+    const cashAccounts = await Account.find({
+      isActive: true,
+      subType: { $in: ["CASH", "BANK"] },
+    })
+      .select("_id name subType code")
+      .lean();
+
+    if (!cashAccounts.length) {
+      return res.json({
+        success: true,
+        data: { rows: [], totals: { cashIn: 0, cashOut: 0, netCashFlow: 0, cashInHand: 0 } },
+      });
+    }
+
+    const accountMap = new Map(cashAccounts.map((a) => [String(a._id), a]));
+    const accountIds = cashAccounts.map((a) => String(a._id));
+
+    const entries = await getEntriesInRange({
+      start,
+      end,
+      companyId,
+      companyName,
+      status: "POSTED",
+    });
+    const entryIds = entries.map((e) => e._id);
+    const lines = await getLinesForEntries(entryIds, { accountId: { $in: accountIds } });
+
+    const bucket = new Map();
+    lines.forEach((l) => {
+      const id = String(l.accountId || "");
+      if (!id || !accountMap.has(id)) return;
+      const acc = accountMap.get(id);
+      const row = bucket.get(id) || {
+        accountId: id,
+        accountName: acc?.name || "",
+        subType: acc?.subType || "",
+        cashIn: 0,
+        cashOut: 0,
+        net: 0,
+      };
+      row.cashIn += toNum(l.debit);
+      row.cashOut += toNum(l.credit);
+      row.net = row.cashIn - row.cashOut;
+      bucket.set(id, row);
+    });
+
+    const rows = Array.from(bucket.values())
+      .map((r) => ({
+        ...r,
+        cashIn: round2(r.cashIn),
+        cashOut: round2(r.cashOut),
+        net: round2(r.net),
+      }))
+      .sort((a, b) => String(a.accountName || "").localeCompare(String(b.accountName || "")));
+
+    const cashIn = round2(rows.reduce((s, r) => s + toNum(r.cashIn), 0));
+    const cashOut = round2(rows.reduce((s, r) => s + toNum(r.cashOut), 0));
+    const netCashFlow = round2(cashIn - cashOut);
+
+    const cashOnlyIds = cashAccounts
+      .filter((a) => String(a.subType || "").toUpperCase() === "CASH")
+      .map((a) => String(a._id));
+    let cashInHand = 0;
+    if (cashOnlyIds.length) {
+      const allEntries = await getEntriesInRange({
+        start: new Date(0),
+        end,
+        companyId,
+        companyName,
+        status: "POSTED",
+      });
+      const cashLines = await getLinesForEntries(allEntries.map((e) => e._id), { accountId: { $in: cashOnlyIds } });
+      cashInHand = round2(cashLines.reduce((s, l) => s + toNum(l.debit) - toNum(l.credit), 0));
+    }
+
+    res.json({
+      success: true,
+      data: {
+        rows,
+        totals: {
+          cashIn,
+          cashOut,
+          netCashFlow,
+          cashInHand,
+        },
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load cash flow." });
+  }
+};
+
 exports.getPartyLedger = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
@@ -776,95 +875,6 @@ exports.getPartyLedger = async (req, res) => {
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load party ledger." });
-  }
-};
-
-exports.getOutstandingReceivables = async (req, res) => {
-  try {
-    await ensureDefaultAccounts();
-    const { end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
-    const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
-
-    const arAccounts = await Account.find({ subType: "AR", isActive: true }).lean();
-    const arIds = arAccounts.map((a) => String(a._id));
-    if (!arIds.length) return res.json({ success: true, data: [] });
-
-    const entryFilter = { date: { $lte: end }, status: "POSTED" };
-    if (companyId) entryFilter.companyId = companyId;
-    if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
-    const entries = await JournalEntry.find(entryFilter).select("_id").lean();
-    const lines = await getLinesForEntries(entries.map((e) => e._id), { accountId: { $in: arIds } });
-
-    const bucket = new Map();
-    lines.forEach((l) => {
-      const name = String(l.partyName || "").trim();
-      if (!name) return;
-      const row = bucket.get(name) || { party: name, totalDebit: 0, totalCredit: 0, balance: 0 };
-      row.totalDebit += toNum(l.debit);
-      row.totalCredit += toNum(l.credit);
-      row.balance = row.totalDebit - row.totalCredit;
-      bucket.set(name, row);
-    });
-
-    const data = Array.from(bucket.values())
-      .filter((r) => r.balance > 0)
-      .map((r) => ({
-        ...r,
-        totalDebit: round2(r.totalDebit),
-        totalCredit: round2(r.totalCredit),
-        balance: round2(r.balance),
-      }))
-      .sort((a, b) => b.balance - a.balance);
-
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load receivables." });
-  }
-};
-
-exports.getOutstandingPayables = async (req, res) => {
-  try {
-    await ensureDefaultAccounts();
-    const { end } = parseRange(req);
-    const companyId = String(req.query.companyId || "").trim();
-    const voucherTypes = parseListParam(req.query.voucherType || req.query.voucherTypes);
-
-    const apAccounts = await Account.find({ subType: "AP", isActive: true }).lean();
-    const apIds = apAccounts.map((a) => String(a._id));
-    if (!apIds.length) return res.json({ success: true, data: [] });
-
-    const entryFilter = { date: { $lte: end }, status: "POSTED" };
-    if (companyId) entryFilter.companyId = companyId;
-    if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
-    const entries = await JournalEntry.find(entryFilter).select("_id").lean();
-    const lines = await getLinesForEntries(entries.map((e) => e._id), { accountId: { $in: apIds } });
-
-    const bucket = new Map();
-    lines.forEach((l) => {
-      const name = String(l.partyName || "").trim();
-      if (!name) return;
-      const row = bucket.get(name) || { party: name, totalDebit: 0, totalCredit: 0, balance: 0 };
-      row.totalDebit += toNum(l.debit);
-      row.totalCredit += toNum(l.credit);
-      // AP balance: credits - debits
-      row.balance = row.totalCredit - row.totalDebit;
-      bucket.set(name, row);
-    });
-
-    const data = Array.from(bucket.values())
-      .filter((r) => r.balance > 0)
-      .map((r) => ({
-        ...r,
-        totalDebit: round2(r.totalDebit),
-        totalCredit: round2(r.totalCredit),
-        balance: round2(r.balance),
-      }))
-      .sort((a, b) => b.balance - a.balance);
-
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load payables." });
   }
 };
 

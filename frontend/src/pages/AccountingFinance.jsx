@@ -9,8 +9,7 @@ import {
   Scale,
   TrendingUp,
   Building2,
-  HandCoins,
-  Wallet,
+  ArrowUpDown,
   Plus,
   Save,
   X,
@@ -18,7 +17,6 @@ import {
   PlusCircle,
   ArrowUp,
   ArrowDown,
-  Eye,
   Trash2,
   Printer,
   Filter,
@@ -41,8 +39,7 @@ const TABS = [
   { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
   { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
   { key: "balance", label: "Balance Sheet", icon: <Building2 size={16} /> },
-  { key: "receivables", label: "Receivables", icon: <HandCoins size={16} /> },
-  { key: "payables", label: "Payables", icon: <Wallet size={16} /> },
+  { key: "cash-flow", label: "Cash Flow", icon: <ArrowUpDown size={16} /> },
 ];
 
 const VOUCHER_TYPES = ["JOURNAL", "PAYMENT", "RECEIPT"];
@@ -353,7 +350,7 @@ export default function AccountingFinance() {
   const [journalPreviewMeta, setJournalPreviewMeta] = useState(null);
   const [journalPreviewEntries, setJournalPreviewEntries] = useState([]);
   const [journalInfoDialog, setJournalInfoDialog] = useState({ open: false, message: "" });
-  const [downloadMenu, setDownloadMenu] = useState({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+  const [downloadMenu, setDownloadMenu] = useState({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
   const [ledgerFilterOpen, setLedgerFilterOpen] = useState(false);
   const [ledgerGenerateOpen, setLedgerGenerateOpen] = useState(false);
   const [ledgerGenerateName, setLedgerGenerateName] = useState("");
@@ -404,6 +401,17 @@ export default function AccountingFinance() {
   const [generatedPlList, setGeneratedPlList] = useState([]);
   const [activeGeneratedPlId, setActiveGeneratedPlId] = useState("");
   const [plEditDialog, setPlEditDialog] = useState({ open: false, rows: [], sourceId: "" });
+
+  const [cashFlowStart, setCashFlowStart] = useState("");
+  const [cashFlowEnd, setCashFlowEnd] = useState("");
+  const [cashFlowRows, setCashFlowRows] = useState([]);
+  const [cashFlowTotals, setCashFlowTotals] = useState({
+    cashIn: 0,
+    cashOut: 0,
+    netCashFlow: 0,
+    cashInHand: 0,
+  });
+  const [cashFlowLoading, setCashFlowLoading] = useState(false);
 
   const [ledgerEditDialog, setLedgerEditDialog] = useState({ open: false, rows: [], sourceId: "" });
   const [trialEditDialog, setTrialEditDialog] = useState({ open: false, rows: [], sourceId: "" });
@@ -1210,6 +1218,17 @@ export default function AccountingFinance() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab !== "cash-flow") return;
+    const now = new Date();
+    const defaultStart = cashFlowStart || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const defaultEnd = cashFlowEnd || now.toISOString().slice(0, 10);
+    if (!cashFlowStart) setCashFlowStart(defaultStart);
+    if (!cashFlowEnd) setCashFlowEnd(defaultEnd);
+    loadCashFlow({ start: defaultStart, end: defaultEnd }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab !== "journal-entry") return;
     (async () => {
       try {
@@ -1616,8 +1635,21 @@ export default function AccountingFinance() {
     setJournalFilterOpen(false);
     setJournalGenerateOpen(false);
     setJournalPreviewOpen(false);
-    setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
+    setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
     setDeleteDialog({ open: true, id, voucherNo: voucherNo || "" });
+  };
+
+  const closeDownloadMenu = () => setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
+
+  const openDownloadMenu = (type, item, anchorEl) => {
+    if (!anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    setDownloadMenu({
+      open: true,
+      type,
+      item,
+      anchor: { x: rect.right, y: rect.bottom + 4 },
+    });
   };
 
   const confirmDeleteVoucher = async () => {
@@ -2433,6 +2465,33 @@ export default function AccountingFinance() {
     return { rows, totals: { ...totals, grossProfit, profit } };
   };
 
+  const loadCashFlow = async (override = {}) => {
+    const start = String(override.start ?? cashFlowStart ?? "").trim();
+    const end = String(override.end ?? cashFlowEnd ?? "").trim();
+    if (!start || !end) return;
+    try {
+      setCashFlowLoading(true);
+      const res = await api.get("/accounting/cash-flow", {
+        params: { range: "custom", startDate: start, endDate: end },
+      });
+      const data = res.data?.data || {};
+      const totals = data.totals || {};
+      setCashFlowRows(Array.isArray(data.rows) ? data.rows : []);
+      setCashFlowTotals({
+        cashIn: Number(totals.cashIn || 0),
+        cashOut: Number(totals.cashOut || 0),
+        netCashFlow: Number(totals.netCashFlow || 0),
+        cashInHand: Number(totals.cashInHand || 0),
+      });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load cash flow.");
+      setCashFlowRows([]);
+      setCashFlowTotals({ cashIn: 0, cashOut: 0, netCashFlow: 0, cashInHand: 0 });
+    } finally {
+      setCashFlowLoading(false);
+    }
+  };
+
   const parseRs = (value) => {
     const raw = String(value || "").replace(/Rs\.?/gi, "").replace(/,/g, "").trim();
     if (!raw) return 0;
@@ -2856,16 +2915,8 @@ export default function AccountingFinance() {
     try {
       setLoading(true);
       const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-      const rowsToPrint =
-        custom.length > 0
-          ? custom
-          : (() => {
-              // fallback to auto layout
-              return null;
-            })();
-
-      let finalRows = rowsToPrint;
-      if (!finalRows) {
+      let finalRows = custom.length > 0 ? custom : null;
+      if (!finalRows || !finalRows.length) {
         const data = await fetchPlByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
         const built = buildPlPreviewRows(data);
         finalRows = built.rows;
@@ -2874,9 +2925,84 @@ export default function AccountingFinance() {
         toast.error("No P&L data found for the selected range.");
         return;
       }
-      printPlRows({ name: j.name || "Profit & Loss", startDate: j.startDate || "", endDate: j.endDate || "", rows: finalRows });
+      const safeName = String(j.name || "profit_loss").replace(/[\\/:*?"<>|]/g, "_");
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const centerX = doc.internal.pageSize.getWidth() / 2;
+      doc.setFontSize(12);
+      doc.text(String(j.name || "Profit & Loss"), centerX, 18, { align: "center" });
+      const rangeLabel = [j.startDate, j.endDate].filter(Boolean).join(" to ");
+      if (rangeLabel) {
+        doc.setFontSize(10);
+        doc.text(rangeLabel, centerX, 24, { align: "center" });
+      }
+      const startY = rangeLabel ? 30 : 26;
+      const body = finalRows.map((r) => [r.drParticular || "", r.drAmount || "", r.crParticular || "", r.crAmount || ""]);
+      autoTable(doc, {
+        head: [["Dr.", "Rs.", "Cr.", "Rs."]],
+        body,
+        startY,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: "bold" },
+        theme: "grid",
+        columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+        didParseCell: (data) => {
+          if (data.section !== "body") return;
+          const row = (finalRows || [])[data.row.index] || {};
+          if (row.isSpacer) data.cell.text = "";
+          if (row.isHeading || row.isSection || row.isTotal) data.cell.styles.fontStyle = "bold";
+        },
+      });
+      doc.save(`${safeName}.pdf`);
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to print P&L.");
+      toast.error(err?.response?.data?.message || "Failed to download P&L.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadGeneratedPlExcel = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      let finalRows = custom.length > 0 ? custom : null;
+      if (!finalRows || !finalRows.length) {
+        const data = await fetchPlByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        const built = buildPlPreviewRows(data);
+        finalRows = built.rows;
+      }
+      if (!finalRows?.length) {
+        toast.error("No P&L data found for the selected range.");
+        return;
+      }
+      const title = String(j.name || "Profit & Loss");
+      const rangeLabel = [j.startDate, j.endDate].filter(Boolean).join(" to ");
+      const headerRows = [
+        [String(printSettings?.businessName || printSettings?.companyName || "")],
+        [title],
+        [rangeLabel],
+        [],
+        ["Dr.", "Rs.", "Cr.", "Rs."],
+      ];
+      const bodyRows = finalRows.map((r) => [
+        r.drParticular || "",
+        parseRs(r.drAmount) ? parseRs(r.drAmount) : "",
+        r.crParticular || "",
+        parseRs(r.crAmount) ? parseRs(r.crAmount) : "",
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
+      ];
+      ws["!cols"] = [{ wch: 44 }, { wch: 14 }, { wch: 44 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Profit & Loss");
+      XLSX.writeFile(wb, `${String(j.name || "profit_loss")}.xlsx`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download Excel.");
     } finally {
       setLoading(false);
     }
@@ -2943,6 +3069,73 @@ export default function AccountingFinance() {
       }
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to download trial balance.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadGeneratedTrialExcel = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      let layout = [];
+      let totals = { totalDebit: 0, totalCredit: 0 };
+      if (custom.length) {
+        layout = custom;
+        totals = computeTrialTotalsFromLayout(custom);
+      } else {
+        const { rows, totals: t } = await fetchTrialByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        if (!rows.length) {
+          toast.error("No trial balance rows found for the selected range.");
+          return;
+        }
+        totals = { totalDebit: Number(t?.totalDebit || 0), totalCredit: Number(t?.totalCredit || 0) };
+        layout = buildTrialLayoutRows({ rows, totals: t });
+      }
+      const safeName = String(j.name || "Trial Balance").replace(/[\\/:*?"<>|]/g, "_");
+      const asOf = j.endDate ? new Date(j.endDate) : new Date();
+      const asOfDate = asOf.toISOString().slice(0, 10);
+      const headerRows = [
+        [String(printSettings?.businessName || printSettings?.companyName || "")],
+        ["TRIAL BALANCE"],
+        [`as at ${asOfDate}`],
+        [],
+        ["S. No", "Account Names", "A/c No.", "Debit", "Credit"],
+      ];
+      const bodyRows = (layout || []).map((r, idx) => {
+        const type = String(r.type || "");
+        if (type === "spacer") return ["", "", "", "", ""];
+        if (type === "heading") return ["", String(r.account || ""), "", "", ""];
+        if (type === "total") {
+          return ["", "", "Total", round2(n0(r.debit ?? totals.totalDebit)), round2(n0(r.credit ?? totals.totalCredit))];
+        }
+        return [
+          String(r.srNo || idx + 1),
+          String(r.account || r.line || "-"),
+          String(r.code || ""),
+          round2(n0(r.debit)),
+          round2(n0(r.credit)),
+        ];
+      });
+      const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 4 } },
+      ];
+      ws["!cols"] = [
+        { wch: 8 },
+        { wch: 40 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 14 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Trial Balance");
+      XLSX.writeFile(wb, `${safeName}.xlsx`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download Excel.");
     } finally {
       setLoading(false);
     }
@@ -3096,6 +3289,71 @@ export default function AccountingFinance() {
       doc.save(`${String(j.name || "ledger").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || "Failed to download ledger.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadGeneratedLedgerExcel = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      const rows = custom.length
+        ? custom
+        : buildLedgerPreviewRows(
+            await fetchLedgerByFilters({
+              startDate: j.startDate || "",
+              endDate: j.endDate || "",
+              companyId: j.companyId || "",
+              companyName: j.companyName || "",
+              accountId: j.accountId || "",
+              partyName: j.partyName || "",
+            })
+          );
+      if (!rows.length) {
+        toast.error("No ledger rows found for the selected filters.");
+        return;
+      }
+      const title = String(j.accountName || "Ledger");
+      const headerRows = [
+        [String(printSettings?.businessName || printSettings?.companyName || "")],
+        [title],
+        [String(j.companyName || j.partyName || "")],
+        [],
+        ["Dr Date", "Dr References", "Dr J.R.", "Dr Amount", "Cr Date", "Cr References", "Cr J.R.", "Cr Amount"],
+      ];
+      const bodyRows = rows.map((r) => [
+        r.drDate,
+        r.drRef,
+        r.drJr,
+        r.drAmount,
+        r.crDate,
+        r.crRef,
+        r.crJr,
+        r.crAmount,
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
+      ];
+      ws["!cols"] = [
+        { wch: 12 },
+        { wch: 28 },
+        { wch: 8 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 28 },
+        { wch: 8 },
+        { wch: 12 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Ledger");
+      XLSX.writeFile(wb, `${String(j.name || "ledger")}.xlsx`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to download Excel.");
     } finally {
       setLoading(false);
     }
@@ -4639,83 +4897,24 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewGeneratedJournal(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="View"
-                          >
-                            <Eye size={14} />
-                          </button>
-                            <div className="flex">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadGeneratedJournal(j)}
-                                className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
-                                title="Download PDF"
-                              >
-                                <Download size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setDownloadMenu({
-                                    open: true,
-                                    journal: j,
-                                    anchor: { x: rect.right, y: rect.bottom + 4 },
-                                  });
-                                }}
-                                className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
-                                title="Download Options"
-                              >
-                                <ChevronDown size={14} />
-                              </button>
-                            </div>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const sourceId = String(j._id || j.id || "");
-                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-                              if (custom.length) {
-                                openJournalEditor({ rows: custom, sourceId });
-                                return;
-                              }
-                              try {
-                                const filterPayload = {
-                                  startDate: j.startDate || "",
-                                  endDate: j.endDate || "",
-                                  companyName: j.companyName || "",
-                                  partyName: j.partyName || "",
-                                  itemId: j.itemId || "",
-                                  itemName: j.itemName || "",
-                                  voucherType: j.voucherType || "",
-                                };
-                                const data = await fetchGeneratedJournals({
-                                  startDate: filterPayload.startDate || undefined,
-                                  endDate: filterPayload.endDate || undefined,
-                                  companyName: filterPayload.companyName || undefined,
-                                  partyName: filterPayload.partyName || undefined,
-                                  itemId: filterPayload.itemId || undefined,
-                                  itemName: filterPayload.itemName || undefined,
-                                  voucherType: filterPayload.voucherType || undefined,
-                                });
-                                const filtered = filterJournalsBy(data || [], filterPayload);
-                                if (!filtered.length) {
-                                  toast.error("No journals found for the selected filters.");
-                                  return;
-                                }
-                                const grouped = buildGroupedJournalRows(filtered);
-                                openJournalEditor({ rows: grouped, sourceId });
-                              } catch (err) {
-                                toast.error(err?.response?.data?.message || "Failed to load journal for editing.");
-                              }
-                            }}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <div className="flex">
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("journal", j, e.currentTarget)}
+                              className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("journal", j, e.currentTarget)}
+                              className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
                           <button
                             type="button"
                             onClick={() =>
@@ -5053,50 +5252,24 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2 border border-gray-200">{j.name}</td>
                       <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewGeneratedLedger(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="View"
-                          >
-                            <Eye size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadGeneratedLedger(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Download PDF"
-                          >
-                            <Download size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const sourceId = String(j._id || j.id || "");
-                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-                              if (custom.length) {
-                                openLedgerEditor({ rows: custom, sourceId });
-                                return;
-                              }
-                              try {
-                                const data = await fetchLedgerByFilters({
-                                  startDate: j.startDate || "",
-                                  endDate: j.endDate || "",
-                                  companyId: j.companyId || "",
-                                  companyName: j.companyName || "",
-                                  accountId: j.accountId || "",
-                                  partyName: j.partyName || "",
-                                });
-                                openLedgerEditor({ rows: buildLedgerPreviewRows(data), sourceId });
-                              } catch {
-                                toast.error("Failed to load ledger for editing.");
-                              }
-                            }}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <div className="flex">
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("ledger", j, e.currentTarget)}
+                              className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("ledger", j, e.currentTarget)}
+                              className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
                           <button
                             type="button"
                             onClick={() =>
@@ -5334,38 +5507,24 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadGeneratedTrial(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Download PDF"
-                          >
-                            <Download size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-                              if (custom.length) {
-                                openTrialEditor({ rows: custom, sourceId: String(j._id || j.id || "") });
-                                return;
-                              }
-                              try {
-                                const { rows, totals } = await fetchTrialByFilters({
-                                  startDate: j.startDate || "",
-                                  endDate: j.endDate || "",
-                                });
-                                const built = buildTrialLayoutRows({ rows, totals });
-                                openTrialEditor({ rows: built, sourceId: String(j._id || j.id || "") });
-                              } catch {
-                                toast.error("Failed to load trial balance for editing.");
-                              }
-                            }}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <div className="flex">
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("trial", j, e.currentTarget)}
+                              className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("trial", j, e.currentTarget)}
+                              className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
                           <button
                             type="button"
                             onClick={() =>
@@ -5563,42 +5722,24 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadGeneratedPl(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Print / Save PDF"
-                          >
-                            <Printer size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setActiveGeneratedPlId(String(j._id || j.id || ""));
-                              const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-                              if (custom.length) {
-                                openPlEditor({ rows: custom, sourceId: String(j._id || j.id || "") });
-                                return;
-                              }
-                              try {
-                                setLoading(true);
-                                const data = await fetchPlByFilters({
-                                  startDate: j.startDate || "",
-                                  endDate: j.endDate || "",
-                                });
-                                const built = buildPlPreviewRows(data);
-                                openPlEditor({ rows: built.rows, sourceId: String(j._id || j.id || "") });
-                              } catch (err) {
-                                toast.error(err?.response?.data?.message || "Failed to open editor.");
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit layout"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <div className="flex">
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("pl", j, e.currentTarget)}
+                              className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("pl", j, e.currentTarget)}
+                              className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
                           <button
                             type="button"
                             onClick={() => handleDeleteGeneratedPl(j)}
@@ -5618,13 +5759,107 @@ export default function AccountingFinance() {
         </div>
       )}
 
-      {["balance", "receivables", "payables"].includes(activeTab) && (
-        <Reports
-          embedded
-          initialTab={activeTab}
-          allowedTabs={["balance", "receivables", "payables"]}
-        />
+      {activeTab === "cash-flow" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-gray-900">Cash Flow</div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-gray-600">From</span>
+                <input
+                  type="date"
+                  value={cashFlowStart}
+                  onChange={(e) => setCashFlowStart(e.target.value)}
+                  className="text-xs bg-white border border-gray-300 rounded px-2 py-1"
+                />
+                <span className="text-gray-600">To</span>
+                <input
+                  type="date"
+                  value={cashFlowEnd}
+                  onChange={(e) => setCashFlowEnd(e.target.value)}
+                  className="text-xs bg-white border border-gray-300 rounded px-2 py-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => loadCashFlow({ start: cashFlowStart, end: cashFlowEnd })}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                >
+                  <RefreshCcw size={14} /> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+                <div className="text-xs text-gray-600">Cash In</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Rs. {round2(cashFlowTotals.cashIn).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                <div className="text-xs text-gray-600">Cash Out</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Rs. {round2(cashFlowTotals.cashOut).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-xs text-gray-600">Net Cash Flow</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Rs. {round2(cashFlowTotals.netCashFlow).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="text-xs text-gray-600">Cash in Hand</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Rs. {round2(cashFlowTotals.cashInHand).toLocaleString()}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2">Account</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Type</th>
+                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Cash In</th>
+                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Cash Out</th>
+                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Net</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {cashFlowLoading && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        Loading cash flow...
+                      </td>
+                    </tr>
+                  )}
+                  {!cashFlowLoading && cashFlowRows.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No cash flow data for the selected range.
+                      </td>
+                    </tr>
+                  )}
+                  {!cashFlowLoading &&
+                    cashFlowRows.map((r) => (
+                      <tr key={r.accountId}>
+                        <td className="px-3 py-2">{r.accountName || "-"}</td>
+                        <td className="px-3 py-2">{String(r.subType || "").replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2 text-right">{round2(r.cashIn).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right">{round2(r.cashOut).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right">{round2(r.net).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
+
+      {activeTab === "balance" && <Reports embedded initialTab="balance" allowedTabs={["balance"]} />}
 
       {activeTab === "coa" && (
         <div className="space-y-4">
@@ -8172,7 +8407,7 @@ export default function AccountingFinance() {
       {downloadMenu.open && (
         <div
           className="fixed inset-0 z-50"
-          onClick={() => setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } })}
+          onClick={closeDownloadMenu}
         >
           <div
             className="absolute bg-white rounded-lg border border-gray-200 shadow-lg py-1 text-sm"
@@ -8182,9 +8417,14 @@ export default function AccountingFinance() {
             <button
               type="button"
               onClick={() => {
-                const j = downloadMenu.journal;
-                setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
-                handleDownloadGeneratedJournal(j);
+                const item = downloadMenu.item;
+                const type = downloadMenu.type;
+                closeDownloadMenu();
+                if (!item) return;
+                if (type === "journal") handleDownloadGeneratedJournal(item);
+                if (type === "ledger") handleDownloadGeneratedLedger(item);
+                if (type === "trial") handleDownloadGeneratedTrial(item);
+                if (type === "pl") handleDownloadGeneratedPl(item);
               }}
               className="w-full text-left px-3 py-2 hover:bg-gray-50"
             >
@@ -8193,9 +8433,14 @@ export default function AccountingFinance() {
             <button
               type="button"
               onClick={() => {
-                const j = downloadMenu.journal;
-                setDownloadMenu({ open: false, journal: null, anchor: { x: 0, y: 0 } });
-                handleDownloadGeneratedJournalExcel(j);
+                const item = downloadMenu.item;
+                const type = downloadMenu.type;
+                closeDownloadMenu();
+                if (!item) return;
+                if (type === "journal") handleDownloadGeneratedJournalExcel(item);
+                if (type === "ledger") handleDownloadGeneratedLedgerExcel(item);
+                if (type === "trial") handleDownloadGeneratedTrialExcel(item);
+                if (type === "pl") handleDownloadGeneratedPlExcel(item);
               }}
               className="w-full text-left px-3 py-2 hover:bg-gray-50"
             >

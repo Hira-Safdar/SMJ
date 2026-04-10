@@ -4,7 +4,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import {
   Home,
-  Wallet,
   Box,
   BarChart3,
   Settings,
@@ -16,7 +15,6 @@ import {
   Menu,
   Lightbulb,
   ChevronDown,
-  HandCoins,
   ChartNoAxesCombined,
   BriefcaseBusiness,
   ShieldAlert,
@@ -56,8 +54,7 @@ const MENU = [
       { name: "Trial Balance", path: "/accounting-finance?tab=trial" },
       { name: "Profit & Loss", path: "/accounting-finance?tab=pl" },
       { name: "Balance Sheet", path: "/accounting-finance?tab=balance" },
-      { name: "Receivables", path: "/accounting-finance?tab=receivables" },
-      { name: "Payables", path: "/accounting-finance?tab=payables" },
+      { name: "Cash Flow", path: "/accounting-finance?tab=cash-flow" },
     ],
   },
   {
