@@ -1,5 +1,6 @@
 const StockLedger = require("../models/stockLedgerModel");
 const ProductionBatch = require("../models/productionBatchModel");
+const GatePass = require("../models/gatePassModel");
 const ProductType = require("../models/productTypeModel");
 const Company = require("../models/companyModel");
 const AccountingFilterTemplate = require("../models/accountingFilterTemplateModel");
@@ -90,6 +91,28 @@ exports.getStockMovementReport = async (req, res) => {
     if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
 
     const rows = await StockLedger.find(filter).sort({ date: 1, createdAt: 1 }).lean();
+    const batchNoSet = new Set();
+    const gatePassIdSet = new Set();
+    rows.forEach((r) => {
+      const batchMatch = String(r.remarks || "").match(/\bPB-\d{8}-\d{6}\b/i);
+      if (batchMatch?.[0]) batchNoSet.add(batchMatch[0]);
+      if (r.gatePassId) gatePassIdSet.add(String(r.gatePassId));
+    });
+
+    const [batchRows, gatePassRows] = await Promise.all([
+      batchNoSet.size
+        ? ProductionBatch.find({ batchNo: { $in: Array.from(batchNoSet) } })
+            .select("_id batchNo status")
+            .lean()
+        : Promise.resolve([]),
+      gatePassIdSet.size
+        ? GatePass.find({ _id: { $in: Array.from(gatePassIdSet) } })
+            .select("_id gatePassNo type")
+            .lean()
+        : Promise.resolve([]),
+    ]);
+    const batchMap = new Map((batchRows || []).map((b) => [String(b.batchNo || ""), b]));
+    const gatePassMap = new Map((gatePassRows || []).map((g) => [String(g._id), g]));
 
     let balance = 0;
     const data = rows.map((r) => {
@@ -97,7 +120,21 @@ exports.getStockMovementReport = async (req, res) => {
       const stockIn = r.type === "OUT" ? 0 : qty;
       const stockOut = r.type === "OUT" ? qty : 0;
       balance += stockIn - stockOut;
-      const ref = r.gatePassNo || (r.transactionId ? `TX-${String(r.transactionId).slice(-6)}` : "");
+      const batchMatch = String(r.remarks || "").match(/\bPB-\d{8}-\d{6}\b/i);
+      const batchNo = batchMatch?.[0] || "";
+      const gatePass = r.gatePassId ? gatePassMap.get(String(r.gatePassId)) : null;
+      const referenceType = gatePass?.gatePassNo || r.gatePassNo ? "gatepass" : batchNo && batchMap.has(batchNo) ? "production" : "other";
+      const reference = gatePass?.gatePassNo || r.gatePassNo || batchNo || (r.transactionId ? `TX-${String(r.transactionId).slice(-6)}` : "");
+      const referenceTarget =
+        referenceType === "gatepass"
+          ? {
+              path: `/gatepass?tab=${gatePass?.type || (String(reference).startsWith("GPO-") ? "OUT" : "IN")}&highlight=${encodeURIComponent(reference)}`,
+            }
+          : referenceType === "production"
+          ? {
+              path: `/production?batchNo=${encodeURIComponent(batchNo)}`,
+            }
+          : null;
       return {
         _id: r._id,
         date: r.date,
@@ -108,7 +145,9 @@ exports.getStockMovementReport = async (req, res) => {
         stockInKg: Number(stockIn.toFixed(3)),
         stockOutKg: Number(stockOut.toFixed(3)),
         balanceKg: Number(balance.toFixed(3)),
-        reference: ref,
+        reference,
+        referenceType,
+        referenceTarget,
         remarks: r.remarks || "",
       };
     });

@@ -8,6 +8,7 @@ import GatePassOUT from "../components/GatePass/GatePassOUT";
 export default function GatePass() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("IN");
+  const highlightId = searchParams.get("highlight") || "";
   const tabs = [
     { label: "Gate Pass Inward", value: "IN", icon: <LogIn size={16} /> },
     { label: "Gate Pass Outward", value: "OUT", icon: <LogOut size={16} /> },
@@ -48,7 +49,7 @@ export default function GatePass() {
         </div>
       </div>
 
-      {activeTab === "IN" ? <GatePassIN /> : <GatePassOUT />}
+      {activeTab === "IN" ? <GatePassIN highlightId={highlightId} /> : <GatePassOUT highlightId={highlightId} />}
     </div>
   );
 }

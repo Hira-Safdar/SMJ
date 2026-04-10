@@ -1,5 +1,6 @@
 ﻿// src/pages/Production.jsx
 import React, { useEffect, useState, useRef, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../services/api";
 import {
   Factory,
@@ -26,6 +27,8 @@ function todayISODate() {
 }
 
 export default function Production() {
+  const [searchParams] = useSearchParams();
+  const requestedBatchNo = searchParams.get("batchNo") || "";
   const [summary, setSummary] = useState({
     dayShiftOutputWeightKg: 0,
     nightShiftOutputWeightKg: 0,
@@ -136,7 +139,7 @@ export default function Production() {
     loadMeta();
     loadBatches();
     loadMillInfo();
-  }, []);
+  }, [requestedBatchNo]);
 
   useEffect(() => {
     const onProductRefresh = () => loadMeta();
@@ -324,10 +327,25 @@ export default function Production() {
       const compList = completedRes.data.data || [];
       const doneList = compList.filter((b) => b.batchDone);
       const remainingCompleted = compList.filter((b) => !b.batchDone);
-
       setInProcessBatches(inList);
       setCompletedBatches(remainingCompleted);
       setDoneBatches(doneList);
+
+      if (requestedBatchNo) {
+        const match =
+          inList.find((b) => String(b.batchNo || "") === requestedBatchNo) ||
+          remainingCompleted.find((b) => String(b.batchNo || "") === requestedBatchNo) ||
+          doneList.find((b) => String(b.batchNo || "") === requestedBatchNo);
+        if (match) {
+          const tab = inList.some((b) => b._id === match._id)
+            ? "IN_PROCESS"
+            : remainingCompleted.some((b) => b._id === match._id)
+            ? "COMPLETED"
+            : "DONE";
+          await selectBatch(match._id, tab);
+          return;
+        }
+      }
 
       if (!selectedBatchId) {
         const firstIn = inList[0];

@@ -28,8 +28,7 @@ export default function App() {
               <Reports
                 allowedTabs={[
                   "acc-reports",
-                  "stock",
-                  "stock-movement",
+                  "stock-reports",
                   "production-summary",
                   "by-product",
                   "production",

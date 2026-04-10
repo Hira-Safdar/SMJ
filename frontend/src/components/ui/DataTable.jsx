@@ -270,13 +270,13 @@ export default function DataTable({
 
   return (
     <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-lg font-semibold text-gray-900">{title}</div>
-            {showRecordCount && (
-              <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
-            )}
-          </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-lg font-semibold text-gray-900">{title}</div>
+          {showRecordCount && (
+            <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
+          )}
+        </div>
         {hasActiveFilters && (
           <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
             Filters Applied

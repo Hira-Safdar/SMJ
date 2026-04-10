@@ -7,7 +7,7 @@ import AddOptionModal from "../ui/AddOptionModal";
 
 const OTHER_OPTION = "__OTHER__";
 
-export default function GatePassOUT() {
+export default function GatePassOUT({ highlightId = "" }) {
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     truckNo: "",
@@ -1791,6 +1791,8 @@ export default function GatePassOUT() {
         columns={tableColumns}
         data={rows}
         idKey="_id"
+        highlightId={highlightId}
+        highlightKey="gatePassNo"
         searchPlaceholder="Search gate passes..."
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
         exportColumns={exportColumns}

@@ -28,7 +28,7 @@ const createBrandModalState = () => ({
   errors: { value: "", rows: [], rowsGeneral: "", draft: {} },
 });
 
-export default function GatePassIN() {
+export default function GatePassIN({ highlightId = "" }) {
   const [brandOptions, setBrandOptions] = useState([]);
   const [productCatalog, setProductCatalog] = useState([]);
   const [form, setForm] = useState({
@@ -1802,6 +1802,8 @@ export default function GatePassIN() {
         columns={tableColumns}
         data={rows}
         idKey="_id"
+        highlightId={highlightId}
+        highlightKey="gatePassNo"
         searchPlaceholder="Search gate passes..."
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
         exportColumns={exportColumns}
