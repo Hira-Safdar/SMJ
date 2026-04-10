@@ -63,8 +63,7 @@ const MENU = [
     path: "/reports",
     children: [
       { name: "Accounting & Finance Reports", path: "/reports?tab=acc-reports" },
-      { name: "Current Stock", path: "/reports?tab=stock" },
-      { name: "Stock Movement", path: "/reports?tab=stock-movement" },
+      { name: "Stock Reports", path: "/reports?tab=stock-reports" },
       { name: "Production Summary", path: "/reports?tab=production-summary" },
       { name: "By-Product", path: "/reports?tab=by-product" },
       { name: "Production Detail", path: "/reports?tab=production" },

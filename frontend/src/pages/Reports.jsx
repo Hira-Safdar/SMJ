@@ -13,7 +13,6 @@ import {
   BookCopy,
   FileText,
   UserRound,
-  Activity,
   Filter,
   Download,
   X,
@@ -29,8 +28,7 @@ import * as XLSX from "xlsx";
 
 const REPORT_TABS = [
   { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
-  { key: "stock", label: "Current Stock", icon: <Package size={16} /> },
-  { key: "stock-movement", label: "Stock Movement", icon: <Activity size={16} /> },
+  { key: "stock-reports", label: "Stock Reports", icon: <Package size={16} /> },
   { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
   { key: "by-product", label: "By-Product Report", icon: <Boxes size={16} /> },
   { key: "production", label: "Production Detail", icon: <Factory size={16} /> },
@@ -46,7 +44,7 @@ const REPORT_GROUPS = [
   },
   {
     label: "Stock",
-    tabs: ["stock", "stock-movement"],
+    tabs: ["stock-reports"],
   },
   {
     label: "Production",
@@ -115,6 +113,26 @@ const ensureAccountSuffix = (value) => {
   return `${text} A/C`;
 };
 
+const mapStockRows = (payload = {}) => {
+  const production = (payload?.production || []).map((r, idx) => ({
+    id: `p-${idx}`,
+    stockType: "Production",
+    item: r.productTypeName || "-",
+    party: r.companyName || "-",
+    balance: `${num(r.balanceKg)} kg`,
+    valuePKR: num(r.valuePKR),
+    companyId: r.companyId || "",
+    productTypeId: r.productTypeId || "",
+  }));
+  return [...production];
+};
+
+const mapStockMovementRows = (payload = []) =>
+  (payload || []).map((r) => ({
+    id: r._id,
+    ...r,
+  }));
+
 function computeTotalsFromItems({ earnings, deductionsItems }) {
   const e = Array.isArray(earnings) ? earnings : [];
   const d = Array.isArray(deductionsItems) ? deductionsItems : [];
@@ -156,6 +174,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [endDate, setEndDate] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [stockRows, setStockRows] = useState([]);
+  const [stockMovementRows, setStockMovementRows] = useState([]);
 
   // Accounting filters (manual-entry reports)
   const [accCompanies, setAccCompanies] = useState([]);
@@ -261,14 +281,21 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
   useEffect(() => {
     if (embedded) {
-      if (initialTab && visibleTabMap.has(initialTab)) {
-        setActiveTab(initialTab);
+      const normalizedInitialTab =
+        initialTab === "stock" || initialTab === "stock-movement" ? "stock-reports" : initialTab;
+      if (normalizedInitialTab && visibleTabMap.has(normalizedInitialTab)) {
+        setActiveTab(normalizedInitialTab);
       } else if (visibleTabs.length) {
         setActiveTab(visibleTabs[0].key);
       }
       return;
     }
     const tab = searchParams.get("tab");
+    if (tab === "stock" || tab === "stock-movement") {
+      setSearchParams({ tab: "stock-reports" }, { replace: true });
+      setActiveTab("stock-reports");
+      return;
+    }
     if (tab && visibleTabMap.has(tab)) {
       setActiveTab(tab);
     } else if (visibleTabs.length) {
@@ -326,7 +353,14 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       if (accProductName) p.itemName = accProductName;
     }
 
-    const isInventoryReport = ["stock", "stock-movement", "production-summary", "by-product", "production"].includes(activeTab);
+    const isInventoryReport = [
+      "stock-reports",
+      "stock",
+      "stock-movement",
+      "production-summary",
+      "by-product",
+      "production",
+    ].includes(activeTab);
     if (isInventoryReport) {
       if (invCompanyIds.length) p.companyIds = invCompanyIds.join(",");
       if (invProductTypeIds.length) p.productTypeIds = invProductTypeIds.join(",");
@@ -378,29 +412,24 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         );
         return;
       }
+      if (activeTab === "stock-reports") {
+        const [stockRes, movementRes] = await Promise.all([
+          api.get("/reports/stock", params),
+          api.get("/reports/stock-movement", params),
+        ]);
+        setStockRows(mapStockRows(stockRes.data?.data || {}));
+        setStockMovementRows(mapStockMovementRows(movementRes.data?.data || []));
+        setRows([]);
+        return;
+      }
       if (activeTab === "stock") {
         const res = await api.get("/reports/stock", params);
-        const production = (res.data?.data?.production || []).map((r, idx) => ({
-          id: `p-${idx}`,
-          stockType: "Production",
-          item: r.productTypeName || "-",
-          party: r.companyName || "-",
-          balance: `${num(r.balanceKg)} kg`,
-          valuePKR: num(r.valuePKR),
-          companyId: r.companyId || "",
-          productTypeId: r.productTypeId || "",
-        }));
-        setRows([...production]);
+        setRows(mapStockRows(res.data?.data || {}));
         return;
       }
       if (activeTab === "stock-movement") {
         const res = await api.get("/reports/stock-movement", params);
-        setRows(
-          (res.data?.data || []).map((r) => ({
-            id: r._id,
-            ...r,
-          }))
-        );
+        setRows(mapStockMovementRows(res.data?.data || []));
         return;
       }
       if (activeTab === "production") {
@@ -918,6 +947,47 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   }
 
+  const stockColumns = [
+    { key: "item", label: "Product" },
+    { key: "party", label: "Company Name" },
+    { key: "balance", label: "Balance" },
+    { key: "valuePKR", label: "Value (PKR)", render: (v) => fmt(v) },
+    {
+      key: "drill",
+      label: "Details",
+      skipExport: true,
+      render: (_v, row) =>
+        row?.companyId && row?.productTypeId ? (
+          <button
+            type="button"
+            onClick={() =>
+              openStockMovementDrill({
+                companyId: row.companyId,
+                productTypeId: row.productTypeId,
+                title: `${row.party || ""} - ${row.item || ""} (Movement)`,
+              })
+            }
+            className="text-emerald-700 hover:underline text-xs"
+          >
+            View
+          </button>
+        ) : (
+          "-"
+        ),
+    },
+  ];
+
+  const stockMovementColumns = [
+    { key: "date", label: "Date", render: (v) => fmtDate(v) },
+    { key: "companyName", label: "Company Name" },
+    { key: "productTypeName", label: "Product" },
+    { key: "stockInKg", label: "Stock In (kg)" },
+    { key: "stockOutKg", label: "Stock Out (kg)" },
+    { key: "balanceKg", label: "Balance (kg)" },
+    { key: "reference", label: "Reference" },
+    { key: "remarks", label: "Remarks" },
+  ];
+
   const columns = useMemo(() => {
     if (activeTab === "customers") {
       return [
@@ -953,47 +1023,10 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       ];
     }
     if (activeTab === "stock") {
-      return [
-        { key: "item", label: "Product" },
-        { key: "party", label: "Company Name" },
-        { key: "balance", label: "Balance" },
-        { key: "valuePKR", label: "Value (PKR)", render: (v) => fmt(v) },
-        {
-          key: "drill",
-          label: "Details",
-          skipExport: true,
-          render: (_v, row) =>
-            row?.companyId && row?.productTypeId ? (
-              <button
-                type="button"
-                onClick={() =>
-                  openStockMovementDrill({
-                    companyId: row.companyId,
-                    productTypeId: row.productTypeId,
-                    title: `${row.party || ""} - ${row.item || ""} (Movement)`,
-                  })
-                }
-                className="text-emerald-700 hover:underline text-xs"
-              >
-                View
-              </button>
-            ) : (
-              "-"
-            ),
-        },
-      ];
+      return stockColumns;
     }
     if (activeTab === "stock-movement") {
-      return [
-        { key: "date", label: "Date", render: (v) => fmtDate(v) },
-        { key: "companyName", label: "Company Name" },
-        { key: "productTypeName", label: "Product" },
-        { key: "stockInKg", label: "Stock In (kg)" },
-        { key: "stockOutKg", label: "Stock Out (kg)" },
-        { key: "balanceKg", label: "Balance (kg)" },
-        { key: "reference", label: "Reference" },
-        { key: "remarks", label: "Remarks" },
-      ];
+      return stockMovementColumns;
     }
     if (activeTab === "production") {
       return [
@@ -1307,6 +1340,12 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
     if (activeTab === "ledger" && Number(row.balance || 0) < 0) return "text-red-700";
     if (activeTab === "stock-movement" && Number(row.balanceKg || 0) < 0) return "text-red-700";
+    return "";
+  };
+
+  const stockMovementRowClass = (row) => {
+    if (!row) return "";
+    if (Number(row.balanceKg || 0) < 0) return "text-red-700";
     return "";
   };
 
@@ -2386,7 +2425,38 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
             {activeTab !== "ledger" && (
               <>
-                {loading ? (
+                {activeTab === "stock-reports" ? (
+                  loading ? (
+                    <div className="text-sm text-gray-500">Loading stock reports...</div>
+                  ) : (
+                    <div className="space-y-6">
+                      <DataTable
+                        title="Current Stock"
+                        columns={stockColumns}
+                        data={stockRows}
+                        idKey="id"
+                        searchPlaceholder="Search current stock..."
+                        emptyMessage="No current stock found."
+                        rowClassName={reportRowClass}
+                        showExport
+                        showPrint
+                        showRecordCount={!(embedded && activeTab === "ledger")}
+                      />
+                      <DataTable
+                        title="Stock Movement"
+                        columns={stockMovementColumns}
+                        data={stockMovementRows}
+                        idKey="id"
+                        searchPlaceholder="Search stock movement..."
+                        emptyMessage="No stock movement found."
+                        rowClassName={stockMovementRowClass}
+                        showExport
+                        showPrint
+                        showRecordCount={!(embedded && activeTab === "ledger")}
+                      />
+                    </div>
+                  )
+                ) : loading ? (
                   <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
                 ) : (
                   <DataTable
