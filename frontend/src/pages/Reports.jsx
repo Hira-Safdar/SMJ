@@ -16,7 +16,6 @@ import {
   Filter,
   Download,
   X,
-  Pencil,
   Trash2,
   ChevronDown,
 } from "lucide-react";
@@ -199,6 +198,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
   const [generatedTrialList, setGeneratedTrialList] = useState([]);
   const [generatedPlList, setGeneratedPlList] = useState([]);
+  const [generatedBalanceList, setGeneratedBalanceList] = useState([]);
   const [generatedLoading, setGeneratedLoading] = useState(false);
   const [ledgerRecordsOpen, setLedgerRecordsOpen] = useState(false);
 
@@ -672,6 +672,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       loadGeneratedList("journal", setGeneratedJournalList);
       loadGeneratedList("trial", setGeneratedTrialList);
       loadGeneratedList("pl", setGeneratedPlList);
+      loadGeneratedList("balance", setGeneratedBalanceList);
     }
   }, [activeTab]);
 
@@ -2062,6 +2063,102 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   };
 
+  const handleDownloadGeneratedBalance = async (j) => {
+    if (!j) return;
+    try {
+      setGeneratedLoading(true);
+      let finalRows = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (!finalRows.length) {
+        const res = await api.get("/accounting/balance", {
+          params: {
+            range: "custom",
+            startDate: j.startDate || "",
+            endDate: j.endDate || "",
+          },
+        });
+        const b = res.data?.data || {};
+        const assets = Array.isArray(b.assets) ? b.assets : [];
+        const liabilities = Array.isArray(b.liabilities) ? b.liabilities : [];
+        const equity = Array.isArray(b.equity) ? b.equity : [];
+        const totals = b.totals || {};
+        const up = (v) => String(v || "").trim().toUpperCase();
+        const asMoney = (v) => `Rs. ${String(round2(n0(v)).toLocaleString())}`;
+        const left = [];
+        const right = [];
+        const pushSection = (target, heading, list) => {
+          if (!list.length) return;
+          target.push({ label: heading, amount: "", isHeading: true });
+          list.forEach((r) => target.push({ label: String(r.account || "-"), amount: asMoney(r.balance), isHeading: false }));
+        };
+        pushSection(left, "Fixed Assets:", assets.filter((r) => up(r.subType) === "FIXED_ASSET"));
+        pushSection(left, "Current Assets:", assets.filter((r) => !["FIXED_ASSET", "CASH", "BANK"].includes(up(r.subType))));
+        pushSection(left, "Liquid Assets:", assets.filter((r) => ["CASH", "BANK"].includes(up(r.subType))));
+        pushSection(right, "Capital:", equity);
+        pushSection(right, "Fixed Liabilities:", liabilities.filter((r) => up(r.subType) === "LONG_TERM_LIABILITY"));
+        pushSection(right, "Current Liabilities:", liabilities.filter((r) => up(r.subType) !== "LONG_TERM_LIABILITY"));
+        const max = Math.max(left.length, right.length, 1);
+        finalRows = Array.from({ length: max }).map((_, idx) => ({
+          assetLabel: left[idx]?.label || "",
+          assetAmount: left[idx]?.amount || "",
+          liabilityLabel: right[idx]?.label || "",
+          liabilityAmount: right[idx]?.amount || "",
+          assetHeading: !!left[idx]?.isHeading,
+          liabilityHeading: !!right[idx]?.isHeading,
+        }));
+        finalRows.push({
+          assetLabel: "Total Assets",
+          assetAmount: asMoney(totals.totalAssets),
+          liabilityLabel: "Total Liabilities and Capital",
+          liabilityAmount: asMoney(totals.totalLE),
+          isTotal: true,
+        });
+      }
+      if (!finalRows.length) {
+        toast.error("No generated balance sheet data found.");
+        return;
+      }
+      const safeName = String(j.name || "balance_sheet").replace(/[\\/:*?\"<>|]/g, "_");
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const centerX = doc.internal.pageSize.getWidth() / 2;
+      doc.setFontSize(12);
+      doc.text(String(settings.companyName || settings.shortName || "SMJ"), centerX, 16, { align: "center" });
+      doc.setFontSize(11);
+      doc.text("Balance Sheet", centerX, 22, { align: "center" });
+      doc.setFontSize(9);
+      doc.text(`as at ${String(j.endDate || "")}`, centerX, 28, { align: "center" });
+      autoTable(doc, {
+        head: [["Assets", "Rs.", "Liabilities and Capital", "Rs."]],
+        body: finalRows.map((r) => [r.assetLabel || "", r.assetAmount || "", r.liabilityLabel || "", r.liabilityAmount || ""]),
+        startY: 34,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        theme: "grid",
+        columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+        didParseCell: (data) => {
+          if (data.section !== "body") return;
+          const row = finalRows[data.row.index] || {};
+          if (row.assetHeading || row.liabilityHeading || row.isTotal) data.cell.styles.fontStyle = "bold";
+        },
+      });
+      doc.save(`${safeName}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download balance sheet.");
+    } finally {
+      setGeneratedLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedBalance = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedList("balance", setGeneratedBalanceList);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete balance sheet.");
+    }
+  };
+
   const downloadLedgerDrillPdf = () => {
     const debits = (drill.rows || []).filter((r) => Number(r.debit || 0) > 0);
     const credits = (drill.rows || []).filter((r) => Number(r.credit || 0) > 0);
@@ -2149,6 +2246,28 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       {/* Filters panel removed as requested */}
 
       <div className="bg-white rounded-lg shadow-sm p-4">
+        {!embedded && visibleTabs.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-2 border-b border-gray-200 pb-4">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  setSearchParams({ tab: tab.key });
+                }}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  activeTab === tab.key
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-transparent bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
         {activeTab === "stock-reports" && (
           <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2277,16 +2396,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                navigate(`/accounting-finance?tab=journal-report&edit=journal&id=${j._id || j.id}`);
-                              }}
-                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => handleDownloadGeneratedJournal(j)}
                               className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
                               title="Download PDF"
@@ -2344,16 +2453,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                navigate(`/accounting-finance?tab=ledger&edit=ledger&id=${j._id || j.id}`);
-                              }}
-                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => handleDownloadGeneratedLedger(j)}
                               className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
                               title="Download PDF"
@@ -2409,16 +2508,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <td className="px-3 py-2">{j.name}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigate(`/accounting-finance?tab=trial&edit=trial&id=${j._id || j.id}`);
-                              }}
-                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
                             <button
                               type="button"
                               onClick={() => handleDownloadGeneratedTrial(j)}
@@ -2487,6 +2576,63 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             <button
                               type="button"
                               onClick={() => handleDeleteGeneratedPl(j)}
+                              className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-gray-900">Generated Balance Sheets</div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-emerald-50 text-emerald-900">
+                    <tr>
+                      <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                      <th className="text-left font-semibold px-3 py-2">Balance Sheet Name</th>
+                      <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {generatedLoading && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Loading generated balance sheets...
+                        </td>
+                      </tr>
+                    )}
+                    {!generatedLoading && generatedBalanceList.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No generated balance sheets yet.
+                        </td>
+                      </tr>
+                    )}
+                    {generatedBalanceList.map((j, idx) => (
+                      <tr key={j._id || j.id}>
+                        <td className="px-3 py-2">{idx + 1}</td>
+                        <td className="px-3 py-2">{j.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedBalance(j)}
+                              className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download PDF"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedBalance(j)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >

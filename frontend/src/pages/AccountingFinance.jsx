@@ -350,7 +350,13 @@ export default function AccountingFinance() {
   const [journalPreviewMeta, setJournalPreviewMeta] = useState(null);
   const [journalPreviewEntries, setJournalPreviewEntries] = useState([]);
   const [journalInfoDialog, setJournalInfoDialog] = useState({ open: false, message: "" });
-  const [downloadMenu, setDownloadMenu] = useState({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
+  const [downloadMenu, setDownloadMenu] = useState({
+    open: false,
+    type: "",
+    item: null,
+    anchor: { x: 0, y: 0 },
+    placement: "bottom",
+  });
   const [ledgerFilterOpen, setLedgerFilterOpen] = useState(false);
   const [ledgerGenerateOpen, setLedgerGenerateOpen] = useState(false);
   const [ledgerGenerateName, setLedgerGenerateName] = useState("");
@@ -401,6 +407,23 @@ export default function AccountingFinance() {
   const [generatedPlList, setGeneratedPlList] = useState([]);
   const [activeGeneratedPlId, setActiveGeneratedPlId] = useState("");
   const [plEditDialog, setPlEditDialog] = useState({ open: false, rows: [], sourceId: "" });
+
+  const [balanceGenerateOpen, setBalanceGenerateOpen] = useState(false);
+  const [balanceGenerateName, setBalanceGenerateName] = useState("");
+  const [balanceNameTouched, setBalanceNameTouched] = useState(false);
+  const [balanceGenerateStart, setBalanceGenerateStart] = useState("");
+  const [balanceGenerateEnd, setBalanceGenerateEnd] = useState("");
+  const [balancePreviewOpen, setBalancePreviewOpen] = useState(true);
+  const [balancePreviewRows, setBalancePreviewRows] = useState([]);
+  const [balanceTotals, setBalanceTotals] = useState({
+    totalAssets: 0,
+    totalLiabilities: 0,
+    totalEquity: 0,
+    totalLE: 0,
+  });
+  const [generatedBalanceList, setGeneratedBalanceList] = useState([]);
+  const [activeGeneratedBalanceId, setActiveGeneratedBalanceId] = useState("");
+  const [balanceEditDialog, setBalanceEditDialog] = useState({ open: false, rows: [], sourceId: "" });
 
   const [cashFlowStart, setCashFlowStart] = useState("");
   const [cashFlowEnd, setCashFlowEnd] = useState("");
@@ -1218,6 +1241,24 @@ export default function AccountingFinance() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab !== "balance") return;
+    loadGeneratedBalanceList().catch(() => {});
+    const now = new Date();
+    const defaultStartDate = (() => {
+      const y = new Date(now);
+      y.setFullYear(y.getFullYear() - 1);
+      return y.toISOString().slice(0, 10);
+    })();
+    const start = balanceGenerateStart || defaultStartDate;
+    if (!balanceGenerateStart) setBalanceGenerateStart(start);
+    const end = resolveOneYearEnd(start);
+    setBalanceGenerateEnd(end);
+    if (!balanceNameTouched) setBalanceGenerateName(getSuggestedBalanceName({ start }));
+    applyBalanceFiltersOnly({ start }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab !== "cash-flow") return;
     const now = new Date();
     const defaultStart = cashFlowStart || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -1635,20 +1676,35 @@ export default function AccountingFinance() {
     setJournalFilterOpen(false);
     setJournalGenerateOpen(false);
     setJournalPreviewOpen(false);
-    setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
+    setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 }, placement: "bottom" });
     setDeleteDialog({ open: true, id, voucherNo: voucherNo || "" });
   };
 
-  const closeDownloadMenu = () => setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 } });
+  const closeDownloadMenu = () =>
+    setDownloadMenu({ open: false, type: "", item: null, anchor: { x: 0, y: 0 }, placement: "bottom" });
 
   const openDownloadMenu = (type, item, anchorEl) => {
     if (!anchorEl) return;
     const rect = anchorEl.getBoundingClientRect();
+    const menuWidth = 180;
+    const menuHeight = 96;
+    const margin = 12;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const openUp = rect.bottom + menuHeight + margin > viewportHeight;
+    const left = Math.min(
+      Math.max(margin, rect.right - menuWidth),
+      Math.max(margin, viewportWidth - menuWidth - margin)
+    );
+    const top = openUp
+      ? Math.max(margin, rect.top - menuHeight - 4)
+      : Math.max(margin, rect.bottom + 4);
     setDownloadMenu({
       open: true,
       type,
       item,
-      anchor: { x: rect.right, y: rect.bottom + 4 },
+      anchor: { x: left, y: top },
+      placement: openUp ? "top" : "bottom",
     });
   };
 
@@ -2465,6 +2521,324 @@ export default function AccountingFinance() {
     return { rows, totals: { ...totals, grossProfit, profit } };
   };
 
+  const fetchBalanceByFilters = async ({ startDate, endDate }) => {
+    const params = {
+      range: "custom",
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    };
+    const res = await api.get("/accounting/balance", { params });
+    return res.data?.data || {};
+  };
+
+  const buildBalancePreviewRows = (payload) => {
+    const assets = Array.isArray(payload?.assets) ? payload.assets : [];
+    const liabilities = Array.isArray(payload?.liabilities) ? payload.liabilities : [];
+    const equity = Array.isArray(payload?.equity) ? payload.equity : [];
+    const totals = payload?.totals || {};
+    const up = (v) => String(v || "").trim().toUpperCase();
+    const asMoney = (v) => `Rs. ${String(round2(n0(v)).toLocaleString())}`;
+    const asName = (v) => String(v || "").trim();
+
+    const fixedAssets = assets.filter((r) => up(r.subType) === "FIXED_ASSET");
+    const liquidAssets = assets.filter((r) => ["CASH", "BANK"].includes(up(r.subType)));
+    const currentAssets = assets.filter((r) => !["FIXED_ASSET", "CASH", "BANK"].includes(up(r.subType)));
+
+    const capitalItems = equity;
+    const fixedLiabilities = liabilities.filter((r) => up(r.subType) === "LONG_TERM_LIABILITY");
+    const currentLiabilities = liabilities.filter((r) => up(r.subType) !== "LONG_TERM_LIABILITY");
+
+    const left = [];
+    const right = [];
+    const pushSection = (target, heading, list) => {
+      if (!Array.isArray(list) || list.length === 0) return;
+      target.push({ label: heading, amount: "", isHeading: true });
+      list.forEach((r) => {
+        target.push({
+          label: asName(r.account || r.line || "-"),
+          amount: asMoney(r.balance),
+          isHeading: false,
+        });
+      });
+    };
+
+    pushSection(left, "Fixed Assets:", fixedAssets);
+    pushSection(left, "Current Assets:", currentAssets);
+    pushSection(left, "Liquid Assets:", liquidAssets);
+
+    pushSection(right, "Capital:", capitalItems);
+    pushSection(right, "Fixed Liabilities:", fixedLiabilities);
+    pushSection(right, "Current Liabilities:", currentLiabilities);
+
+    const max = Math.max(left.length, right.length, 1);
+    const rows = Array.from({ length: max }).map((_, idx) => {
+      const l = left[idx];
+      const r = right[idx];
+      return {
+        assetLabel: l?.label || "",
+        assetAmount: l?.amount || "",
+        liabilityLabel: r?.label || "",
+        liabilityAmount: r?.amount || "",
+        assetHeading: !!l?.isHeading,
+        liabilityHeading: !!r?.isHeading,
+      };
+    });
+
+    rows.push({
+      assetLabel: "Total Assets",
+      assetAmount: asMoney(totals.totalAssets),
+      liabilityLabel: "Total Liabilities and Capital",
+      liabilityAmount: asMoney(totals.totalLE),
+      isTotal: true,
+    });
+
+    return {
+      rows,
+      totals: {
+        totalAssets: Number(totals.totalAssets || 0),
+        totalLiabilities: Number(totals.totalLiabilities || 0),
+        totalEquity: Number(totals.totalEquity || 0),
+        totalLE: Number(totals.totalLE || 0),
+      },
+    };
+  };
+
+  const getSuggestedBalanceName = (opts = {}) => {
+    const start = opts.start || balanceGenerateStart || "";
+    const end = resolveOneYearEnd(start);
+    const rangeLabel = buildJournalRangeLabel({ range: "custom", start, end });
+    return ["Balance Sheet", rangeLabel].filter(Boolean).join(" - ");
+  };
+
+  const loadGeneratedBalanceList = async () => {
+    const res = await api.get("/accounting/generated-journals", {
+      params: { reportKey: "balance" },
+    });
+    setGeneratedBalanceList(res.data?.data || []);
+  };
+
+  const applyBalanceFiltersOnly = async ({ start } = {}) => {
+    const nextStart = String(start ?? balanceGenerateStart ?? "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+    setBalanceGenerateStart(nextStart);
+    setBalanceGenerateEnd(nextEnd);
+    const payload = await fetchBalanceByFilters({ startDate: nextStart, endDate: nextEnd });
+    const built = buildBalancePreviewRows(payload);
+    setBalancePreviewRows(built.rows);
+    setBalanceTotals(built.totals);
+  };
+
+  const applyBalanceGenerateFilters = async () => {
+    const nextStart = String(balanceGenerateStart || "").trim();
+    const nextEnd = resolveOneYearEnd(nextStart);
+    const payload = await fetchBalanceByFilters({ startDate: nextStart, endDate: nextEnd });
+    const built = buildBalancePreviewRows(payload);
+    if (!built.rows.length) {
+      toast.error("No balance sheet rows found for the selected range.");
+      return;
+    }
+    const finalName = String(balanceGenerateName || "").trim() || getSuggestedBalanceName();
+    await api.post("/accounting/generated-journals", {
+      name: finalName,
+      range: "custom",
+      rangeDate: "",
+      startDate: nextStart,
+      endDate: nextEnd,
+      reportKey: "balance",
+      customLayout: built.rows,
+    });
+    await loadGeneratedBalanceList();
+    setActiveGeneratedBalanceId("");
+    setBalanceGenerateOpen(false);
+    setBalanceGenerateStart(nextStart);
+    setBalanceGenerateEnd(nextEnd);
+    setBalancePreviewRows(built.rows);
+    setBalanceTotals(built.totals);
+    setBalancePreviewOpen(true);
+  };
+
+  const handleViewGeneratedBalance = async (j) => {
+    if (!j) return;
+    setActiveGeneratedBalanceId(String(j._id || j.id || ""));
+    setBalanceGenerateStart(j.startDate || "");
+    setBalanceGenerateEnd(j.endDate || "");
+    setBalanceGenerateName(j.name || "");
+    setBalanceNameTouched(true);
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      setBalancePreviewRows(custom);
+      return;
+    }
+    const payload = await fetchBalanceByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+    const built = buildBalancePreviewRows(payload);
+    setBalancePreviewRows(built.rows);
+    setBalanceTotals(built.totals);
+    setBalancePreviewOpen(true);
+  };
+
+  const handleEditGeneratedBalance = async (j) => {
+    if (!j) return;
+    const sourceId = String(j._id || j.id || "");
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      openBalanceEditor({ rows: custom, sourceId });
+      return;
+    }
+    const payload = await fetchBalanceByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+    const built = buildBalancePreviewRows(payload);
+    openBalanceEditor({ rows: built.rows, sourceId });
+  };
+
+  const handleDownloadGeneratedBalance = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      let finalRows = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (!finalRows.length) {
+        const payload = await fetchBalanceByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        finalRows = buildBalancePreviewRows(payload).rows;
+      }
+      if (!finalRows.length) {
+        toast.error("No balance sheet data found for the selected range.");
+        return;
+      }
+      const safeName = String(j.name || "balance_sheet").replace(/[\\/:*?"<>|]/g, "_");
+      const businessName = String(printSettings?.businessName || printSettings?.companyName || "SMJ").trim() || "SMJ";
+      const asOf = j.endDate || "";
+      const doc = new jsPDF();
+      doc.setFont("times", "normal");
+      const centerX = doc.internal.pageSize.getWidth() / 2;
+      doc.setFontSize(12);
+      doc.text(businessName, centerX, 16, { align: "center" });
+      doc.setFontSize(11);
+      doc.text("Balance Sheet", centerX, 22, { align: "center" });
+      doc.setFontSize(9);
+      doc.text(`as at ${asOf}`, centerX, 28, { align: "center" });
+      autoTable(doc, {
+        head: [["Assets", "Rs.", "Liabilities and Capital", "Rs."]],
+        body: finalRows.map((r) => [r.assetLabel || "", r.assetAmount || "", r.liabilityLabel || "", r.liabilityAmount || ""]),
+        startY: 34,
+        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: "bold" },
+        theme: "grid",
+        columnStyles: { 1: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
+        didParseCell: (data) => {
+          if (data.section !== "body") return;
+          const row = finalRows[data.row.index] || {};
+          if (row.assetHeading || row.liabilityHeading || row.isTotal) data.cell.styles.fontStyle = "bold";
+        },
+      });
+      doc.save(`${safeName}.pdf`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download balance sheet.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadGeneratedBalanceExcel = async (j) => {
+    if (!j) return;
+    try {
+      setLoading(true);
+      let finalRows = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (!finalRows.length) {
+        const payload = await fetchBalanceByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+        finalRows = buildBalancePreviewRows(payload).rows;
+      }
+      if (!finalRows.length) {
+        toast.error("No balance sheet data found for the selected range.");
+        return;
+      }
+      const businessName = String(printSettings?.businessName || printSettings?.companyName || "SMJ").trim() || "SMJ";
+      const ws = XLSX.utils.aoa_to_sheet([
+        [businessName],
+        ["Balance Sheet"],
+        [`as at ${String(j.endDate || "")}`],
+        [],
+        ["Assets", "Rs.", "Liabilities and Capital", "Rs."],
+        ...finalRows.map((r) => [
+          r.assetLabel || "",
+          parseRs(r.assetAmount) ? parseRs(r.assetAmount) : "",
+          r.liabilityLabel || "",
+          parseRs(r.liabilityAmount) ? parseRs(r.liabilityAmount) : "",
+        ]),
+      ]);
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
+      ];
+      ws["!cols"] = [{ wch: 38 }, { wch: 14 }, { wch: 38 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Balance Sheet");
+      XLSX.writeFile(wb, `${String(j.name || "balance_sheet")}.xlsx`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download Excel.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGeneratedBalance = async (j) => {
+    if (!j) return;
+    try {
+      await api.delete(`/accounting/generated-journals/${j._id || j.id}`);
+      loadGeneratedBalanceList().catch(() => {});
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete balance sheet.");
+    }
+  };
+
+  const balanceToEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      assetLabel: String(r.assetLabel || ""),
+      assetAmount: String(r.assetAmount || ""),
+      liabilityLabel: String(r.liabilityLabel || ""),
+      liabilityAmount: String(r.liabilityAmount || ""),
+      assetHeading: !!r.assetHeading,
+      liabilityHeading: !!r.liabilityHeading,
+      isTotal: !!r.isTotal,
+    }));
+  };
+
+  const balanceFromEditable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return list.map((r) => ({
+      assetLabel: String(r.assetLabel || ""),
+      assetAmount: String(r.assetAmount || ""),
+      liabilityLabel: String(r.liabilityLabel || ""),
+      liabilityAmount: String(r.liabilityAmount || ""),
+      assetHeading: !!r.assetHeading,
+      liabilityHeading: !!r.liabilityHeading,
+      isTotal: !!r.isTotal,
+    }));
+  };
+
+  const openBalanceEditor = ({ rows, sourceId = "" }) => {
+    setBalanceEditDialog({ open: true, rows: balanceToEditable(rows), sourceId });
+  };
+
+  const closeBalanceEditor = () => setBalanceEditDialog({ open: false, rows: [], sourceId: "" });
+
+  const applyBalanceEditor = async () => {
+    const nextRows = balanceFromEditable(balanceEditDialog.rows);
+    setBalancePreviewRows(nextRows);
+    closeBalanceEditor();
+    if (balanceEditDialog.sourceId) {
+      try {
+        await api.put(`/accounting/generated-journals/${balanceEditDialog.sourceId}`, {
+          customLayout: nextRows,
+        });
+        await loadGeneratedBalanceList();
+      } catch (err) {
+        toast.error(err?.response?.data?.message || "Failed to save balance sheet edits.");
+      }
+    } else {
+      toast.success("Edits applied for this session.");
+    }
+  };
+
   const loadCashFlow = async (override = {}) => {
     const start = String(override.start ?? cashFlowStart ?? "").trim();
     const end = String(override.end ?? cashFlowEnd ?? "").trim();
@@ -3018,6 +3392,19 @@ export default function AccountingFinance() {
     }
   };
 
+  const handleEditGeneratedPl = async (j) => {
+    if (!j) return;
+    const sourceId = String(j._id || j.id || "");
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      openPlEditor({ rows: custom, sourceId });
+      return;
+    }
+    const data = await fetchPlByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+    const built = buildPlPreviewRows(data);
+    openPlEditor({ rows: built.rows, sourceId });
+  };
+
   const handleViewGeneratedTrial = async (j) => {
     if (!j) return;
     setActiveGeneratedTrialId(String(j._id || j.id || ""));
@@ -3042,6 +3429,18 @@ export default function AccountingFinance() {
       setTrialLayoutRows(buildTrialLayoutRows({ rows, totals }));
     }
     setTrialPreviewOpen(true);
+  };
+
+  const handleEditGeneratedTrial = async (j) => {
+    if (!j) return;
+    const sourceId = String(j._id || j.id || "");
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      openTrialEditor({ rows: custom, sourceId });
+      return;
+    }
+    const { rows, totals } = await fetchTrialByFilters({ startDate: j.startDate || "", endDate: j.endDate || "" });
+    openTrialEditor({ rows: buildTrialLayoutRows({ rows, totals }), sourceId });
   };
 
   const handleDownloadGeneratedTrial = async (j) => {
@@ -3231,6 +3630,25 @@ export default function AccountingFinance() {
     setLedgerPreviewOpen(true);
   };
 
+  const handleEditGeneratedLedger = async (j) => {
+    if (!j) return;
+    const sourceId = String(j._id || j.id || "");
+    const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+    if (custom.length) {
+      openLedgerEditor({ rows: custom, sourceId });
+      return;
+    }
+    const data = await fetchLedgerByFilters({
+      startDate: j.startDate || "",
+      endDate: j.endDate || "",
+      companyId: j.companyId || "",
+      companyName: j.companyName || "",
+      accountId: j.accountId || "",
+      partyName: j.partyName || "",
+    });
+    openLedgerEditor({ rows: buildLedgerPreviewRows(data), sourceId });
+  };
+
   const handleDownloadGeneratedLedger = async (j) => {
     if (!j) return;
     try {
@@ -3405,6 +3823,34 @@ export default function AccountingFinance() {
       });
       setJournalPreviewOpen(false);
       setJournalReportPreviewOpen(true);
+    };
+
+    const handleEditGeneratedJournal = async (j) => {
+      if (!j) return;
+      const sourceId = String(j._id || j.id || "");
+      const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
+      if (custom.length) {
+        openJournalEditor({ rows: custom, sourceId });
+        return;
+      }
+      const data = await loadGeneratedJournalsWithOverride({
+        startDate: j.startDate || undefined,
+        endDate: j.endDate || undefined,
+        companyName: j.companyName || undefined,
+        partyName: j.partyName || undefined,
+        itemId: j.itemId || undefined,
+        voucherType: j.voucherType || undefined,
+      });
+      const filtered = filterJournalsBy(data || [], {
+        startDate: j.startDate || "",
+        endDate: j.endDate || "",
+        companyName: j.companyName || "",
+        partyName: j.partyName || "",
+        itemId: j.itemId || "",
+        itemName: j.itemName || "",
+        voucherType: j.voucherType || "",
+      });
+      openJournalEditor({ rows: buildGroupedJournalRows(filtered), sourceId });
     };
 
     const handleDownloadGeneratedJournal = async (j) => {
@@ -4282,14 +4728,14 @@ export default function AccountingFinance() {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 p-2 flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex flex-wrap gap-2">
+      <div className="bg-white rounded-xl border border-gray-200 p-2 flex items-center gap-2 overflow-x-auto">
+        <div className="flex items-center gap-1.5 min-w-max">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setActiveTab(t.key)}
-              className={`px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2 border ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs inline-flex items-center gap-1.5 border shrink-0 whitespace-nowrap ${
                 activeTab === t.key
                   ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                   : "bg-white border-transparent text-gray-600 hover:bg-gray-50"
@@ -4300,7 +4746,7 @@ export default function AccountingFinance() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0 ml-auto">
           {activeTab === "journal-entry" && null}
         </div>
       </div>
@@ -4897,6 +5343,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGeneratedTrial(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -4957,7 +5411,7 @@ export default function AccountingFinance() {
                 </button>
                 Ledger Preview
               </div>
-              <div className="flex-1 flex justify-center gap-2">
+              <div className="flex-1 flex justify-center gap-2 flex-wrap items-center min-w-0">
                 <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
                   <span className="text-xs text-gray-600">Range</span>
                   <select
@@ -5252,6 +5706,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2 border border-gray-200">{j.name}</td>
                       <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGeneratedLedger(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5507,6 +5969,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGeneratedPl(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5618,6 +6088,14 @@ export default function AccountingFinance() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => openPlEditor({ rows: plPreviewRows })}
+                  disabled={!plPreviewRows.length}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedPlName({ start: plGenerateStart });
                     setPlGenerateName(suggested);
@@ -5627,14 +6105,6 @@ export default function AccountingFinance() {
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
                 >
                   <Printer size={16} /> Generate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openPlEditor({ rows: plPreviewRows })}
-                  disabled={!plPreviewRows.length}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                >
-                  <Pencil size={16} /> Edit
                 </button>
               </div>
             </div>
@@ -5722,6 +6192,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGeneratedBalance(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5859,7 +6337,222 @@ export default function AccountingFinance() {
         </div>
       )}
 
-      {activeTab === "balance" && <Reports embedded initialTab="balance" allowedTabs={["balance"]} />}
+      {activeTab === "balance" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setBalancePreviewOpen((v) => !v)}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={balancePreviewOpen ? "Hide preview" : "Show preview"}
+                >
+                  <ChevronDown
+                    size={16}
+                    className={balancePreviewOpen ? "transform rotate-180 transition-transform" : "transition-transform"}
+                  />
+                </button>
+                Balance Sheet Preview
+              </div>
+
+              <div className="flex-1 flex justify-center">
+                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <span className="text-xs text-gray-600">From</span>
+                  <input
+                    type="date"
+                    value={balanceGenerateStart}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBalanceGenerateStart(v);
+                      const end = resolveOneYearEnd(v);
+                      setBalanceGenerateEnd(end);
+                      if (!balanceNameTouched) setBalanceGenerateName(getSuggestedBalanceName({ start: v }));
+                      applyBalanceFiltersOnly({ start: v }).catch(() => {});
+                    }}
+                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                  />
+                  <span className="text-xs text-gray-600">To</span>
+                  <input
+                    type="date"
+                    value={balanceGenerateEnd}
+                    disabled
+                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    title="Auto calculated (1 year range)"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const y = new Date(now);
+                    y.setFullYear(y.getFullYear() - 1);
+                    const start = y.toISOString().slice(0, 10);
+                    const end = resolveOneYearEnd(start);
+                    setBalanceGenerateStart(start);
+                    setBalanceGenerateEnd(end);
+                    setActiveGeneratedBalanceId("");
+                    setBalanceGenerateName(getSuggestedBalanceName({ start }));
+                    setBalanceNameTouched(false);
+                    applyBalanceFiltersOnly({ start }).catch(() => {});
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  title="Clear Filters"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openBalanceEditor({ rows: balancePreviewRows, sourceId: activeGeneratedBalanceId || "" })}
+                  disabled={!balancePreviewRows.length}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <Pencil size={16} /> Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const suggested = getSuggestedBalanceName({ start: balanceGenerateStart });
+                    setBalanceGenerateName(suggested);
+                    setBalanceNameTouched(false);
+                    setBalanceGenerateOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                >
+                  <Printer size={16} /> Generate
+                </button>
+              </div>
+            </div>
+
+            {balancePreviewOpen && (
+              <div className="rounded-xl border border-gray-200 overflow-x-auto" style={{ fontFamily: '"Times New Roman", serif' }}>
+                <div className="px-3 pt-3 pb-2 text-center">
+                  <div className="text-sm font-bold uppercase text-gray-900">
+                    {String(printSettings?.businessName || printSettings?.companyName || "SMJ").trim() || "SMJ"}
+                  </div>
+                  <div className="text-sm font-semibold text-gray-900">Balance Sheet</div>
+                  <div className="text-xs text-gray-700">as at {balanceGenerateEnd || "-"}</div>
+                </div>
+                <table className="w-full text-sm border border-black table-fixed">
+                  <thead className="bg-white text-gray-900">
+                    <tr>
+                      <th className="text-left font-semibold px-2 py-2 border border-black">Assets</th>
+                      <th className="text-right font-semibold px-2 py-2 w-[140px] border border-black">Rs.</th>
+                      <th className="text-left font-semibold px-2 py-2 border border-black">Liabilities and Capital</th>
+                      <th className="text-right font-semibold px-2 py-2 w-[140px] border border-black">Rs.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {balancePreviewRows.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-4 text-sm text-gray-500 text-center">
+                          Select a range to preview balance sheet.
+                        </td>
+                      </tr>
+                    )}
+                    {balancePreviewRows.map((r, idx) => {
+                      const isTotal = !!r.isTotal;
+                      const cellBg = isTotal ? "bg-emerald-50/60" : "";
+                      const assetWeight = r.assetHeading || isTotal ? "font-semibold" : "";
+                      const liabilityWeight = r.liabilityHeading || isTotal ? "font-semibold" : "";
+                      return (
+                        <tr key={`balance-row-${idx}`}>
+                          <td className={`px-2 py-2 border border-black ${cellBg} ${assetWeight}`}>{r.assetLabel}</td>
+                          <td className={`px-2 py-2 border border-black ${cellBg} ${assetWeight} text-right`}>{r.assetAmount}</td>
+                          <td className={`px-2 py-2 border border-black ${cellBg} ${liabilityWeight}`}>{r.liabilityLabel}</td>
+                          <td className={`px-2 py-2 border border-black ${cellBg} ${liabilityWeight} text-right`}>{r.liabilityAmount}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 space-y-3">
+            <div className="text-sm font-semibold text-emerald-900">Generated Balance Sheets</div>
+            <div className="rounded-xl border border-emerald-100 overflow-x-auto">
+              <table className="min-w-[600px] w-full text-sm border border-emerald-100">
+                <thead className="bg-emerald-50 text-emerald-900">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
+                    <th className="text-left font-semibold px-3 py-2">Name</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[180px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {generatedBalanceList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        No generated balance sheets yet.
+                      </td>
+                    </tr>
+                  )}
+                  {generatedBalanceList.map((j, idx) => (
+                    <tr
+                      key={j._id || j.id}
+                      className={String(activeGeneratedBalanceId) === String(j._id || j.id) ? "bg-emerald-50/60" : ""}
+                    >
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => handleViewGeneratedBalance(j)}
+                          className="text-left text-emerald-700 hover:underline"
+                        >
+                          {j.name}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditGeneratedJournal(j)}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <div className="flex">
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("balance", j, e.currentTarget)}
+                              className="p-2 rounded-l border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => openDownloadMenu("balance", j, e.currentTarget)}
+                              className="p-2 rounded-r border border-gray-300 border-l-0 text-gray-700 hover:bg-gray-50"
+                              title="Download Options"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGeneratedBalance(j)}
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === "coa" && (
         <div className="space-y-4">
@@ -7357,6 +8050,247 @@ export default function AccountingFinance() {
         </div>
       )}
 
+      {balanceGenerateOpen && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Generate Balance Sheet</div>
+              <button
+                type="button"
+                onClick={() => setBalanceGenerateOpen(false)}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Name</label>
+              <input
+                value={balanceGenerateName}
+                onChange={(e) => {
+                  setBalanceGenerateName(e.target.value);
+                  setBalanceNameTouched(true);
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                placeholder="Balance sheet name"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBalanceGenerateOpen(false)}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyBalanceGenerateFilters}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {balanceEditDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-6xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Edit Balance Sheet Layout</div>
+              <button type="button" onClick={closeBalanceEditor} className="p-2 rounded hover:bg-gray-100" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[900px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-800">
+                  <tr>
+                    <th className="text-left font-semibold px-3 py-2 border border-gray-200">Assets</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[140px] border border-gray-200">Asset Rs.</th>
+                    <th className="text-left font-semibold px-3 py-2 border border-gray-200">Liabilities and Capital</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[140px] border border-gray-200">Liability Rs.</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[170px] border border-gray-200">Flags</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[150px] border border-gray-200">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {balanceEditDialog.rows.map((row, idx) => (
+                    <tr key={`balance-edit-${idx}`}>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <input
+                          value={row.assetLabel}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBalanceEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], assetLabel: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full px-2 py-1.5 rounded border border-gray-300"
+                        />
+                      </td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <input
+                          value={row.assetAmount}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBalanceEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], assetAmount: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full px-2 py-1.5 rounded border border-gray-300"
+                        />
+                      </td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <input
+                          value={row.liabilityLabel}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBalanceEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], liabilityLabel: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full px-2 py-1.5 rounded border border-gray-300"
+                        />
+                      </td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <input
+                          value={row.liabilityAmount}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBalanceEditDialog((p) => {
+                              const next = [...p.rows];
+                              next[idx] = { ...next[idx], liabilityAmount: v };
+                              return { ...p, rows: next };
+                            });
+                          }}
+                          className="w-full px-2 py-1.5 rounded border border-gray-300"
+                        />
+                      </td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <div className="flex flex-col gap-1 text-xs">
+                          <label className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={row.assetHeading}
+                              onChange={(e) => {
+                                const v = e.target.checked;
+                                setBalanceEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next[idx] = { ...next[idx], assetHeading: v };
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                            />
+                            Asset heading
+                          </label>
+                          <label className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={row.liabilityHeading}
+                              onChange={(e) => {
+                                const v = e.target.checked;
+                                setBalanceEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next[idx] = { ...next[idx], liabilityHeading: v };
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                            />
+                            Liability heading
+                          </label>
+                          <label className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={row.isTotal}
+                              onChange={(e) => {
+                                const v = e.target.checked;
+                                setBalanceEditDialog((p) => {
+                                  const next = [...p.rows];
+                                  next[idx] = { ...next[idx], isTotal: v };
+                                  return { ...p, rows: next };
+                                });
+                              }}
+                            />
+                            Total row
+                          </label>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 border border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBalanceEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(idx, 0, {
+                                  assetLabel: "",
+                                  assetAmount: "",
+                                  liabilityLabel: "",
+                                  liabilityAmount: "",
+                                  assetHeading: false,
+                                  liabilityHeading: false,
+                                  isTotal: false,
+                                });
+                                return { ...p, rows: next };
+                              });
+                            }}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Add row"
+                          >
+                            <Plus size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBalanceEditDialog((p) => {
+                                const next = [...p.rows];
+                                next.splice(idx, 1);
+                                return { ...p, rows: next.length ? next : p.rows };
+                              });
+                            }}
+                            className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                            title="Delete row"
+                            disabled={balanceEditDialog.rows.length <= 1}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeBalanceEditor}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyBalanceEditor}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+              >
+                Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {plEditDialog.open && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4 max-h-[85vh] overflow-y-auto">
@@ -8411,7 +9345,7 @@ export default function AccountingFinance() {
         >
           <div
             className="absolute bg-white rounded-lg border border-gray-200 shadow-lg py-1 text-sm"
-            style={{ top: downloadMenu.anchor.y, left: downloadMenu.anchor.x, transform: "translateX(-100%)" }}
+            style={{ top: downloadMenu.anchor.y, left: downloadMenu.anchor.x, minWidth: 180 }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -8425,6 +9359,7 @@ export default function AccountingFinance() {
                 if (type === "ledger") handleDownloadGeneratedLedger(item);
                 if (type === "trial") handleDownloadGeneratedTrial(item);
                 if (type === "pl") handleDownloadGeneratedPl(item);
+                if (type === "balance") handleDownloadGeneratedBalance(item);
               }}
               className="w-full text-left px-3 py-2 hover:bg-gray-50"
             >
@@ -8441,6 +9376,7 @@ export default function AccountingFinance() {
                 if (type === "ledger") handleDownloadGeneratedLedgerExcel(item);
                 if (type === "trial") handleDownloadGeneratedTrialExcel(item);
                 if (type === "pl") handleDownloadGeneratedPlExcel(item);
+                if (type === "balance") handleDownloadGeneratedBalanceExcel(item);
               }}
               className="w-full text-left px-3 py-2 hover:bg-gray-50"
             >

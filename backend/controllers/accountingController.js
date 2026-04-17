@@ -709,7 +709,14 @@ exports.getBalanceSheet = async (req, res) => {
       const acc = accountMap.get(String(l.accountId));
       if (!acc) return;
       const k = String(acc._id);
-      const prev = balances.get(k) || { accountId: k, code: acc.code, account: acc.name, type: acc.type, balance: 0 };
+      const prev = balances.get(k) || {
+        accountId: k,
+        code: acc.code,
+        account: acc.name,
+        type: acc.type,
+        subType: acc.subType || "",
+        balance: 0,
+      };
       // Assets: debit-credit. Liab/Equity: credit-debit. Income/Expense excluded from BS.
       let delta = toNum(l.debit) - toNum(l.credit);
       if (acc.type === "LIABILITY" || acc.type === "EQUITY") delta = -delta;
