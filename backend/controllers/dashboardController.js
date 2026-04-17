@@ -134,7 +134,7 @@ const getDashboardStats = async (req, res) => {
       Transaction.find({ type: "SALE" })
         .sort({ date: -1, createdAt: -1 })
         .limit(RECENT_LIMIT)
-        .select("companyName invoiceNo paymentStatus totalAmount partialPaid date")
+        .select("companyName invoiceNo paymentStatus totalAmount partialPaid date createdAt")
         .lean(),
       ProductionBatch.find({ status: "COMPLETED" })
         .sort({ updatedAt: -1 })
@@ -178,7 +178,7 @@ const getDashboardStats = async (req, res) => {
         title: "Payment Received",
         meta: `${t.companyName || "Customer"} · Invoice ${t.invoiceNo}`,
         amount: paid,
-        createdAt: t.date || t.createdAt,
+        createdAt: t.createdAt || t.date,
       });
     });
     recentBatches.forEach((b) => {

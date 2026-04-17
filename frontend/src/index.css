@@ -32,3 +32,98 @@
 .thin-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(16, 185, 129, 0.75);
 }
+
+@keyframes loginScreenEnter {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes loginScreenExit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes loginCardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loginCardExit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.99);
+  }
+}
+
+@keyframes loginOrbFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -16px, 0);
+  }
+}
+
+@keyframes loginSuccessPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.25);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+}
+
+.login-screen-enter {
+  animation: loginScreenEnter 420ms ease-out both;
+}
+
+.login-screen-exit {
+  animation: loginScreenExit 420ms ease-in forwards;
+}
+
+.login-card-enter {
+  animation: loginCardEnter 560ms cubic-bezier(0.18, 0.9, 0.25, 1) both;
+}
+
+.login-card-exit {
+  animation: loginCardExit 320ms ease-in forwards;
+}
+
+.login-orb-float {
+  animation: loginOrbFloat 7s ease-in-out infinite;
+}
+
+.login-orb-float-delayed {
+  animation: loginOrbFloat 8.5s ease-in-out infinite;
+  animation-delay: 0.8s;
+}
+
+.login-success-pulse {
+  animation: loginSuccessPulse 850ms ease-in-out infinite;
+}

@@ -2,7 +2,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast, Toaster } from "react-hot-toast";
-import { Building2, Mail, ShieldCheck } from "lucide-react";
+import { Building2, CheckCircle2, LockKeyhole, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../services/api";
 import Pin4Input from "../components/Pin4Input";
@@ -27,6 +27,8 @@ export default function MainLayout({ children }) {
   const [authLocked, setAuthLocked] = useState(false);
   const [loginPin, setLoginPin] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [loginScreenState, setLoginScreenState] = useState("idle");
+  const loginTimersRef = useRef([]);
   const [forgotDialog, setForgotDialog] = useState({
     open: false,
     channel: "email",
@@ -56,6 +58,34 @@ export default function MainLayout({ children }) {
   };
   const isDashboard = location.pathname === "/";
   const moduleTitle = routeNameMap[location.pathname] || "Module";
+  const isLoginAnimatingOut =
+    loginScreenState === "success" || loginScreenState === "closing";
+
+  const resetLoginTimers = () => {
+    loginTimersRef.current.forEach((id) => window.clearTimeout(id));
+    loginTimersRef.current = [];
+  };
+
+  const scheduleLoginTimer = (callback, delay) => {
+    const id = window.setTimeout(callback, delay);
+    loginTimersRef.current.push(id);
+    return id;
+  };
+
+  const completeLoginWithTransition = () => {
+    resetLoginTimers();
+    setLoginScreenState("success");
+    toast.success("Logged in");
+    scheduleLoginTimer(() => setLoginScreenState("closing"), 520);
+    scheduleLoginTimer(() => {
+      localStorage.setItem("smj_logged_in", "true");
+      setAuthLocked(false);
+      setLoginPin("");
+      setLoginError("");
+      setLoginScreenState("idle");
+      resetLoginTimers();
+    }, 980);
+  };
 
   const getDraftStorageKey = (pathname, search) =>
     `smj_draft_${pathname}${search || ""}`;
@@ -176,6 +206,23 @@ export default function MainLayout({ children }) {
     loadSettings();
   }, []);
 
+  useEffect(
+    () => () => {
+      resetLoginTimers();
+    },
+    []
+  );
+
+  useEffect(() => {
+    resetLoginTimers();
+    if (authLocked) {
+      setLoginScreenState("opening");
+      scheduleLoginTimer(() => setLoginScreenState("ready"), 260);
+      return;
+    }
+    setLoginScreenState("idle");
+  }, [authLocked]);
+
   useEffect(() => {
     const onLogout = () => {
       localStorage.setItem("smj_logged_in", "false");
@@ -256,11 +303,7 @@ export default function MainLayout({ children }) {
       return;
     }
     if (enteredPin === expectedPin) {
-      localStorage.setItem("smj_logged_in", "true");
-      setAuthLocked(false);
-      setLoginPin("");
-      setLoginError("");
-      toast.success("Logged in");
+      completeLoginWithTransition();
     } else {
       setLoginError("PIN is incorrect");
       toast.error("Invalid PIN");
@@ -412,8 +455,10 @@ export default function MainLayout({ children }) {
   }, [location.pathname, location.search]);
 
   return (
-    <div className="flex min-h-screen bg-gray-50 overflow-hidden">
+    <div className="min-h-screen bg-gray-50 overflow-hidden">
       <Toaster position="top-center" />
+      {!authLocked && (
+        <>
       {/* Sidebar */}
       <Sidebar
         isOpen={isOpen}
@@ -455,78 +500,137 @@ export default function MainLayout({ children }) {
           <div>{children}</div>
         </main>
       </div>
+        </>
+      )}
 
       {authLocked && (
-        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
-            <div className="border-b border-gray-100 px-5 py-5">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 overflow-hidden">
-                  {settings.logoUrl ? (
-                    <img src={settings.logoUrl} alt="SMJ logo" className="h-9 w-9 object-contain" />
-                  ) : (
-                    <Building2 size={20} />
-                  )}
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-emerald-700">Login</div>
-                  <h3 className="mt-1 text-xl font-semibold text-gray-900">
-                    {settings.companyName || settings.shortName || "SMJ"}
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Enter your 4-digit PIN to continue to the workspace.
-                  </p>
+        <div
+          className={[
+            "relative z-[200] flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-8",
+            loginScreenState === "opening" ? "login-screen-enter" : "",
+            loginScreenState === "closing" ? "login-screen-exit" : "",
+          ].join(" ")}
+        >
+          <div className="pointer-events-none absolute left-1/2 top-[-8rem] h-80 w-80 -translate-x-1/2 rounded-full bg-emerald-500/30 blur-3xl login-orb-float" />
+          <div className="pointer-events-none absolute right-[-6rem] top-[20%] h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl login-orb-float-delayed" />
+          <div className="pointer-events-none absolute bottom-[-8rem] left-[-6rem] h-80 w-80 rounded-full bg-teal-400/20 blur-3xl login-orb-float" />
+
+          <div
+            className={[
+              "relative z-10 w-full max-w-5xl overflow-hidden rounded-[2rem] border border-emerald-100/40 bg-white/95 shadow-2xl backdrop-blur",
+              loginScreenState === "opening" ? "login-card-enter" : "",
+              loginScreenState === "closing" ? "login-card-exit" : "",
+            ].join(" ")}
+          >
+            <div className="grid md:grid-cols-[1.1fr_0.9fr]">
+              <div className="relative overflow-hidden bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-700 p-8 text-white md:p-10">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.35),transparent_60%)]" />
+                <div className="relative flex h-full flex-col justify-between gap-8">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-white ring-1 ring-white/40">
+                      {settings.logoUrl ? (
+                        <img src={settings.logoUrl} alt="SMJ logo" className="h-10 w-10 object-contain" />
+                      ) : (
+                        <Building2 size={24} />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.26em] text-emerald-100">
+                        Workspace Access
+                      </p>
+                      <h2 className="mt-1 text-2xl font-semibold">
+                        {settings.companyName || settings.shortName || "SMJ"}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <p className="max-w-md text-lg leading-relaxed text-emerald-50">
+                      Secure access to dashboard, gate passes, production and accounting in one place.
+                    </p>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-sm text-emerald-50 ring-1 ring-white/35">
+                      <Sparkles size={14} />
+                      Theme synced with your production workspace
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="p-5">
-              <div className="space-y-3">
-              <Pin4Input
-                value={loginPin}
-                onChange={(v) => {
-                  setLoginPin(v.slice(0, 4));
-                  if (loginError) setLoginError("");
-                }}
-                onComplete={(v) => handleLogin(v)}
-                error={!!loginError}
-              />
-              {loginError && (
-                <div className="text-xs text-red-600 text-center">{loginError}</div>
-              )}
-              {!settings.loginPassword && (
-                <p className="text-xs text-amber-600 text-center">
-                  No login PIN set. Default PIN: 0000.
+              <div className="bg-white p-8 md:p-10">
+                <div
+                  className={[
+                    "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
+                    isLoginAnimatingOut
+                      ? "bg-emerald-100 text-emerald-700 login-success-pulse"
+                      : "bg-emerald-50 text-emerald-700",
+                  ].join(" ")}
+                >
+                  {isLoginAnimatingOut ? <CheckCircle2 size={14} /> : <LockKeyhole size={14} />}
+                  {isLoginAnimatingOut ? "Access Granted" : "Secure Login"}
+                </div>
+
+                <h3 className="mt-4 text-3xl font-semibold text-gray-900">Welcome back</h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  {isLoginAnimatingOut
+                    ? "Opening your workspace..."
+                    : "Enter your 4-digit PIN to continue."}
                 </p>
-              )}
-                <div className="grid grid-cols-[1fr_auto] gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleLogin()}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-700"
-                  >
-                    <ShieldCheck size={16} />
-                    Enter Workspace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForgotDialog({
-                        open: true,
-                        channel: "email",
-                        otp: "",
-                        newPin: "",
-                        confirmPin: "",
-                        expiresIn: 0,
-                        sending: false,
-                        resetting: false,
-                        error: "",
-                      })
-                    }
-                    className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
-                  >
-                    Forgot PIN
-                  </button>
+
+                <div className="mt-7 space-y-4">
+                  <Pin4Input
+                    value={loginPin}
+                    onChange={(v) => {
+                      if (isLoginAnimatingOut) return;
+                      setLoginPin(v.slice(0, 4));
+                      if (loginError) setLoginError("");
+                    }}
+                    onComplete={(v) => {
+                      if (isLoginAnimatingOut) return;
+                      handleLogin(v);
+                    }}
+                    error={!!loginError}
+                    disabled={isLoginAnimatingOut}
+                    inputClassName="h-14 w-14 rounded-xl"
+                  />
+                  {loginError && (
+                    <div className="text-center text-xs text-red-600">{loginError}</div>
+                  )}
+                  {!settings.loginPassword && (
+                    <p className="text-center text-xs text-amber-600">
+                      No login PIN set. Default PIN: 0000.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+                    <button
+                      type="button"
+                      onClick={() => handleLogin()}
+                      disabled={isLoginAnimatingOut}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isLoginAnimatingOut ? <CheckCircle2 size={16} /> : <ShieldCheck size={16} />}
+                      {isLoginAnimatingOut ? "Entering..." : "Enter Workspace"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForgotDialog({
+                          open: true,
+                          channel: "email",
+                          otp: "",
+                          newPin: "",
+                          confirmPin: "",
+                          expiresIn: 0,
+                          sending: false,
+                          resetting: false,
+                          error: "",
+                        })
+                      }
+                      disabled={isLoginAnimatingOut}
+                      className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Forgot PIN
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -684,10 +788,7 @@ export default function MainLayout({ children }) {
                         adminPin: forgotDialog.newPin,
                         loginPassword: forgotDialog.newPin,
                       }));
-                      localStorage.setItem("smj_logged_in", "true");
-                      setAuthLocked(false);
-                      setLoginPin("");
-                      setLoginError("");
+                      completeLoginWithTransition();
                       resetForgotDialog();
                       window.dispatchEvent(new Event("smj-settings-updated"));
                       toast.success("PIN reset successful");

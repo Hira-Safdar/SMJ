@@ -125,6 +125,20 @@ export default function Dashboard() {
     return "red";
   };
 
+  const formatActivityDateTime = (value) => {
+    if (!value) return "Date/time unavailable";
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return "Date/time unavailable";
+    return dt.toLocaleString("en-PK", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
   const productionDonut =
     stockBreakdown.production.length > 0
       ? stockBreakdown.production
@@ -289,8 +303,13 @@ export default function Dashboard() {
                     <div className="text-xs text-gray-400 mt-1">{a.meta}</div>
                   </div>
                 </div>
-                <div className="text-sm font-semibold text-gray-800">
-                  {a.amount ? `Rs. ${Number(a.amount || 0).toLocaleString()}` : "-"}
+                <div className="text-right">
+                  <div className="text-sm font-semibold text-gray-800">
+                    {a.amount ? `Rs. ${Number(a.amount || 0).toLocaleString()}` : "-"}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Generated: {formatActivityDateTime(a.createdAt)}
+                  </div>
                 </div>
               </div>
             ))}
