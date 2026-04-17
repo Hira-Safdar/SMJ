@@ -174,6 +174,34 @@ export default function SystemSettings() {
   const fullRestoreInputRef = useRef(null);
   const moduleRestoreInputRefs = useRef({});
   const savedGeneralEmailRef = useRef("");
+  const pinSectionRef = useRef(null);
+  const newPinInputRef = useRef(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState("");
+
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreviewUrl("");
+      return undefined;
+    }
+    const preview = URL.createObjectURL(logoFile);
+    setLogoPreviewUrl(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [logoFile]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("focus") !== "set-pin") return;
+    setActiveTab("general");
+    const timer = window.setTimeout(() => {
+      pinSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      newPinInputRef.current?.focus();
+    }, 120);
+    params.delete("focus");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const updateModuleProgress = (key, patch) => {
     setModuleProgress((prev) => ({
@@ -1159,15 +1187,8 @@ export default function SystemSettings() {
         {/* GENERAL TAB */}
         {activeTab === "general" && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-teal-50 p-4">
-              <div className="text-lg font-semibold text-gray-900">General Settings</div>
-              <p className="mt-1 text-sm text-gray-600">
-                Manage the main business identity shown across reports, invoices, and the app header.
-              </p>
-            </div>
-
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
+              <div ref={pinSectionRef} className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">
                     <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700 mb-2">Company Name</label>
@@ -1228,15 +1249,15 @@ export default function SystemSettings() {
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
                 <div className="text-sm font-semibold text-gray-900">Logo & Branding</div>
                 <div className="mt-4 rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/50 p-4 text-center">
-                  {settings.logoUrl ? (
+                  {logoPreviewUrl || settings.logoUrl ? (
                     <img
-                      src={settings.logoUrl}
+                      src={logoPreviewUrl || settings.logoUrl}
                       alt="logo"
                       className="mx-auto h-28 object-contain"
                     />
                   ) : (
                     <div className="h-28 w-full flex items-center justify-center text-sm text-gray-400">
-                      No logo configured
+                      Upload logo here
                     </div>
                   )}
                 </div>
@@ -1264,14 +1285,7 @@ export default function SystemSettings() {
               </div>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-              {generalSaveMsg ? (
-                <div className={`text-sm ${generalSaveMsg === "Saved" ? "text-emerald-700" : "text-rose-600"}`}>
-                  {generalSaveMsg}
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500">Save changes to update company details across the app.</div>
-              )}
+            <div className="flex justify-end">
               <button
                 onClick={handleSaveGeneral}
                 disabled={loading}
@@ -1347,6 +1361,7 @@ export default function SystemSettings() {
                 )}
                 <div className="relative">
                   <input
+                    ref={newPinInputRef}
                     type={showNewPin ? "text" : "password"}
                     inputMode="numeric"
                     maxLength="4"
@@ -1892,120 +1907,122 @@ export default function SystemSettings() {
       )}
 
       {otpDialog.open && (
-        <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
-            <h3 className="text-lg font-semibold text-gray-900">OTP Verification</h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Choose a delivery channel, enter the code, then set a new 4-digit PIN.
-            </p>
-            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-              <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Email</div>
-              <div className="mt-1 text-gray-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+        <div className="fixed inset-0 z-[120] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 shadow-2xl">
+            <div className="rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.14em] text-emerald-700">Forgot PIN</div>
+              <h3 className="mt-1 text-xl font-semibold text-emerald-900">Reset Login PIN</h3>
+              <p className="mt-1 text-sm text-emerald-700/80">Send OTP, then set your new 4-digit PIN.</p>
             </div>
 
-            {otpDialog.expiresIn > 0 && (
-              <div className="mt-3 text-xs text-gray-500">
-                Code expires in <span className="font-medium text-gray-700">{formatCountdown(otpDialog.expiresIn)}</span>
+            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">Email</div>
+              <div className="mt-1 text-sm font-medium text-emerald-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+              {otpDialog.expiresIn > 0 && (
+                <div className="mt-1 text-xs text-emerald-700">OTP expires in {formatCountdown(otpDialog.expiresIn)}</div>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-900">Enter OTP</div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setOtpDialog((prev) => ({ ...prev, sending: true, error: "" }));
+                    try {
+                      const res = await api.post("/settings/otp/send");
+                      if (res.data?.success) {
+                        toast.success("OTP sent to email");
+                        setOtpResendIn(OTP_RESEND_SECONDS);
+                        const expiresAt = new Date(res.data?.data?.expiresAt || Date.now() + 5 * 60 * 1000).getTime();
+                        const expiresIn = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+                        setOtpDialog((prev) => ({ ...prev, sent: true, sending: false, expiresIn }));
+                      } else {
+                        setOtpDialog((prev) => ({
+                          ...prev,
+                          sending: false,
+                          error: res.data?.message || "Failed to send OTP",
+                        }));
+                      }
+                    } catch (err) {
+                      setOtpDialog((prev) => ({
+                        ...prev,
+                        sending: false,
+                        error: err.response?.data?.message || "Failed to send OTP",
+                      }));
+                    }
+                  }}
+                  disabled={otpDialog.sending || otpResendIn > 0 || !canSendEmailOtp}
+                  className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {otpDialog.sending
+                    ? "Sending..."
+                    : otpResendIn > 0
+                    ? `Resend ${formatCountdown(otpResendIn)}`
+                    : "Send OTP"}
+                </button>
               </div>
-            )}
-            <div className="mt-4">
-              <Pin4Input
-                value={otpDialog.otp}
-                onChange={(v) =>
+              <div className="mt-3">
+                <Pin4Input
+                  value={otpDialog.otp}
+                  onChange={(v) =>
+                    setOtpDialog((prev) => ({
+                      ...prev,
+                      otp: v.slice(0, 4),
+                      error: "",
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength="4"
+                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                placeholder="New PIN"
+                value={otpDialog.newPin}
+                onChange={(e) =>
                   setOtpDialog((prev) => ({
                     ...prev,
-                    otp: v.slice(0, 4),
+                    newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
                     error: "",
                   }))
                 }
               />
-              {otpDialog.error && (
-                <div className="text-xs text-red-600 text-center mt-2">{otpDialog.error}</div>
-              )}
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength="4"
+                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                placeholder="Confirm PIN"
+                value={otpDialog.confirmPin}
+                onChange={(e) =>
+                  setOtpDialog((prev) => ({
+                    ...prev,
+                    confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                    error: "",
+                  }))
+                }
+              />
             </div>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="relative">
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength="4"
-                  className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  placeholder="New PIN"
-                  value={otpDialog.newPin}
-                  onChange={(e) =>
-                    setOtpDialog((prev) => ({
-                      ...prev,
-                      newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
-                      error: "",
-                    }))
-                  }
-                />
+
+            {otpDialog.error && (
+              <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {otpDialog.error}
               </div>
-              <div className="relative">
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength="4"
-                  className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  placeholder="Confirm PIN"
-                  value={otpDialog.confirmPin}
-                  onChange={(e) =>
-                    setOtpDialog((prev) => ({
-                      ...prev,
-                      confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
-                      error: "",
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="mt-4 flex gap-2 justify-end">
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={resetOtpDialog}
-                className="px-3 py-2 rounded border border-gray-300 text-sm"
+                className="rounded-2xl border border-gray-300 px-4 py-2.5 text-sm text-gray-700"
               >
                 Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setOtpDialog((prev) => ({ ...prev, sending: true, error: "" }));
-                  try {
-                    const res = await api.post("/settings/otp/send");
-                    if (res.data?.success) {
-                      toast.success("OTP sent to email");
-                      setOtpResendIn(OTP_RESEND_SECONDS);
-                      const expiresAt = new Date(res.data?.data?.expiresAt || Date.now() + 5 * 60 * 1000).getTime();
-                      const expiresIn = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-                      setOtpDialog((prev) => ({ ...prev, sent: true, sending: false, expiresIn }));
-                    } else {
-                      setOtpDialog((prev) => ({
-                        ...prev,
-                        sending: false,
-                        error: res.data?.message || "Failed to send OTP",
-                      }));
-                    }
-                  } catch (err) {
-                    setOtpDialog((prev) => ({
-                      ...prev,
-                      sending: false,
-                      error: err.response?.data?.message || "Failed to send OTP",
-                    }));
-                  }
-                }}
-                disabled={
-                  otpDialog.sending ||
-                  otpResendIn > 0 ||
-                  !canSendEmailOtp
-                }
-                className="px-3 py-2 rounded border border-gray-300 text-sm"
-              >
-                {otpDialog.sending
-                  ? "Sending..."
-                  : otpResendIn > 0
-                  ? `Resend in ${formatCountdown(otpResendIn)}`
-                  : "Send via Email"}
               </button>
               <button
                 type="button"
@@ -2055,7 +2072,7 @@ export default function SystemSettings() {
                   }
                 }}
                 disabled={otpDialog.resetting}
-                className="px-3 py-2 rounded bg-emerald-600 text-white text-sm disabled:opacity-60"
+                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
               >
                 {otpDialog.resetting ? "Resetting..." : "Reset PIN"}
               </button>

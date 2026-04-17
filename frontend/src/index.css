@@ -127,3 +127,83 @@
 .login-success-pulse {
   animation: loginSuccessPulse 850ms ease-in-out infinite;
 }
+
+@keyframes loginLiquidFloat {
+  0% {
+    transform: translateX(-18%) translateY(10%) rotate(0deg);
+  }
+  50% {
+    transform: translateX(18%) translateY(-10%) rotate(4deg);
+  }
+  100% {
+    transform: translateX(-18%) translateY(10%) rotate(0deg);
+  }
+}
+
+.liquid-login-btn {
+  position: relative;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.liquid-login-btn::before {
+  content: "";
+  position: absolute;
+  inset: -35% -15%;
+  background: radial-gradient(circle at 30% 40%, rgba(16, 185, 129, 0.55), rgba(5, 150, 105, 0.92) 65%);
+  border-radius: 999px;
+  animation: loginLiquidFloat 4.6s ease-in-out infinite;
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.liquid-login-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(167, 243, 208, 0.95), rgba(110, 231, 183, 0.95));
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 900ms ease-in-out;
+}
+
+.liquid-login-btn.liquid-login-btn-filling::before {
+  opacity: 0.75;
+}
+
+.liquid-login-btn.liquid-login-btn-filling::after {
+  transform: scaleX(1);
+}
+
+@keyframes loginBubbleRandomA {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  30% { transform: translate3d(10px, -16px, 0) scale(1.08); }
+  60% { transform: translate3d(-8px, -28px, 0) scale(0.94); }
+}
+
+@keyframes loginBubbleRandomB {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  25% { transform: translate3d(-14px, -12px, 0) scale(1.04); }
+  70% { transform: translate3d(8px, -24px, 0) scale(0.92); }
+}
+
+@keyframes loginBubbleRandomC {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  35% { transform: translate3d(12px, -10px, 0) scale(0.96); }
+  65% { transform: translate3d(-10px, -30px, 0) scale(1.1); }
+}
+
+.login-bubble-random-a {
+  animation: loginBubbleRandomA 5.7s ease-in-out infinite;
+  animation-delay: 0.4s;
+}
+
+.login-bubble-random-b {
+  animation: loginBubbleRandomB 6.4s ease-in-out infinite;
+  animation-delay: 1.1s;
+}
+
+.login-bubble-random-c {
+  animation: loginBubbleRandomC 7.1s ease-in-out infinite;
+  animation-delay: 0.8s;
+}

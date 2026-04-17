@@ -2,13 +2,22 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast, Toaster } from "react-hot-toast";
-import { Building2, CheckCircle2, LockKeyhole, Mail, ShieldCheck, Sparkles } from "lucide-react";
+import { Building2, CheckCircle2, Leaf, LockKeyhole, Mail, ShieldCheck, Sprout, Wheat } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import api from "../services/api";
 import Pin4Input from "../components/Pin4Input";
 
 export default function MainLayout({ children }) {
   const OTP_RESEND_SECONDS = 45;
+  const getDefaultForgotDialog = () => ({
+    open: false,
+    channel: "email",
+    otp: "",
+    expiresIn: 0,
+    sending: false,
+    verifying: false,
+    error: "",
+  });
   const [isOpen, setIsOpen] = useState(false);
   const toggleSidebar = () => setIsOpen((prev) => !prev);
   const location = useLocation();
@@ -29,15 +38,13 @@ export default function MainLayout({ children }) {
   const [loginError, setLoginError] = useState("");
   const [loginScreenState, setLoginScreenState] = useState("idle");
   const loginTimersRef = useRef([]);
-  const [forgotDialog, setForgotDialog] = useState({
+  const [forgotDialog, setForgotDialog] = useState(getDefaultForgotDialog());
+  const [postLoginPinDialog, setPostLoginPinDialog] = useState({
     open: false,
-    channel: "email",
     otp: "",
     newPin: "",
     confirmPin: "",
-    expiresIn: 0,
-    sending: false,
-    resetting: false,
+    saving: false,
     error: "",
   });
   const [forgotResendIn, setForgotResendIn] = useState(0);
@@ -278,6 +285,9 @@ export default function MainLayout({ children }) {
       if (e.key === "Escape") {
         window.dispatchEvent(new Event("smj-esc"));
         if (forgotDialog.open) resetForgotDialog();
+        if (postLoginPinDialog.open) {
+          setPostLoginPinDialog((prev) => ({ ...prev, open: false, error: "" }));
+        }
       }
     };
     window.addEventListener("smj-logout", onLogout);
@@ -288,7 +298,7 @@ export default function MainLayout({ children }) {
       window.removeEventListener("smj-settings-updated", onSettingsUpdate);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [navigate, forgotDialog.open]);
+  }, [navigate, forgotDialog.open, postLoginPinDialog.open]);
 
   const handleLogin = (pinOverride) => {
     const expectedPin = String(settings.loginPassword || settings.adminPin || "0000")
@@ -299,14 +309,12 @@ export default function MainLayout({ children }) {
       .slice(0, 4);
     if (enteredPin.length !== 4) {
       setLoginError("Enter 4-digit PIN");
-      toast.error("Enter 4-digit PIN");
       return;
     }
     if (enteredPin === expectedPin) {
       completeLoginWithTransition();
     } else {
       setLoginError("PIN is incorrect");
-      toast.error("Invalid PIN");
     }
   };
 
@@ -331,17 +339,7 @@ export default function MainLayout({ children }) {
   }, [forgotDialog.expiresIn]);
 
   const resetForgotDialog = () => {
-    setForgotDialog({
-      open: false,
-      channel: "email",
-      otp: "",
-      newPin: "",
-      confirmPin: "",
-      expiresIn: 0,
-      sending: false,
-      resetting: false,
-      error: "",
-    });
+    setForgotDialog(getDefaultForgotDialog());
     setForgotResendIn(0);
   };
 
@@ -506,77 +504,87 @@ export default function MainLayout({ children }) {
       {authLocked && (
         <div
           className={[
-            "relative z-[200] flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-8",
+            "relative z-[200] flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-[#bfece2] via-[#a7dfd3] to-[#8dd2c5] px-4 md:px-8",
             loginScreenState === "opening" ? "login-screen-enter" : "",
             loginScreenState === "closing" ? "login-screen-exit" : "",
           ].join(" ")}
         >
-          <div className="pointer-events-none absolute left-1/2 top-[-8rem] h-80 w-80 -translate-x-1/2 rounded-full bg-emerald-500/30 blur-3xl login-orb-float" />
-          <div className="pointer-events-none absolute right-[-6rem] top-[20%] h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl login-orb-float-delayed" />
-          <div className="pointer-events-none absolute bottom-[-8rem] left-[-6rem] h-80 w-80 rounded-full bg-teal-400/20 blur-3xl login-orb-float" />
+          <div className="pointer-events-none absolute -left-16 top-24 h-72 w-72 rounded-full bg-emerald-200/15 blur-3xl login-orb-float" />
+          <div className="pointer-events-none absolute right-[-6rem] top-10 h-80 w-80 rounded-full bg-teal-200/10 blur-3xl login-orb-float-delayed" />
+          <div className="pointer-events-none absolute bottom-[-10rem] left-[35%] h-96 w-96 rounded-full bg-emerald-400/15 blur-3xl login-orb-float" />
 
           <div
             className={[
-              "relative z-10 w-full max-w-5xl overflow-hidden rounded-[2rem] border border-emerald-100/40 bg-white/95 shadow-2xl backdrop-blur",
+              "relative z-10 w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-[2rem] bg-[#3f8071]/95 shadow-2xl ring-1 ring-emerald-50/25",
               loginScreenState === "opening" ? "login-card-enter" : "",
               loginScreenState === "closing" ? "login-card-exit" : "",
             ].join(" ")}
           >
-            <div className="grid md:grid-cols-[1.1fr_0.9fr]">
-              <div className="relative overflow-hidden bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-700 p-8 text-white md:p-10">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.35),transparent_60%)]" />
-                <div className="relative flex h-full flex-col justify-between gap-8">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-white ring-1 ring-white/40">
-                      {settings.logoUrl ? (
-                        <img src={settings.logoUrl} alt="SMJ logo" className="h-10 w-10 object-contain" />
-                      ) : (
-                        <Building2 size={24} />
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.26em] text-emerald-100">
-                        Workspace Access
-                      </p>
-                      <h2 className="mt-1 text-2xl font-semibold">
-                        {settings.companyName || settings.shortName || "SMJ"}
-                      </h2>
-                    </div>
+            <div className="grid md:grid-cols-[1fr_0.92fr]">
+              <div className="relative hidden overflow-hidden bg-[#f5fbf9] md:flex md:min-h-[560px]">
+                <div className="absolute inset-y-0 right-[-10%] w-[56%] rounded-l-[42%] bg-[#f5fbf9]" />
+                <div className="relative z-10 flex w-full flex-col items-center p-10 text-center">
+                  <div className="mt-7 text-2xl font-bold uppercase tracking-wide text-emerald-900/90 md:mt-10 md:text-3xl">
+                    {settings.companyName || settings.shortName || "SMJ Rice Mills"}
                   </div>
-
-                  <div className="space-y-4">
-                    <p className="max-w-md text-lg leading-relaxed text-emerald-50">
-                      Secure access to dashboard, gate passes, production and accounting in one place.
-                    </p>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-sm text-emerald-50 ring-1 ring-white/35">
-                      <Sparkles size={14} />
-                      Theme synced with your production workspace
-                    </div>
+                  <div className="flex flex-1 items-start justify-center pt-0 text-emerald-900">
+                    {settings.logoUrl ? (
+                      <img src={settings.logoUrl} alt="SMJ logo" className="-mt-[390px] h-[980px] w-[980px] origin-top scale-110 object-contain" />
+                    ) : (
+                      <Building2 size={1080} />
+                    )}
                   </div>
+                </div>
+                <div className="pointer-events-none absolute bottom-10 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-emerald-300/70 bg-white px-5 py-2.5 text-emerald-800 shadow-2xl">
+                  <Wheat size={18} />
+                  <Sprout size={18} />
+                  <Leaf size={18} />
+                  <Wheat size={18} />
+                  <Sprout size={18} />
                 </div>
               </div>
 
-              <div className="bg-white p-8 md:p-10">
+              <div className="relative p-5 sm:p-7 md:px-12 md:pb-12 md:pt-20">
+                <div className="mb-5 overflow-hidden rounded-[1.6rem] bg-gradient-to-br from-[#016d73] via-[#0a7379] to-[#045e63] p-5 text-white md:hidden">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-3xl font-semibold leading-tight">Hello!</div>
+                      <p className="mt-1 text-sm text-teal-100">
+                        Welcome to {settings.companyName || settings.shortName || "SMJ"}
+                      </p>
+                    </div>
+                    <div>
+                      {settings.logoUrl ? (
+                        <img src={settings.logoUrl} alt="SMJ logo" className="h-[140px] w-[140px] object-contain" />
+                      ) : (
+                        <Building2 size={140} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div
                   className={[
                     "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
                     isLoginAnimatingOut
                       ? "bg-emerald-100 text-emerald-700 login-success-pulse"
-                      : "bg-emerald-50 text-emerald-700",
+                      : "bg-emerald-100/90 text-emerald-800",
                   ].join(" ")}
                 >
                   {isLoginAnimatingOut ? <CheckCircle2 size={14} /> : <LockKeyhole size={14} />}
                   {isLoginAnimatingOut ? "Access Granted" : "Secure Login"}
                 </div>
 
-                <h3 className="mt-4 text-3xl font-semibold text-gray-900">Welcome back</h3>
-                <p className="mt-2 text-sm text-gray-500">
+                <h3 className="mt-4 text-4xl font-semibold tracking-tight text-white md:text-[2.6rem]">
+                  Login
+                </h3>
+                <p className="mt-2 text-sm text-emerald-100/90">
                   {isLoginAnimatingOut
                     ? "Opening your workspace..."
                     : "Enter your 4-digit PIN to continue."}
                 </p>
 
-                <div className="mt-7 space-y-4">
+                <div className="mt-10 space-y-4">
                   <Pin4Input
                     value={loginPin}
                     onChange={(v) => {
@@ -590,46 +598,52 @@ export default function MainLayout({ children }) {
                     }}
                     error={!!loginError}
                     disabled={isLoginAnimatingOut}
-                    inputClassName="h-14 w-14 rounded-xl"
+                    className="mx-auto w-[248px] justify-between"
+                    inputClassName="h-14 w-14 rounded-xl border-gray-300 bg-white text-emerald-900 focus:ring-teal-200"
                   />
+
                   {loginError && (
-                    <div className="text-center text-xs text-red-600">{loginError}</div>
+                    <div className="text-center text-xs text-rose-200">{loginError}</div>
                   )}
                   {!settings.loginPassword && (
-                    <p className="text-center text-xs text-amber-600">
+                    <p className="text-center text-xs text-amber-200">
                       No login PIN set. Default PIN: 0000.
                     </p>
                   )}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
-                    <button
-                      type="button"
-                      onClick={() => handleLogin()}
-                      disabled={isLoginAnimatingOut}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {isLoginAnimatingOut ? <CheckCircle2 size={16} /> : <ShieldCheck size={16} />}
-                      {isLoginAnimatingOut ? "Entering..." : "Enter Workspace"}
-                    </button>
+
+                  <div className="mx-auto w-[248px]">
                     <button
                       type="button"
                       onClick={() =>
                         setForgotDialog({
+                          ...getDefaultForgotDialog(),
                           open: true,
-                          channel: "email",
-                          otp: "",
-                          newPin: "",
-                          confirmPin: "",
-                          expiresIn: 0,
-                          sending: false,
-                          resetting: false,
-                          error: "",
                         })
                       }
                       disabled={isLoginAnimatingOut}
-                      className="inline-flex items-center justify-center rounded-2xl border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="block w-full text-right text-xs font-medium text-emerald-100 underline underline-offset-2 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Forgot PIN
+                      Forgot PIN?
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleLogin()}
+                      disabled={isLoginAnimatingOut}
+                      className={[
+                        "liquid-login-btn mt-3 inline-flex w-full translate-x-1 items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-emerald-800 transition disabled:cursor-not-allowed disabled:opacity-70",
+                        isLoginAnimatingOut ? "liquid-login-btn-filling" : "",
+                      ].join(" ")}
+                    >
+                      <span className="relative z-[2] inline-flex items-center gap-2">
+                        {isLoginAnimatingOut ? <CheckCircle2 size={16} /> : <ShieldCheck size={16} />}
+                        {isLoginAnimatingOut ? "Entering..." : "Login to SMJ"}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="pt-1 text-center text-xs text-emerald-100/80">
+                    Protected by OTP reset via {settings.email ? maskEmail(settings.email) : "configured email"}
                   </div>
                 </div>
               </div>
@@ -639,55 +653,158 @@ export default function MainLayout({ children }) {
       )}
 
       {forgotDialog.open && (
-        <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-emerald-700">Forgot PIN</div>
-                <h3 className="mt-1 text-lg font-semibold text-gray-900">Reset login PIN</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  We will send a code to your saved email, then you can set a new 4-digit PIN.
-                </p>
-              </div>
-            </div>
+        <div className="fixed inset-0 z-[210] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 shadow-2xl">
+            <div className="text-left text-sm font-semibold text-emerald-800">Forgot PIN</div>
 
-            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
               <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
                 <Mail size={14} />
-                Email
+                Recovery Email
               </div>
-              <div className="mt-1 text-sm text-gray-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+              <div className="mt-1 text-sm font-medium text-emerald-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+              {forgotDialog.expiresIn > 0 && (
+                <div className="mt-1 text-xs text-emerald-700">OTP expires in {formatCountdown(forgotDialog.expiresIn)}</div>
+              )}
             </div>
 
-            {forgotDialog.expiresIn > 0 && (
-              <div className="mt-3 text-xs text-gray-500">
-                Code expires in <span className="font-medium text-gray-700">{formatCountdown(forgotDialog.expiresIn)}</span>
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-900">Enter OTP</div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setForgotDialog((prev) => ({ ...prev, sending: true, error: "" }));
+                    try {
+                      const res = await api.post("/settings/otp/send");
+                      if (res.data?.success) {
+                        toast.success("OTP sent to email");
+                        setForgotResendIn(OTP_RESEND_SECONDS);
+                        const expiresAt = new Date(res.data?.data?.expiresAt || Date.now() + 5 * 60 * 1000).getTime();
+                        const expiresIn = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+                        setForgotDialog((prev) => ({ ...prev, sending: false, expiresIn }));
+                      } else {
+                        setForgotDialog((prev) => ({ ...prev, sending: false, error: res.data?.message || "Failed to send OTP" }));
+                      }
+                    } catch (err) {
+                      setForgotDialog((prev) => ({
+                        ...prev,
+                        sending: false,
+                        error: err.response?.data?.message || "Failed to send OTP",
+                      }));
+                    }
+                  }}
+                  disabled={forgotDialog.sending || forgotResendIn > 0 || !canSendEmailOtp}
+                  className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {forgotDialog.sending
+                    ? "Sending..."
+                    : forgotResendIn > 0
+                    ? `Resend ${formatCountdown(forgotResendIn)}`
+                    : "Send OTP"}
+                </button>
+              </div>
+              <div className="mt-3">
+                <Pin4Input
+                  value={forgotDialog.otp}
+                  onChange={(v) =>
+                    setForgotDialog((prev) => ({
+                      ...prev,
+                      otp: v.slice(0, 4),
+                      error: "",
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-700">
+              After OTP verification, you will be logged in and redirected to System Settings to set a new PIN.
+            </div>
+
+            {forgotDialog.error && (
+              <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {forgotDialog.error}
               </div>
             )}
 
-            <div className="mt-4">
-              <Pin4Input
-                value={forgotDialog.otp}
-                onChange={(v) =>
-                  setForgotDialog((prev) => ({
-                    ...prev,
-                    otp: v.slice(0, 4),
-                    error: "",
-                  }))
-                }
-              />
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={resetForgotDialog}
+                className="rounded-2xl border border-gray-300 px-4 py-2.5 text-sm text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (forgotDialog.otp.length !== 4) {
+                    setForgotDialog((prev) => ({ ...prev, error: "Enter 4-digit OTP" }));
+                    return;
+                  }
+                  setForgotDialog((prev) => ({ ...prev, verifying: true, error: "" }));
+                  try {
+                    const res = await api.post("/settings/otp/verify", { otp: forgotDialog.otp });
+                    if (res.data?.success) {
+                      const verifiedOtp = forgotDialog.otp;
+                      completeLoginWithTransition();
+                      resetForgotDialog();
+                      window.setTimeout(() => {
+                        setPostLoginPinDialog({
+                          open: true,
+                          otp: verifiedOtp,
+                          newPin: "",
+                          confirmPin: "",
+                          saving: false,
+                          error: "",
+                        });
+                        toast("OTP verified. Set your new PIN.");
+                      }, 1100);
+                      window.dispatchEvent(new Event("smj-settings-updated"));
+                      toast.success("OTP verified");
+                    } else {
+                      setForgotDialog((prev) => ({
+                        ...prev,
+                        verifying: false,
+                        error: res.data?.message || "OTP verification failed",
+                      }));
+                    }
+                  } catch (err) {
+                    setForgotDialog((prev) => ({
+                      ...prev,
+                      verifying: false,
+                      error: err.response?.data?.message || "OTP verification failed",
+                    }));
+                  }
+                }}
+                disabled={forgotDialog.verifying}
+                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {forgotDialog.verifying ? "Verifying..." : "Verify OTP & Continue"}
+              </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {postLoginPinDialog.open && (
+        <div className="fixed inset-0 z-[220] bg-black/45 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl border border-emerald-100 bg-white p-6 shadow-2xl">
+            <div className="text-xs uppercase tracking-[0.14em] text-emerald-700">Set New PIN</div>
+            <h3 className="mt-1 text-xl font-semibold text-emerald-900">Create your new login PIN</h3>
+            <p className="mt-1 text-sm text-gray-600">Enter and confirm a 4-digit PIN.</p>
+
+            <div className="mt-4 grid grid-cols-1 gap-3">
               <input
                 type="password"
                 inputMode="numeric"
                 maxLength="4"
                 className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 placeholder="New PIN"
-                value={forgotDialog.newPin}
+                value={postLoginPinDialog.newPin}
                 onChange={(e) =>
-                  setForgotDialog((prev) => ({
+                  setPostLoginPinDialog((prev) => ({
                     ...prev,
                     newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
                     error: "",
@@ -700,9 +817,9 @@ export default function MainLayout({ children }) {
                 maxLength="4"
                 className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 placeholder="Confirm PIN"
-                value={forgotDialog.confirmPin}
+                value={postLoginPinDialog.confirmPin}
                 onChange={(e) =>
-                  setForgotDialog((prev) => ({
+                  setPostLoginPinDialog((prev) => ({
                     ...prev,
                     confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
                     error: "",
@@ -711,106 +828,72 @@ export default function MainLayout({ children }) {
               />
             </div>
 
-            {forgotDialog.error && (
+            {postLoginPinDialog.error && (
               <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {forgotDialog.error}
+                {postLoginPinDialog.error}
               </div>
             )}
 
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={resetForgotDialog}
+                onClick={() => setPostLoginPinDialog((prev) => ({ ...prev, open: false, error: "" }))}
                 className="rounded-2xl border border-gray-300 px-4 py-2.5 text-sm text-gray-700"
               >
-                Cancel
+                Later
               </button>
               <button
                 type="button"
                 onClick={async () => {
-                  setForgotDialog((prev) => ({ ...prev, sending: true, error: "" }));
-                  try {
-                    const res = await api.post("/settings/otp/send");
-                    if (res.data?.success) {
-                      toast.success("OTP sent to email");
-                      setForgotResendIn(OTP_RESEND_SECONDS);
-                      const expiresAt = new Date(res.data?.data?.expiresAt || Date.now() + 5 * 60 * 1000).getTime();
-                      const expiresIn = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-                      setForgotDialog((prev) => ({ ...prev, sending: false, expiresIn }));
-                    } else {
-                      setForgotDialog((prev) => ({ ...prev, sending: false, error: res.data?.message || "Failed to send OTP" }));
-                    }
-                  } catch (err) {
-                    setForgotDialog((prev) => ({
-                      ...prev,
-                      sending: false,
-                      error: err.response?.data?.message || "Failed to send OTP",
-                    }));
-                  }
-                }}
-                disabled={
-                  forgotDialog.sending ||
-                  forgotResendIn > 0 ||
-                  !canSendEmailOtp
-                }
-                className="rounded-2xl border border-emerald-200 px-4 py-2.5 text-sm font-medium text-emerald-700 disabled:opacity-60"
-              >
-                {forgotDialog.sending
-                  ? "Sending..."
-                  : forgotResendIn > 0
-                  ? `Resend in ${formatCountdown(forgotResendIn)}`
-                  : "Send OTP"}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (forgotDialog.otp.length !== 4) {
-                    setForgotDialog((prev) => ({ ...prev, error: "Enter 4-digit OTP" }));
+                  if (postLoginPinDialog.newPin.length !== 4) {
+                    setPostLoginPinDialog((prev) => ({ ...prev, error: "Enter a new 4-digit PIN" }));
                     return;
                   }
-                  if (forgotDialog.newPin.length !== 4) {
-                    setForgotDialog((prev) => ({ ...prev, error: "Enter a new 4-digit PIN" }));
+                  if (postLoginPinDialog.newPin !== postLoginPinDialog.confirmPin) {
+                    setPostLoginPinDialog((prev) => ({ ...prev, error: "PIN confirmation does not match" }));
                     return;
                   }
-                  if (forgotDialog.newPin !== forgotDialog.confirmPin) {
-                    setForgotDialog((prev) => ({ ...prev, error: "PIN confirmation does not match" }));
-                    return;
-                  }
-                  setForgotDialog((prev) => ({ ...prev, resetting: true, error: "" }));
+                  setPostLoginPinDialog((prev) => ({ ...prev, saving: true, error: "" }));
                   try {
                     const res = await api.post("/settings/otp/reset-pin", {
-                      otp: forgotDialog.otp,
-                      newPin: forgotDialog.newPin,
+                      otp: postLoginPinDialog.otp,
+                      newPin: postLoginPinDialog.newPin,
                     });
                     if (res.data?.success) {
                       setSettings((prev) => ({
                         ...prev,
-                        adminPin: forgotDialog.newPin,
-                        loginPassword: forgotDialog.newPin,
+                        adminPin: postLoginPinDialog.newPin,
+                        loginPassword: postLoginPinDialog.newPin,
                       }));
-                      completeLoginWithTransition();
-                      resetForgotDialog();
+                      setPostLoginPinDialog({
+                        open: false,
+                        otp: "",
+                        newPin: "",
+                        confirmPin: "",
+                        saving: false,
+                        error: "",
+                      });
+                      toast.success("New PIN saved");
                       window.dispatchEvent(new Event("smj-settings-updated"));
-                      toast.success("PIN reset successful");
                     } else {
-                      setForgotDialog((prev) => ({
+                      setPostLoginPinDialog((prev) => ({
                         ...prev,
-                        resetting: false,
-                        error: res.data?.message || "PIN reset failed",
+                        saving: false,
+                        error: res.data?.message || "Failed to save PIN",
                       }));
                     }
                   } catch (err) {
-                    setForgotDialog((prev) => ({
+                    setPostLoginPinDialog((prev) => ({
                       ...prev,
-                      resetting: false,
-                      error: err.response?.data?.message || "PIN reset failed",
+                      saving: false,
+                      error: err.response?.data?.message || "Failed to save PIN",
                     }));
                   }
                 }}
-                disabled={forgotDialog.resetting}
+                disabled={postLoginPinDialog.saving}
                 className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
               >
-                {forgotDialog.resetting ? "Resetting..." : "Reset PIN"}
+                {postLoginPinDialog.saving ? "Saving..." : "Save PIN"}
               </button>
             </div>
           </div>

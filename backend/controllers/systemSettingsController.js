@@ -555,6 +555,14 @@ exports.saveSettings = async (req, res) => {
       payload.adminPin = payload.loginPassword;
     }
 
+    // Keep SMTP identity auto-synced with General Settings email when email changes.
+    // Frontend may intentionally hide smtpUser/mailFrom fields.
+    if (payload.email !== undefined) {
+      const nextEmail = String(payload.email || "").trim();
+      payload.smtpUser = nextEmail;
+      payload.mailFrom = nextEmail;
+    }
+
     const updated = await SystemSettings.findOneAndUpdate(
       {},
       { $set: payload },
@@ -855,13 +863,25 @@ exports.restoreModuleBackup = async (req, res) => {
 };
 
 const getMailer = (settings = null) => {
-  const host = String(process.env.SMJ_SMTP_HOST || settings?.smtpHost || "").trim();
-  const port = Number(process.env.SMJ_SMTP_PORT || settings?.smtpPort || 587);
-  const user = String(process.env.SMJ_SMTP_USER || settings?.smtpUser || "").trim();
+  const smtpUserFromSettings = String(settings?.smtpUser || "").trim();
+  const generalEmail = String(settings?.email || "").trim();
+  const user = String(process.env.SMJ_SMTP_USER || generalEmail || smtpUserFromSettings || "").trim();
   const pass = String(process.env.SMJ_SMTP_PASS || settings?.smtpPass || "").trim();
+  let host = String(process.env.SMJ_SMTP_HOST || settings?.smtpHost || "").trim();
+  const port = Number(process.env.SMJ_SMTP_PORT || settings?.smtpPort || 587);
   const secureSource =
     process.env.SMJ_SMTP_SECURE != null ? process.env.SMJ_SMTP_SECURE : settings?.smtpSecure;
   const secure = String(secureSource || "false") === "true" || secureSource === true;
+
+  // Friendly fallback for common setup: if user/pass exist and host is empty, infer provider.
+  if (!host && user) {
+    const domain = String(user.split("@")[1] || "").toLowerCase();
+    if (domain === "gmail.com") host = "smtp.gmail.com";
+    else if (domain.includes("outlook") || domain.includes("hotmail") || domain.includes("live")) {
+      host = "smtp.office365.com";
+    }
+  }
+
   if (!host || !user || !pass) return null;
   return nodemailer.createTransport({
     host,
@@ -879,11 +899,31 @@ const escapeHtml = (value = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const buildOtpEmail = (settings = {}, otp, expiresAt) => {
+const resolveInlineLogoAttachment = (settings = {}) => {
+  const logoUrl = String(settings.logoUrl || "").trim();
+  if (!logoUrl) return null;
+  try {
+    const parsed = new URL(logoUrl);
+    const fileName = path.basename(parsed.pathname || "");
+    if (!fileName) return null;
+    const localPath = path.join(__dirname, "../uploads", fileName);
+    if (!fs.existsSync(localPath)) return null;
+    return {
+      filename: fileName,
+      path: localPath,
+      cid: "smj-logo-inline",
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildOtpEmail = (settings = {}, otp, expiresAt, inlineLogoCid = "") => {
   const companyName = String(settings.companyName || settings.shortName || "SMJ Rice Mill").trim();
   const address = String(settings.address || "").trim();
   const supportEmail = String(settings.email || settings.mailFrom || settings.smtpUser || "").trim();
   const logoUrl = String(settings.logoUrl || "").trim();
+  const logoSource = inlineLogoCid ? `cid:${inlineLogoCid}` : logoUrl;
   const expiryTime = new Date(expiresAt).toLocaleString("en-PK", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -920,8 +960,8 @@ const buildOtpEmail = (settings = {}, otp, expiresAt) => {
       <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d1e7dd;border-radius:20px;overflow:hidden;box-shadow:0 12px 30px rgba(16,24,40,0.08);">
         <div style="background:linear-gradient(135deg,#065f46,#10b981);padding:28px 24px;color:#ffffff;text-align:center;">
           ${
-            logoUrl
-              ? `<img src="${escapeHtml(logoUrl)}" alt="${safeCompanyName} logo" style="max-height:72px;max-width:180px;margin:0 auto 14px;display:block;background:#ffffff;padding:8px 12px;border-radius:16px;" />`
+            logoSource
+              ? `<img src="${escapeHtml(logoSource)}" alt="${safeCompanyName} logo" style="max-height:72px;max-width:180px;margin:0 auto 14px;display:block;background:#ffffff;padding:8px 12px;border-radius:16px;" />`
               : ""
           }
           <div style="font-size:26px;font-weight:700;letter-spacing:0.4px;">${safeCompanyName}</div>
@@ -984,20 +1024,23 @@ exports.sendEmailOtp = async (req, res) => {
     if (!transport) {
       return res.status(400).json({
         success: false,
-        message: "Email provider not configured. Set SMTP env vars.",
+        message:
+          "Email provider not configured. Set SMTP in System Settings (Host/User/App Password) or SMJ_SMTP_* env vars.",
       });
     }
 
     const otp = String(Math.floor(1000 + Math.random() * 9000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const from = String(process.env.SMJ_MAIL_FROM || settings?.mailFrom || settings?.smtpUser || "no-reply@smj.local").trim();
-    const emailContent = buildOtpEmail(settings, otp, expiresAt);
+    const logoAttachment = resolveInlineLogoAttachment(settings);
+    const emailContent = buildOtpEmail(settings, otp, expiresAt, logoAttachment?.cid || "");
     await transport.sendMail({
       from,
       to: settings.email,
       subject: "SMJ OTP Verification",
       text: emailContent.text,
       html: emailContent.html,
+      attachments: logoAttachment ? [logoAttachment] : [],
     });
 
     settings.otpCodeHash = hashOtp(otp);
@@ -1027,9 +1070,6 @@ exports.verifyEmailOtp = async (req, res) => {
     if (!isValid) {
       return res.status(400).json({ success: false, message: "OTP is incorrect." });
     }
-    settings.otpCodeHash = "";
-    settings.otpExpiresAt = null;
-    await settings.save();
     res.json({ success: true, message: "OTP verified" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
