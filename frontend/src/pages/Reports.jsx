@@ -4,8 +4,7 @@ import toast from "react-hot-toast";
 import {
   Package,
   Factory,
-  Building2,
-  Boxes,
+  Truck,
   TrendingUp,
   Scale,
   Landmark,
@@ -29,9 +28,7 @@ const REPORT_TABS = [
   { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
   { key: "stock-reports", label: "Stock Reports", icon: <Package size={16} /> },
   { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
-  { key: "by-product", label: "By-Product Report", icon: <Boxes size={16} /> },
-  { key: "production", label: "Production Detail", icon: <Factory size={16} /> },
-  { key: "companies", label: "Company List", icon: <Building2 size={16} /> },
+  { key: "gatepass", label: "Gatepass Report", icon: <Truck size={16} /> },
   { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
 ];
 
@@ -47,11 +44,15 @@ const REPORT_GROUPS = [
   },
   {
     label: "Production",
-    tabs: ["production-summary", "by-product", "production"],
+    tabs: ["production-summary"],
+  },
+  {
+    label: "Gate Pass",
+    tabs: ["gatepass"],
   },
   {
     label: "Masters",
-    tabs: ["companies", "customers"],
+    tabs: ["customers"],
   },
 ];
 
@@ -66,7 +67,7 @@ const RANGE_OPTIONS = [
   { value: "week", label: "Week" },
   { value: "month", label: "Month" },
   { value: "year", label: "Year" },
-  { value: "custom", label: "Custom Range" },
+  { value: "custom", label: "From-To Date" },
 ];
 
 const num = (v) => {
@@ -120,10 +121,12 @@ const ensureAccountSuffix = (value) => {
 const mapStockRows = (payload = {}) => {
   const production = (payload?.production || []).map((r, idx) => ({
     id: `p-${idx}`,
+    entryDate: r.lastEntryDate || "",
     stockType: "Production",
     item: r.productTypeName || "-",
     party: r.companyName || "-",
     balance: num(r.balanceKg),
+    valuePKR: round2(r.valuePKR || 0),
     companyId: r.companyId || "",
     productTypeId: r.productTypeId || "",
   }));
@@ -168,11 +171,17 @@ function defaultDeductions() {
 export default function Reports({ embedded = false, initialTab = "", allowedTabs = null, hideFilters = false, highlightId = "" }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const currentMonthValue = new Date().toISOString().slice(0, 7);
+  const currentYearValue = String(new Date().getFullYear());
   const [activeTab, setActiveTab] = useState(() =>
     embedded && initialTab ? initialTab : "acc-reports"
   );
   const [range, setRange] = useState("month");
-  const [particularDate, setParticularDate] = useState(new Date().toISOString().slice(0, 10));
+  const [particularDate, setParticularDate] = useState(todayIso);
+  const [weekDate, setWeekDate] = useState(todayIso);
+  const [monthValue, setMonthValue] = useState(currentMonthValue);
+  const [yearValue, setYearValue] = useState(currentYearValue);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [rows, setRows] = useState([]);
@@ -207,10 +216,10 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [invProducts, setInvProducts] = useState([]); // ProductType list
   const [invCompanyIds, setInvCompanyIds] = useState([]);
   const [invProductTypeIds, setInvProductTypeIds] = useState([]);
+  const [stockFilterOpen, setStockFilterOpen] = useState(false);
 
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [settings, setSettings] = useState({});
   const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
 
@@ -271,11 +280,18 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
   const clearStockFilters = () => {
     setRange("month");
-    setParticularDate(new Date().toISOString().slice(0, 10));
+    setParticularDate(todayIso);
+    setWeekDate(todayIso);
+    setMonthValue(currentMonthValue);
+    setYearValue(currentYearValue);
     setStartDate("");
     setEndDate("");
     setInvCompanyIds([]);
     setInvProductTypeIds([]);
+  };
+
+  const openStockFilterPopup = () => {
+    setStockFilterOpen(true);
   };
 
   const renderMovementReference = (row) => {
@@ -294,28 +310,61 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     );
   };
 
-  const stockToolbarActions = (
-    <div className="flex flex-wrap gap-2 items-end">
-      <button
-        type="button"
-        onClick={() => setFiltersOpen((v) => !v)}
-        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${
-          filtersOpen ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-700 hover:bg-gray-50"
-        }`}
-      >
-        <Filter size={16} />
-        {filtersOpen ? "Hide Filters" : "Filter"}
-      </button>
-      <button
-        type="button"
-        onClick={clearStockFilters}
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-      >
-        <X size={16} />
-        Clear
-      </button>
-    </div>
-  );
+  const stockAsOfDateLabel = useMemo(() => {
+    if (range === "custom" && startDate && endDate) return `${fmtDate(startDate)} to ${fmtDate(endDate)}`;
+    if (range === "particular" && particularDate) return fmtDate(particularDate);
+    if (range === "week" && weekDate) return `Week of ${fmtDate(weekDate)}`;
+    if (range === "month" && monthValue) {
+      const [y, m] = monthValue.split("-").map(Number);
+      return `${MONTHS[(m || 1) - 1]} ${y || ""}`.trim();
+    }
+    if (range === "year" && yearValue) return String(yearValue);
+    if (range === "custom" && startDate) return `From ${fmtDate(startDate)}`;
+    if (range === "custom" && endDate) return fmtDate(endDate);
+    if (range === "day") return "Today";
+    if (range === "week") return "Selected week";
+    if (range === "month") return "Selected month";
+    if (range === "year") return "Selected year";
+    return "All dates";
+  }, [endDate, monthValue, particularDate, range, startDate, weekDate, yearValue]);
+
+  const stockRangeSummary = useMemo(() => {
+    if (range === "particular" && particularDate) return `Stock as of ${fmtDate(particularDate)}`;
+    if (range === "custom" && startDate && endDate) return `Stock as of ${fmtDate(endDate)} for ${fmtDate(startDate)} to ${fmtDate(endDate)}`;
+    if (range === "custom" && endDate) return `Stock as of ${fmtDate(endDate)}`;
+    if (range === "year") return "Year-end stock snapshot";
+    if (range === "month") return "Month-end stock snapshot";
+    if (range === "week") return "Week-end stock snapshot";
+    if (range === "day") return "Today stock snapshot";
+    return "Stock snapshot";
+  }, [endDate, particularDate, range, startDate]);
+
+  const stockFilterSummary = useMemo(() => {
+    const bits = [stockRangeSummary];
+    if (invCompanyIds[0]) {
+      const company = (invCompanies || []).find((c) => String(c._id) === String(invCompanyIds[0]));
+      if (company?.name) bits.push(`Company: ${company.name}`);
+    }
+    if (invProductTypeIds[0]) {
+      const product = (invProducts || []).find((p) => String(p._id) === String(invProductTypeIds[0]));
+      if (product?.name) bits.push(`Product: ${product.name}`);
+    }
+    return bits.join(" | ");
+  }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockRangeSummary]);
+
+  const stockReportContextLines = useMemo(() => {
+    const lines = [];
+    const company = invCompanyIds[0]
+      ? (invCompanies || []).find((c) => String(c._id) === String(invCompanyIds[0]))?.name || "Selected Company"
+      : "All Companies";
+    const product = invProductTypeIds[0]
+      ? (invProducts || []).find((p) => String(p._id) === String(invProductTypeIds[0]))?.name || "Selected Product"
+      : "All Products";
+    lines.push(`Company: ${company}`);
+    lines.push(`Product: ${product}`);
+    lines.push(`Date: ${stockAsOfDateLabel}`);
+    return lines;
+  }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockAsOfDateLabel]);
 
   const visibleTabs = useMemo(() => {
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
@@ -386,6 +435,9 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const params = useMemo(() => {
     const p = { range };
     if (range === "particular" && particularDate) p.date = particularDate;
+    if (range === "week" && weekDate) p.anchorDate = weekDate;
+    if (range === "month" && monthValue) p.monthValue = monthValue;
+    if (range === "year" && yearValue) p.yearValue = yearValue;
     if (range === "custom") {
       if (startDate) p.startDate = startDate;
       if (endDate) p.endDate = endDate;
@@ -411,8 +463,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       "stock",
       "stock-movement",
       "production-summary",
-      "by-product",
-      "production",
     ].includes(activeTab);
     if (isInventoryReport) {
       if (invCompanyIds.length) p.companyIds = invCompanyIds.join(",");
@@ -422,6 +472,9 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   }, [
     range,
     particularDate,
+    weekDate,
+    monthValue,
+    yearValue,
     startDate,
     endDate,
     activeTab,
@@ -449,22 +502,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         setRows([]);
         return;
       }
-      if (activeTab === "companies") {
-        const res = await api.get("/reports/master/companies");
-        setRows(
-          (res.data?.data || []).map((c) => ({
-            id: c._id,
-            name: c.name || "-",
-            phone: c.phone || "-",
-            email: c.email || "-",
-            address: c.address || "-",
-            products: Array.isArray(c.products) ? c.products : [],
-            productCount: Number(c.productCount || 0),
-            updatedAt: c.updatedAt || c.createdAt,
-          }))
-        );
-        return;
-      }
       if (activeTab === "stock-reports") {
         const [stockRes, movementRes] = await Promise.all([
           api.get("/reports/stock", params),
@@ -485,22 +522,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         setRows(mapStockMovementRows(res.data?.data || []));
         return;
       }
-      if (activeTab === "production") {
-        const res = await api.get("/reports/production", params);
-        const mapped = (res.data?.data || []).flatMap((b) =>
-          (b.outputs?.length ? b.outputs : [{ productTypeName: "-", netWeightKg: 0, outputDate: b.date }]).map((o, idx) => ({
-            id: `${b._id}-${idx}`,
-            date: fmtDate(o.outputDate || b.date),
-            batchNo: b.batchNo || "-",
-            company: o.companyName || b.sourceCompanyName || "-",
-            product: o.productTypeName || "-",
-            outputKg: num(o.netWeightKg),
-            status: b.status || "-",
-          }))
-        );
-        setRows(mapped);
-        return;
-      }
       if (activeTab === "production-summary") {
         const res = await api.get("/reports/production-summary", params);
         setRows(
@@ -511,11 +532,11 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         );
         return;
       }
-      if (activeTab === "by-product") {
-        const res = await api.get("/reports/by-product", params);
+      if (activeTab === "gatepass") {
+        const res = await api.get("/reports/gatepass", params);
         setRows(
-          (res.data?.data || []).map((r, idx) => ({
-            id: `${idx}-${r.productTypeName}`,
+          (res.data?.data || []).map((r) => ({
+            id: r._id,
             ...r,
           }))
         );
@@ -1002,10 +1023,173 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   }
 
   const stockColumns = [
-    { key: "item", label: "Product" },
+    { key: "entryDate", label: "Created Date", render: (v) => fmtDate(v) },
     { key: "party", label: "Company Name" },
+    { key: "item", label: "Product" },
     { key: "balance", label: "Weight (kg)" },
+    { key: "valuePKR", label: "Value (PKR)", render: (v) => fmt(v) },
   ];
+
+  const stockSnapshotToolbarActions = (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={openStockFilterPopup}
+        className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${
+          invCompanyIds.length || invProductTypeIds.length || range !== "month" || startDate || endDate
+            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+            : "border-gray-300 text-gray-700 hover:bg-gray-50"
+        }`}
+        title="Filter stock snapshot"
+      >
+        <Filter size={16} />
+        Filter
+      </button>
+      {stockFilterOpen && (
+        <div className="absolute right-0 mt-2 z-20 w-[320px] max-w-[90vw] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-gray-900">Stock Filters</div>
+            <button
+              type="button"
+              onClick={() => setStockFilterOpen(false)}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100"
+              title="Close"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className={filterLabelClass}>Range</label>
+              <select value={range} onChange={(e) => setRange(e.target.value)} className={`${filterInputClass} w-full`}>
+                {RANGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {range === "particular" && (
+              <div>
+                <label className={filterLabelClass}>Date</label>
+                <input
+                  type="date"
+                  value={particularDate}
+                  onChange={(e) => setParticularDate(e.target.value)}
+                  className={`${filterInputClass} w-full`}
+                />
+              </div>
+            )}
+            {range === "week" && (
+              <div>
+                <label className={filterLabelClass}>Choose Week</label>
+                <input
+                  type="date"
+                  value={weekDate}
+                  onChange={(e) => setWeekDate(e.target.value)}
+                  className={`${filterInputClass} w-full`}
+                />
+              </div>
+            )}
+            {range === "month" && (
+              <div>
+                <label className={filterLabelClass}>Choose Month</label>
+                <input
+                  type="month"
+                  value={monthValue}
+                  onChange={(e) => setMonthValue(e.target.value)}
+                  className={`${filterInputClass} w-full`}
+                />
+              </div>
+            )}
+            {range === "year" && (
+              <div>
+                <label className={filterLabelClass}>Choose Year</label>
+                <input
+                  type="number"
+                  min="2000"
+                  max="3000"
+                  step="1"
+                  value={yearValue}
+                  onChange={(e) => setYearValue(e.target.value)}
+                  className={`${filterInputClass} w-full`}
+                  placeholder="2026"
+                />
+              </div>
+            )}
+            {range === "custom" && (
+              <>
+                <div>
+                  <label className={filterLabelClass}>Start Date</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className={`${filterInputClass} w-full`}
+                  />
+                </div>
+                <div>
+                  <label className={filterLabelClass}>End Date</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className={`${filterInputClass} w-full`}
+                  />
+                </div>
+              </>
+            )}
+            <div>
+              <label className={filterLabelClass}>Company</label>
+              <select
+                value={invCompanyIds[0] || ""}
+                onChange={(e) => setInvCompanyIds(e.target.value ? [e.target.value] : [])}
+                className={`${filterInputClass} w-full`}
+              >
+                <option value="">All Companies</option>
+                {(invCompanies || []).map((company) => (
+                  <option key={company._id} value={company._id}>
+                    {company.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={filterLabelClass}>Product</label>
+              <select
+                value={invProductTypeIds[0] || ""}
+                onChange={(e) => setInvProductTypeIds(e.target.value ? [e.target.value] : [])}
+                className={`${filterInputClass} w-full`}
+              >
+                <option value="">All Products</option>
+                {(invProducts || []).map((product) => (
+                  <option key={product._id} value={product._id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={clearStockFilters}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setStockFilterOpen(false)}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-sm text-white hover:bg-emerald-700"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   const stockMovementColumns = [
     { key: "date", label: "Date", render: (v) => fmtDate(v) },
@@ -1027,45 +1211,11 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
       ];
     }
-    if (activeTab === "companies") {
-      return [
-        { key: "name", label: "Company Name" },
-        { key: "phone", label: "Phone" },
-        { key: "email", label: "Email" },
-        { key: "address", label: "Address" },
-        {
-          key: "products",
-          label: "Products",
-          sortable: false,
-          render: (v) => {
-            const list = Array.isArray(v) ? v : [];
-            const text = list.join(", ");
-            return (
-              <span className="block max-w-[360px] truncate" title={text || "-"}>
-                {text || "-"}
-              </span>
-            );
-          },
-        },
-        { key: "productCount", label: "Total Products" },
-        { key: "updatedAt", label: "Updated", render: (v) => fmtDate(v) },
-      ];
-    }
     if (activeTab === "stock") {
       return stockColumns;
     }
     if (activeTab === "stock-movement") {
       return stockMovementColumns;
-    }
-    if (activeTab === "production") {
-      return [
-        { key: "date", label: "Date" },
-        { key: "batchNo", label: "Batch #" },
-        { key: "company", label: "Company Name" },
-        { key: "product", label: "Product" },
-        { key: "outputKg", label: "Output (kg)" },
-        { key: "status", label: "Status" },
-      ];
     }
     if (activeTab === "production-summary") {
       return [
@@ -1081,10 +1231,35 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "status", label: "Status" },
       ];
     }
-    if (activeTab === "by-product") {
+    if (activeTab === "gatepass") {
       return [
-        { key: "productTypeName", label: "Product" },
-        { key: "outputKg", label: "Total Output (kg)" },
+        { key: "date", label: "Date", render: (v) => fmtDate(v) },
+        {
+          key: "gatePassNo",
+          label: "GP No",
+          render: (v, row) =>
+            row?.targetPath ? (
+              <button
+                type="button"
+                onClick={() => navigate(row.targetPath)}
+                className="text-emerald-700 hover:underline"
+              >
+                {v || "-"}
+              </button>
+            ) : (
+              v || "-"
+            ),
+        },
+        { key: "type", label: "Type" },
+        { key: "partyName", label: "Party" },
+        { key: "companyNames", label: "Company" },
+        { key: "productNames", label: "Products" },
+        { key: "truckNo", label: "Truck" },
+        { key: "totalBags", label: "Bags" },
+        { key: "totalWeightKg", label: "Weight (kg)" },
+        { key: "totalAmount", label: "Amount (PKR)", render: (v) => fmt(v) },
+        { key: "paymentStatus", label: "Payment" },
+        { key: "status", label: "Status" },
       ];
     }
     if (activeTab === "ledger") {
@@ -1226,7 +1401,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           ),
       },
     ];
-  }, [activeTab, openLedgerDrill, openVoucherDrill, openStockMovementDrill]);
+  }, [activeTab, navigate, openLedgerDrill, openVoucherDrill, openStockMovementDrill]);
 
   const title = visibleTabs.find((t) => t.key === activeTab)?.label || "Report";
   const emptyMessage = `No ${title.toLowerCase()} found.`;
@@ -2268,98 +2443,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
             ))}
           </div>
         )}
-        {activeTab === "stock-reports" && (
-          <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div className="text-sm font-semibold text-gray-900">Stock Filters</div>
-                <div className="text-xs text-gray-500">Week, month, year ya custom range ke mutabiq stock aur movement dekhein.</div>
-              </div>
-              {stockToolbarActions}
-            </div>
-            {filtersOpen && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
-                <div>
-                  <label className={filterLabelClass}>Range</label>
-                  <select
-                    value={range}
-                    onChange={(e) => setRange(e.target.value)}
-                    className={filterInputClass}
-                  >
-                    {RANGE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {range === "particular" && (
-                  <div>
-                    <label className={filterLabelClass}>Date</label>
-                    <input
-                      type="date"
-                      value={particularDate}
-                      onChange={(e) => setParticularDate(e.target.value)}
-                      className={filterInputClass}
-                    />
-                  </div>
-                )}
-                {range === "custom" && (
-                  <>
-                    <div>
-                      <label className={filterLabelClass}>Start Date</label>
-                      <input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className={filterInputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className={filterLabelClass}>End Date</label>
-                      <input
-                        type="date"
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className={filterInputClass}
-                      />
-                    </div>
-                  </>
-                )}
-                <div>
-                  <label className={filterLabelClass}>Company</label>
-                  <select
-                    value={invCompanyIds[0] || ""}
-                    onChange={(e) => setInvCompanyIds(e.target.value ? [e.target.value] : [])}
-                    className={filterInputClass}
-                  >
-                    <option value="">All Companies</option>
-                    {(invCompanies || []).map((company) => (
-                      <option key={company._id} value={company._id}>
-                        {company.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={filterLabelClass}>Product</label>
-                  <select
-                    value={invProductTypeIds[0] || ""}
-                    onChange={(e) => setInvProductTypeIds(e.target.value ? [e.target.value] : [])}
-                    className={filterInputClass}
-                  >
-                    <option value="">All Products</option>
-                    {(invProducts || []).map((product) => (
-                      <option key={product._id} value={product._id}>
-                        {product.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
         {activeTab === "acc-reports" ? (
           <div className="space-y-4">
             <div className="space-y-3">
@@ -2697,17 +2780,19 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                   ) : (
                     <div className="space-y-6">
                       <DataTable
-                        title="Current Stock"
+                        title="Stock Snapshot"
                         columns={stockColumns}
                         data={stockRows}
                         idKey="id"
-                        searchPlaceholder="Search current stock..."
-                        emptyMessage="No current stock found."
+                        emptyMessage="No stock snapshot found."
                         rowClassName={reportRowClass}
+                        showSearch={false}
                         showFilters={false}
                         showClearFilters={false}
                         showExport
                         showPrint
+                        toolbarActions={stockSnapshotToolbarActions}
+                        reportContextLines={stockReportContextLines}
                         showRecordCount={!(embedded && activeTab === "ledger")}
                       />
                       <DataTable

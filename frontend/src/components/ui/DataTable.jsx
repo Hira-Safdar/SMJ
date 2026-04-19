@@ -42,6 +42,7 @@ export default function DataTable({
   deleteAll,
   highlightId = "",
   highlightKey = "id",
+  reportContextLines = [],
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -187,7 +188,11 @@ export default function DataTable({
         toText(c.render ? c.render(row[c.key], row) : row[c.key] ?? "")
       )
     );
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const metaRows = (reportContextLines || [])
+      .map((line) => [toText(line)])
+      .filter((row) => String(row[0] || "").trim());
+    const sheetRows = metaRows.length ? [...metaRows, [], headers, ...rows] : [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(sheetRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, title.replace(/\s/g, "_").slice(0, 31));
     XLSX.writeFile(wb, `${title.replace(/\s/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -201,11 +206,25 @@ export default function DataTable({
       )
     );
     const doc = new jsPDF();
+    let startY = 18;
+    if ((reportContextLines || []).length) {
+      doc.setFontSize(14);
+      doc.text(title, 14, startY);
+      startY += 7;
+      doc.setFontSize(10);
+      (reportContextLines || []).forEach((line) => {
+        const text = toText(line).trim();
+        if (!text) return;
+        doc.text(text, 14, startY);
+        startY += 5;
+      });
+      startY += 2;
+    }
     // revert to legacy: no custom header
     autoTable(doc, {
       head: [headers],
       body: rows,
-      startY: 18,
+      startY,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [236, 253, 245], textColor: 6 },
     });
@@ -216,6 +235,11 @@ export default function DataTable({
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     const tableHtml = document.getElementById("data-table-print")?.outerHTML ?? "";
+    const metaHtml = (reportContextLines || [])
+      .map((line) => toText(line).trim())
+      .filter(Boolean)
+      .map((line) => `<div class="meta-line">${line}</div>`)
+      .join("");
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
@@ -228,6 +252,7 @@ export default function DataTable({
             .print-header .name { font-weight: 700; font-size: 14px; margin: 0; }
             .print-header .line { font-size: 11px; color: #333; margin: 0; }
             h2 { margin: 4px 0 6px; }
+            .meta-line { font-size: 12px; color: #333; margin: 2px 0; }
             table { width: 100%; border-collapse: collapse; }
             th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
             th { background: #ecfdf5; color: #065f46; }
@@ -242,6 +267,7 @@ export default function DataTable({
           </div>
           <h2>${title}</h2>
           <p>Printed on ${new Date().toLocaleString()}</p>
+          ${metaHtml}
           ${tableHtml}
         </body>
       </html>

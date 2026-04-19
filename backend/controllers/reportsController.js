@@ -7,6 +7,7 @@ const AccountingFilterTemplate = require("../models/accountingFilterTemplateMode
 const { getDateRangeFromQuery } = require("../utils/dateRange");
 
 const parseRange = (req) => getDateRangeFromQuery(req.query);
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const parseListParam = (value) => {
   if (value == null) return [];
   if (Array.isArray(value)) {
@@ -28,7 +29,15 @@ exports.getStockReport = async (req, res) => {
     const productTypeIds = parseListParam(req.query.productTypeId || req.query.productTypeIds);
 
     const filter = { date: { $lte: end } };
-    if (companyIds.length) filter.companyId = { $in: companyIds };
+    if (companyIds.length) {
+      const companyRows = await Company.find({ _id: { $in: companyIds } }).select("_id name").lean();
+      const companyNameMatchers = (companyRows || [])
+        .map((c) => String(c?.name || "").trim())
+        .filter(Boolean)
+        .map((name) => ({ companyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") } }));
+
+      filter.$or = [{ companyId: { $in: companyIds } }, ...companyNameMatchers];
+    }
     if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
 
     const productionLedgers = await StockLedger.find(filter).lean();
@@ -43,9 +52,13 @@ exports.getStockReport = async (req, res) => {
         productTypeId: l.productTypeId ? String(l.productTypeId) : "",
         balanceKg: 0,
         valuePKR: 0,
+        lastEntryDate: l.createdAt || l.date || null,
       };
       const qty = Number(l.netWeightKg || 0);
       prev.balanceKg += l.type === "OUT" ? -qty : qty;
+      const currentRowDate = new Date(l.createdAt || l.date || 0).getTime();
+      const prevRowDate = new Date(prev.lastEntryDate || 0).getTime();
+      if (currentRowDate > prevRowDate) prev.lastEntryDate = l.createdAt || l.date || prev.lastEntryDate;
       const pt = l.productTypeId ? ptMap.get(String(l.productTypeId)) : null;
       const rate = Number(pt?.pricePerKg || 0) || Number(pt?.defaultSaleRate || 0) || 0;
       // Value is derived from current balance only (not movement).
@@ -57,6 +70,7 @@ exports.getStockReport = async (req, res) => {
       success: true,
       data: {
         production: Array.from(productionMap.values()),
+        asOfDate: end,
       },
     });
   } catch (err) {
@@ -75,6 +89,67 @@ exports.getProductionReport = async (req, res) => {
     res.json({ success: true, data: batches });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load production report." });
+  }
+};
+
+exports.getGatePassReport = async (req, res) => {
+  try {
+    const { start, end } = parseRange(req);
+    const rows = await GatePass.find({
+      date: { $gte: start, $lte: end },
+    })
+      .sort({ date: -1, createdAt: -1 })
+      .lean();
+
+    const data = (rows || []).map((gp) => {
+      const items = Array.isArray(gp.items) ? gp.items : [];
+      const companyNames = Array.from(
+        new Set(
+          items
+            .map((it) => String(it?.brand || gp.supplier || "").trim())
+            .filter(Boolean)
+        )
+      );
+      const productNames = Array.from(
+        new Set(
+          items
+            .map((it) => {
+              const custom = String(it?.customItemName || "").trim();
+              const itemType = String(it?.itemType || "").trim();
+              return custom || itemType;
+            })
+            .filter(Boolean)
+        )
+      );
+      const totalBags = items.reduce((sum, it) => sum + (Number(it?.bagCount) || 0), 0);
+      const totalWeightKg = items.reduce(
+        (sum, it) => sum + (Number(it?.netWeightKg || it?.quantity) || 0),
+        0
+      );
+
+      return {
+        _id: gp._id,
+        date: gp.date || gp.createdAt,
+        gatePassNo: gp.gatePassNo || "-",
+        type: gp.type || "-",
+        partyName: gp.type === "OUT" ? gp.customer || "-" : gp.supplier || "-",
+        truckNo: gp.truckNo || "-",
+        companyNames: companyNames.join(", ") || "-",
+        productNames: productNames.join(", ") || "-",
+        totalBags: Number(totalBags || 0),
+        totalWeightKg: Number(totalWeightKg.toFixed(3)),
+        totalAmount: Number(Number(gp.totalAmount || 0).toFixed(2)),
+        paymentStatus: gp.paymentStatus || "-",
+        status: gp.status || "-",
+        targetPath: `/gatepass?tab=${gp.type || "IN"}&highlight=${encodeURIComponent(
+          gp.gatePassNo || ""
+        )}`,
+      };
+    });
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load gatepass report." });
   }
 };
 
