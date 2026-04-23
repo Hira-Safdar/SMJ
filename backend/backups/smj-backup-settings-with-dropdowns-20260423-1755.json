@@ -1,0 +1,167 @@
+{
+  "backupVersion": 3,
+  "exportedAt": "2026-04-23T12:55:21.850Z",
+  "scope": "module",
+  "moduleKey": "settings",
+  "moduleName": "System Settings",
+  "settings": {
+    "_id": "6915f1e050a9b8878fe89bf6",
+    "companyName": "SMJ Rice Mill",
+    "shortName": "SMJ",
+    "address": "Mirza Virkan Road, Sheikhupura",
+    "phone": "03255202062",
+    "email": "hirasafdar04@gmail.com",
+    "smtpHost": "",
+    "smtpPort": 587,
+    "smtpUser": "hirasafdar04@gmail.com",
+    "smtpPass": "wzlxpeepgtycbivx",
+    "smtpSecure": false,
+    "mailFrom": "hirasafdar04@gmail.com",
+    "ntn": "",
+    "strn": "",
+    "defaultCurrency": "PKR",
+    "fiscalYearStart": "2025-11-28T00:00:00.000Z",
+    "dateFormat": "DD/MM/YYYY",
+    "timezone": "Asia/Lahore",
+    "logoUrl": "http://localhost:5000/uploads/logo-1769953313128.png",
+    "defaultBagWeightKg": 65,
+    "adminPin": "3333",
+    "additionalStockSettingsEnabled": false,
+    "otpCodeHash": "0a7e9ae0aab05e51d0d14cce4653932df2d3a9850e0c19b596780481fd0d5ecf",
+    "otpExpiresAt": "2026-04-23T12:59:01.026Z",
+    "loginUsername": "Asif Jamil",
+    "loginPassword": "3333",
+    "stockStatusExtremeLowKg": 300,
+    "stockStatusLowKg": 500,
+    "purchaseItemOptions": [
+      "Table",
+      "Laptop",
+      "car",
+      "Palaster of paris",
+      "Motor"
+    ],
+    "purchaseCategoryOptions": [
+      "Machinery",
+      "Equipment",
+      "Vehicle",
+      "Furniture",
+      "IT & Electronics",
+      "Other"
+    ],
+    "transporterOptions": [
+      "express",
+      "Faisal Movers"
+    ],
+    "brandOptions": [
+      "Abc trades",
+      "Anwar Trades",
+      "Bismillah Rice",
+      "Muslim Traders",
+      "Mustafa And Sons",
+      "Pakistan Trades",
+      "Smj",
+      "Xyz Trades"
+    ],
+    "backupAutomationEnabled": false,
+    "backupScheduleTime": "00:52",
+    "backupLastBackupAt": null,
+    "backupLastRestoreAt": "2026-04-23T12:51:24.461Z",
+    "backupScheduleLastRunAt": "2026-04-08T19:52:00.032Z",
+    "accountingBackfillVersion": 1,
+    "accountingBackfillAt": "2026-02-28T19:47:51.319Z",
+    "createdAt": "2025-11-13T14:57:36.783Z",
+    "updatedAt": "2026-04-23T12:55:18.672Z",
+    "__v": 1,
+    "backupHistory": [
+      {
+        "action": "RESTORE",
+        "trigger": "MANUAL",
+        "scope": "full",
+        "moduleKey": "",
+        "moduleName": "Full System",
+        "fileName": "smj-scheduled-backup-20260409-0052.json",
+        "recordCount": 551,
+        "status": "SUCCESS",
+        "createdAt": "2026-04-23T12:51:24.476Z"
+      }
+    ]
+  },
+  "includeDropdowns": true,
+  "meta": {
+    "generatedAt": "2026-04-23T12:55:21.850Z",
+    "modules": [
+      {
+        "key": "settings",
+        "name": "System Settings",
+        "collections": [
+          "settings"
+        ]
+      },
+      {
+        "key": "masters",
+        "name": "Master Data",
+        "collections": [
+          "customers",
+          "productTypes",
+          "expenseCategories"
+        ]
+      },
+      {
+        "key": "accounting",
+        "name": "Accounting",
+        "collections": [
+          "accountingEntities",
+          "accountingParties",
+          "accountingProducts",
+          "accountingFilterTemplates",
+          "accountingGeneratedJournals",
+          "accounts",
+          "journalEntries",
+          "journalLines"
+        ]
+      },
+      {
+        "key": "transactions",
+        "name": "Transactions",
+        "collections": [
+          "transactions"
+        ]
+      },
+      {
+        "key": "gatepasses",
+        "name": "Gate Passes",
+        "collections": [
+          "gatePasses"
+        ]
+      },
+      {
+        "key": "production",
+        "name": "Production",
+        "collections": [
+          "productionBatches"
+        ]
+      },
+      {
+        "key": "stock",
+        "name": "Stock Ledger",
+        "collections": [
+          "stockLedgers"
+        ]
+      },
+      {
+        "key": "expenses",
+        "name": "Expenses",
+        "collections": [
+          "expenseEntries"
+        ]
+      },
+      {
+        "key": "intelligence",
+        "name": "Audit Logs",
+        "collections": [
+          "systemActions"
+        ]
+      }
+    ]
+  }
+}

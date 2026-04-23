@@ -4,7 +4,14 @@ const ProductionBatch = require("../models/productionBatchModel");
 const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const Company = require("../models/companyModel");
+const JournalEntry = require("../models/journalEntryModel");
+const AccountingGeneratedJournal = require("../models/accountingGeneratedJournalModel");
 const axios = require("axios");
+const {
+  retrieveKnowledgeContext,
+  formatKnowledgeForPrompt,
+} = require("../services/aiKnowledgeRetrieval");
+const { answerFromManual } = require("../services/aiManualHelp");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -36,7 +43,24 @@ async function buildBusinessSnapshot() {
     $or: [{ date: { $gte: since } }, { createdAt: { $gte: since } }],
   });
 
-  const [sales7, sales30, purchases7, purchases30, stockAgg, paddyAgg, inProcessCount, completedCount, batchDoneCount, outputAgg, gateIn7, gateOut7, gateIn30, gateOut30] =
+  const [
+    sales7,
+    sales30,
+    purchases7,
+    purchases30,
+    stockAgg,
+    paddyAgg,
+    inProcessCount,
+    completedCount,
+    batchDoneCount,
+    outputAgg,
+    gateIn7,
+    gateOut7,
+    gateIn30,
+    gateOut30,
+    journalTotals,
+    savedJournalReportsTotal,
+  ] =
     await Promise.all([
       Transaction.find({ type: "SALE", ...inRange(since7) })
         .select("totalAmount partialPaid paymentStatus saleKind date createdAt")
@@ -154,6 +178,22 @@ async function buildBusinessSnapshot() {
           },
         },
       ]),
+      JournalEntry.aggregate([
+        {
+          $facet: {
+            total: [{ $count: "count" }],
+            posted: [{ $match: { status: "POSTED" } }, { $count: "count" }],
+            reversed: [{ $match: { status: "REVERSED" } }, { $count: "count" }],
+            last7: [{ $match: { date: { $gte: since7 } } }, { $count: "count" }],
+            last30: [{ $match: { date: { $gte: since30 } } }, { $count: "count" }],
+            byVoucherType: [
+              { $group: { _id: "$voucherType", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+            ],
+          },
+        },
+      ]),
+      AccountingGeneratedJournal.countDocuments({ reportKey: "journal" }),
     ]);
 
   const effectiveTimeMs = (tx) => {
@@ -250,6 +290,16 @@ async function buildBusinessSnapshot() {
     .sort((a, b) => a.productTypeName.localeCompare(b.productTypeName))
     .slice(0, 5);
 
+  const jt = Array.isArray(journalTotals) && journalTotals[0] ? journalTotals[0] : {};
+  const pickCount = (arr) => (Array.isArray(arr) && arr[0] ? toNum(arr[0].count) : 0);
+  const journalByVoucherType = Array.isArray(jt.byVoucherType)
+    ? jt.byVoucherType.reduce((acc, r) => {
+        const k = String(r?._id || "UNKNOWN");
+        acc[k] = toNum(r?.count);
+        return acc;
+      }, {})
+    : {};
+
   return {
     generatedAt: now.toISOString(),
     windows: {
@@ -289,6 +339,19 @@ async function buildBusinessSnapshot() {
       outwardLast7Days: { count: toNum(out7.count), totalQty: toNum(out7.totalQty), totalAmount: toNum(out7.totalAmount) },
       inwardLast30Days: { count: toNum(in30.count), totalQty: toNum(in30.totalQty), totalAmount: toNum(in30.totalAmount) },
       outwardLast30Days: { count: toNum(out30.count), totalQty: toNum(out30.totalQty), totalAmount: toNum(out30.totalAmount) },
+    },
+    accounting: {
+      journalEntries: {
+        total: pickCount(jt.total),
+        posted: pickCount(jt.posted),
+        reversed: pickCount(jt.reversed),
+        last7Days: pickCount(jt.last7),
+        last30Days: pickCount(jt.last30),
+        byVoucherType: journalByVoucherType,
+      },
+      savedJournalReports: {
+        total: toNum(savedJournalReportsTotal),
+      },
     },
   };
 }
@@ -450,8 +513,51 @@ function detectIntent(rawMessage) {
   const has = (s) => msg.includes(s);
 
   const wantsTotal = has("total") || has("overall") || has("kitna") || has("how much") || has("sum");
+  const wantsCount = wantsTotal || has("count") || has("numbers") || has("how many") || has("kitne");
   const wantsList = has("list") || has("show") || has("all") || has("names") || has("name") || has("customers") || has("customer");
   const wantsProduction = has("production") || has("finished") || has("rice stock");
+
+  const navWords =
+    has("how to") ||
+    has("how do i") ||
+    has("where is") ||
+    has("where can i") ||
+    has("open") ||
+    has("navigate") ||
+    has("sub tab") ||
+    has("submenu") ||
+    has("module") ||
+    has("tab") ||
+    has("kahan") ||
+    has("kaise") ||
+    has("kaisy") ||
+    has("kaisa") ||
+    has("kidhr");
+
+  const moduleWords =
+    has("gate pass") ||
+    has("gatepass") ||
+    has("production") ||
+    has("stock") ||
+    has("inventory") ||
+    has("accounting") ||
+    has("finance") ||
+    has("journal") ||
+    has("voucher") ||
+    has("ledger") ||
+    has("trial") ||
+    has("profit") ||
+    has("loss") ||
+    has("balance sheet") ||
+    has("cash flow") ||
+    has("reports") ||
+    has("settings") ||
+    has("system settings") ||
+    has("masterdata") ||
+    has("master data") ||
+    has("customer list");
+
+  if (navWords && moduleWords) return { type: "nav_help", q: String(rawMessage || "").trim() };
 
   // Managerial stock module has been removed from the system UI.
   if (has("managerial") || has("office") || has("admin stock")) {
@@ -474,6 +580,12 @@ function detectIntent(rawMessage) {
   if (has("purchase") || has("purchases")) return { type: "purchases_summary" };
   if (has("receivable") || has("pending payment") || has("due") || has("overdue")) return { type: "receivables_summary" };
   if (has("production") || has("batch")) return { type: "production_summary" };
+
+  if (has("journal") || has("voucher")) {
+    if (wantsCount) return { type: "journal_entries_summary" };
+    if (wantsList) return { type: "journal_entries_recent" };
+    return { type: "journal_entries_summary" };
+  }
 
   if (has("suggest") || has("recommend") || has("advice")) return { type: "suggestions" };
 
@@ -559,6 +671,19 @@ function answerFromSnapshot(intent, snapshot) {
   if (intent.type === "production_summary") {
     return `In-process batches: ${toNum(snapshot?.production?.inProcessBatches)}`;
   }
+  if (intent.type === "journal_entries_summary") {
+    const j = snapshot?.accounting?.journalEntries || {};
+    const total = toNum(j.total);
+    const last30 = toNum(j.last30Days);
+    const posted = toNum(j.posted);
+    const reversed = toNum(j.reversed);
+    return [
+      `Journal entries (total): ${total}`,
+      `Posted: ${posted}`,
+      `Reversed: ${reversed}`,
+      `Last 30 days: ${last30}`,
+    ].join("\n");
+  }
   if (intent.type === "suggestions") {
     const items = generateAutoSuggestions(snapshot).slice(0, 5);
     return items.map((x, i) => `${i + 1}. ${x.title} - ${x.description}`).join("\n");
@@ -611,7 +736,7 @@ async function answerFromDatabase(intent) {
   return null;
 }
 
-async function generateAIResponse({ message, context, history, snapshot, forceProvider }) {
+async function generateAIResponse({ message, context, history, snapshot, ragText, forceProvider }) {
   const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
   const hfModel = process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL;
   const hfBaseUrl = String(process.env.HF_BASE_URL || "https://router.huggingface.co").replace(
@@ -635,18 +760,20 @@ async function generateAIResponse({ message, context, history, snapshot, forcePr
 
       const baseRules = [
         "You are the SMJ Rice Mill AI assistant.",
-        "Give concise and practical answers based on the provided business snapshot.",
+        "Give concise and practical answers based on the provided business snapshot and retrieved knowledge.",
         "Never invent financial values not present in snapshot.",
+        "For journals, use snapshot.accounting.journalEntries.* counts.",
       ].join(" ");
 
       const isFlanT5 = String(hfModel || "").toLowerCase().includes("flan-t5");
 
       const prompt = isFlanT5
         ? [
-            "Instruction: Answer using ONLY the snapshot values. If data is missing, say what is missing.",
+            "Instruction: Answer using the snapshot + retrieved knowledge. If data is missing, say what is missing.",
             `Rules: ${baseRules}`,
             `Context: ${context || "general"}`,
             `Snapshot JSON: ${JSON.stringify(snapshot)}`,
+            ragText ? `Retrieved Knowledge:\n${ragText}` : null,
             `Question: ${String(message || "")}`,
             "Answer:",
           ]
@@ -656,6 +783,7 @@ async function generateAIResponse({ message, context, history, snapshot, forcePr
             baseRules,
             `Context: ${context || "general"}`,
             `Snapshot: ${JSON.stringify(snapshot)}`,
+            ragText ? `Retrieved Knowledge:\n${ragText}` : null,
           ].join("\n");
 
       const headers = { Authorization: `Bearer ${hfToken}` };
@@ -677,8 +805,10 @@ async function generateAIResponse({ message, context, history, snapshot, forcePr
                       "Answer naturally and helpfully.",
                       "If a question needs current system data, use the snapshot; if data is missing, say so.",
                       "Never invent financial numbers.",
+                      "For journal totals, read snapshot.accounting.journalEntries.*",
                       `Context: ${context || "general"}`,
                       `Snapshot JSON: ${JSON.stringify(snapshot)}`,
+                      ragText ? `Retrieved Knowledge:\n${ragText}` : null,
                     ].join("\n"),
                   },
                   ...chatHistory,
@@ -856,19 +986,20 @@ exports.sendMessage = async (req, res) => {
     const intent = detectIntent(cleanMessage);
     const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase();
 
-    // Deterministic real-time answers for common questions to avoid model hallucination.
-    const direct =
-      forceProvider === "huggingface" ? null : answerFromSnapshot(intent, snapshot);
+    const ragCtx = await retrieveKnowledgeContext(cleanMessage);
+    const ragText = formatKnowledgeForPrompt(ragCtx);
+
+    // Deterministic answers for key queries to avoid hallucination (always allowed, even when HF is enabled).
+    const direct = answerFromSnapshot(intent, snapshot);
+    const manualDirect = direct == null ? await answerFromManual(intent, cleanMessage) : null;
     const dbDirect =
-      forceProvider === "huggingface"
-        ? null
-        : direct == null
-          ? await answerFromDatabase(intent)
-          : null;
+      direct == null && manualDirect == null ? await answerFromDatabase(intent) : null;
 
     const ai =
       direct != null
         ? { text: direct, provider: "local", model: process.env.HF_MODEL || null, error: null }
+        : manualDirect != null
+          ? { text: manualDirect, provider: "local", model: process.env.HF_MODEL || null, error: null }
         : dbDirect != null
           ? { text: dbDirect, provider: "local", model: process.env.HF_MODEL || null, error: null }
           : await generateAIResponse({
@@ -876,6 +1007,7 @@ exports.sendMessage = async (req, res) => {
               context: (chat && chat.context) || "general",
               history: (chat && chat.messages) || [],
               snapshot,
+              ragText,
               forceProvider,
             });
 

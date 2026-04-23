@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "nodemon --ignore backend/backups/** --ignore backend/uploads/** backend/server.js"
+    "dev": "nodemon --ignore backend/backups/** --ignore backend/uploads/** backend/server.js",
+    "rag:reindex": "node backend/scripts/reindexAiKnowledge.js --days 90",
+    "rag:reindex:all": "node backend/scripts/reindexAiKnowledge.js --all"
   },
   "repository": {
     "type": "git",

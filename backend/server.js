@@ -5,6 +5,8 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
 const { initBackupScheduler } = require("./controllers/systemSettingsController");
+const { initAIKnowledgeSync } = require("./services/aiKnowledgeSync");
+const { initAIManualSync } = require("./services/aiManualSync");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -56,6 +58,14 @@ mongoose
 
 mongoose.connection.once("open", () => {
   initBackupScheduler();
+  initAIManualSync().then((r) => {
+    if (r?.started) console.log(`[AI][Manual] Loaded manual entries (${r.count || 0})`);
+  });
+  initAIKnowledgeSync().then((r) => {
+    if (r?.started) {
+      console.log(`[AI][RAG] Knowledge sync started (streams=${r.streams || 0}, pollMs=${r.pollMs})`);
+    }
+  });
 });
 
 // Start server
