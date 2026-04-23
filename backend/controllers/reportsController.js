@@ -1,8 +1,8 @@
+const mongoose = require("mongoose");
 const StockLedger = require("../models/stockLedgerModel");
 const ProductionBatch = require("../models/productionBatchModel");
 const GatePass = require("../models/gatePassModel");
 const ProductType = require("../models/productTypeModel");
-const Company = require("../models/companyModel");
 const AccountingFilterTemplate = require("../models/accountingFilterTemplateModel");
 const { getDateRangeFromQuery } = require("../utils/dateRange");
 
@@ -22,23 +22,48 @@ const parseListParam = (value) => {
     .filter(Boolean);
 };
 
+const buildNameOrIdFilter = async (Model, values = [], { idField, nameField }) => {
+  const list = parseListParam(values);
+  if (!list.length) return null;
+
+  const ids = list.filter((value) => mongoose.isValidObjectId(value));
+  const directNames = list.filter((value) => !mongoose.isValidObjectId(value));
+  const matchedRows = ids.length && Model ? await Model.find({ _id: { $in: ids } }).select("_id name").lean() : [];
+  const matchedNames = (matchedRows || []).map((row) => String(row?.name || "").trim()).filter(Boolean);
+  const uniqueNames = Array.from(new Set([...directNames, ...matchedNames]));
+
+  const clauses = [];
+  if (ids.length) clauses.push({ [idField]: { $in: ids } });
+  uniqueNames.forEach((name) => {
+    clauses.push({ [nameField]: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") } });
+  });
+
+  if (!clauses.length) return null;
+  if (clauses.length === 1) return clauses[0];
+  return { $or: clauses };
+};
+
 exports.getStockReport = async (req, res) => {
   try {
-    const { end } = parseRange(req);
+    const { start, end } = parseRange(req);
     const companyIds = parseListParam(req.query.companyId || req.query.companyIds);
     const productTypeIds = parseListParam(req.query.productTypeId || req.query.productTypeIds);
 
-    const filter = { date: { $lte: end } };
+    const filter = { date: { $gte: start, $lte: end } };
     if (companyIds.length) {
-      const companyRows = await Company.find({ _id: { $in: companyIds } }).select("_id name").lean();
-      const companyNameMatchers = (companyRows || [])
-        .map((c) => String(c?.name || "").trim())
-        .filter(Boolean)
-        .map((name) => ({ companyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") } }));
-
-      filter.$or = [{ companyId: { $in: companyIds } }, ...companyNameMatchers];
+      const companyFilter = await buildNameOrIdFilter(null, companyIds, {
+        idField: "companyId",
+        nameField: "companyName",
+      });
+      if (companyFilter) Object.assign(filter, companyFilter);
     }
-    if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
+    if (productTypeIds.length) {
+      const productFilter = await buildNameOrIdFilter(ProductType, productTypeIds, {
+        idField: "productTypeId",
+        nameField: "productTypeName",
+      });
+      if (productFilter) Object.assign(filter, productFilter);
+    }
 
     const productionLedgers = await StockLedger.find(filter).lean();
     const productTypes = await ProductType.find({}).lean().select("_id name pricePerKg defaultSaleRate");
@@ -68,11 +93,12 @@ exports.getStockReport = async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        production: Array.from(productionMap.values()),
-        asOfDate: end,
-      },
-    });
+        data: {
+          production: Array.from(productionMap.values()),
+          asOfDate: end,
+          rangeStart: start,
+        },
+      });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load stock report." });
   }
@@ -162,8 +188,20 @@ exports.getStockMovementReport = async (req, res) => {
     const productTypeIds = parseListParam(req.query.productTypeId || req.query.productTypeIds);
 
     const filter = { date: { $gte: start, $lte: end } };
-    if (companyIds.length) filter.companyId = { $in: companyIds };
-    if (productTypeIds.length) filter.productTypeId = { $in: productTypeIds };
+    if (companyIds.length) {
+      const companyFilter = await buildNameOrIdFilter(null, companyIds, {
+        idField: "companyId",
+        nameField: "companyName",
+      });
+      if (companyFilter) Object.assign(filter, companyFilter);
+    }
+    if (productTypeIds.length) {
+      const productFilter = await buildNameOrIdFilter(ProductType, productTypeIds, {
+        idField: "productTypeId",
+        nameField: "productTypeName",
+      });
+      if (productFilter) Object.assign(filter, productFilter);
+    }
 
     const rows = await StockLedger.find(filter).sort({ date: 1, createdAt: 1 }).lean();
     const batchNoSet = new Set();

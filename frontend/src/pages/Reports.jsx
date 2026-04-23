@@ -139,6 +139,26 @@ const mapStockMovementRows = (payload = []) =>
     ...r,
   }));
 
+const dedupeByName = (items = []) => {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const key = String(item?.name || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildStockProducts = (payload = {}, fallback = []) => {
+  const source = (payload?.production || [])
+    .map((row) => ({
+      _id: String(row.productTypeId || row.productTypeName || "").trim(),
+      name: String(row.productTypeName || "").trim(),
+    }))
+    .filter((row) => row._id && row.name);
+  return dedupeByName(source.length ? source : fallback);
+};
+
 function computeTotalsFromItems({ earnings, deductionsItems }) {
   const e = Array.isArray(earnings) ? earnings : [];
   const d = Array.isArray(deductionsItems) ? deductionsItems : [];
@@ -290,7 +310,20 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     setInvProductTypeIds([]);
   };
 
-  const openStockFilterPopup = () => {
+  const refreshInventoryFilterOptions = async () => {
+    try {
+      const [companyRes, productRes] = await Promise.all([api.get("/companies"), api.get("/product-types")]);
+      const companyList = dedupeByName(companyRes.data?.data || []);
+      const productList = dedupeByName(productRes.data?.data || []);
+      setInvCompanies((prev) => dedupeByName([...(prev || []), ...companyList]));
+      setInvProducts((prev) => dedupeByName([...(prev || []), ...productList]));
+    } catch {
+      // ignore; existing filter options can still be used
+    }
+  };
+
+  const openStockFilterPopup = async () => {
+    await refreshInventoryFilterOptions();
     setStockFilterOpen(true);
   };
 
@@ -507,8 +540,10 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           api.get("/reports/stock", params),
           api.get("/reports/stock-movement", params),
         ]);
-        setStockRows(mapStockRows(stockRes.data?.data || {}));
+        const stockPayload = stockRes.data?.data || {};
+        setStockRows(mapStockRows(stockPayload));
         setStockMovementRows(mapStockMovementRows(movementRes.data?.data || []));
+        setInvProducts((prev) => buildStockProducts(stockPayload, prev));
         setRows([]);
         return;
       }
@@ -648,15 +683,25 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           api.get("/companies"),
           api.get("/product-types"),
         ]);
+        const companyList = dedupeByName(compRes.data?.data || []);
+        const productList = dedupeByName(invProdRes.data?.data || []);
         setAccCompanies(compRes.data?.data || []);
         setAccAccounts(accRes.data?.data || []);
         setAccCustomers(customerRes.data?.data || []);
-        setInvCompanies(invCompRes.data?.data || []);
-        setInvProducts(invProdRes.data?.data || []);
+        setInvCompanies(dedupeByName(invCompRes.data?.data || companyList));
+        setInvProducts(productList);
       } catch {
         // ignore; reports can still load without these filters
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const onSettingsUpdated = () => {
+      refreshInventoryFilterOptions();
+    };
+    window.addEventListener("smj-settings-updated", onSettingsUpdated);
+    return () => window.removeEventListener("smj-settings-updated", onSettingsUpdated);
   }, []);
 
   useEffect(() => {

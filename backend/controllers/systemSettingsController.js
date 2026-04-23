@@ -4,7 +4,6 @@ const fs = require("fs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const SystemSettings = require("../models/systemSettingsModel");
-const Company = require("../models/companyModel");
 const ProductType = require("../models/productTypeModel");
 const ExpenseCategory = require("../models/expenseCategoryModel");
 const ProductionBatch = require("../models/productionBatchModel");
@@ -24,7 +23,6 @@ const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
 
 const COLLECTIONS = [
-  { key: "companies", model: Company },
   { key: "customers", model: Customer },
   { key: "productTypes", model: ProductType },
   { key: "expenseCategories", model: ExpenseCategory },
@@ -62,8 +60,8 @@ const MODULES = [
   {
     key: "masters",
     name: "Master Data",
-    description: "Companies, customers, product types and expense categories.",
-    collections: ["companies", "customers", "productTypes", "expenseCategories"],
+    description: "Customers, product types and expense categories.",
+    collections: ["customers", "productTypes", "expenseCategories"],
   },
   {
     key: "accounting",
@@ -614,8 +612,10 @@ exports.exportBackup = async (req, res) => {
     const includeDropdowns = String(req.query?.includeDropdowns ?? "true").toLowerCase() !== "false";
     const payload = await buildBackupPayload({ includeDropdowns });
     const suffix = includeDropdowns ? "with-dropdowns" : "records-only";
-    const fileName = `smj-backup-all-${suffix}-${new Date().toISOString().slice(0, 10)}.json`;
+    const nowParts = getNowInTimezoneParts(payload?.settings?.timezone || "Asia/Karachi");
+    const fileName = `smj-backup-all-${suffix}-${nowParts.dateKey.replace(/-/g, "")}-${nowParts.timeKey.replace(":", "")}.json`;
     const recordCount = countPayloadRecords(payload);
+    writeBackupSnapshotToDisk({ payload, fileName });
     await SystemSettings.findOneAndUpdate(
       {},
       { $set: { backupLastBackupAt: new Date() } },
@@ -729,8 +729,10 @@ exports.exportModuleBackup = async (req, res) => {
     const includeDropdowns = String(req.query?.includeDropdowns ?? "true").toLowerCase() !== "false";
     const payload = await buildBackupPayload({ moduleKey, includeDropdowns });
     const suffix = includeDropdowns ? "with-dropdowns" : "records-only";
-    const fileName = `smj-backup-${module.key}-${suffix}-${new Date().toISOString().slice(0, 10)}.json`;
+    const nowParts = getNowInTimezoneParts(payload?.settings?.timezone || "Asia/Karachi");
+    const fileName = `smj-backup-${module.key}-${suffix}-${nowParts.dateKey.replace(/-/g, "")}-${nowParts.timeKey.replace(":", "")}.json`;
     const recordCount = countPayloadRecords(payload, module.collections);
+    writeBackupSnapshotToDisk({ payload, fileName });
     await SystemSettings.findOneAndUpdate(
       {},
       { $set: { backupLastBackupAt: new Date() } },
@@ -862,26 +864,38 @@ exports.restoreModuleBackup = async (req, res) => {
   }
 };
 
-const getMailer = (settings = null) => {
-  const smtpUserFromSettings = String(settings?.smtpUser || "").trim();
-  const generalEmail = String(settings?.email || "").trim();
-  const user = String(process.env.SMJ_SMTP_USER || generalEmail || smtpUserFromSettings || "").trim();
-  const pass = String(process.env.SMJ_SMTP_PASS || settings?.smtpPass || "").trim();
-  let host = String(process.env.SMJ_SMTP_HOST || settings?.smtpHost || "").trim();
-  const port = Number(process.env.SMJ_SMTP_PORT || settings?.smtpPort || 587);
-  const secureSource =
-    process.env.SMJ_SMTP_SECURE != null ? process.env.SMJ_SMTP_SECURE : settings?.smtpSecure;
-  const secure = String(secureSource || "false") === "true" || secureSource === true;
-
-  // Friendly fallback for common setup: if user/pass exist and host is empty, infer provider.
-  if (!host && user) {
-    const domain = String(user.split("@")[1] || "").toLowerCase();
-    if (domain === "gmail.com") host = "smtp.gmail.com";
-    else if (domain.includes("outlook") || domain.includes("hotmail") || domain.includes("live")) {
-      host = "smtp.office365.com";
-    }
+const inferSmtpHost = (emailOrUser = "") => {
+  const domain = String(emailOrUser).split("@")[1]?.toLowerCase() || "";
+  if (domain === "gmail.com") return "smtp.gmail.com";
+  if (domain.includes("outlook") || domain.includes("hotmail") || domain.includes("live")) {
+    return "smtp.office365.com";
   }
+  return "";
+};
 
+const resolveMailerConfig = (settings = null) => {
+  const generalEmail = String(settings?.email || "").trim();
+  const smtpUserFromSettings = String(settings?.smtpUser || "").trim();
+  const smtpPassFromSettings = String(settings?.smtpPass || "").replace(/\s+/g, "").trim();
+  const smtpHostFromSettings = String(settings?.smtpHost || "").trim();
+  const mailFromFromSettings = String(settings?.mailFrom || "").trim();
+
+  // Frontend-saved System Settings must win so mail works the same on every machine.
+  const user = String(smtpUserFromSettings || generalEmail || process.env.SMJ_SMTP_USER || "").trim();
+  const pass = String(smtpPassFromSettings || process.env.SMJ_SMTP_PASS || "").replace(/\s+/g, "").trim();
+  const host = String(smtpHostFromSettings || inferSmtpHost(user) || process.env.SMJ_SMTP_HOST || "").trim();
+  const rawPort = settings?.smtpPort ?? process.env.SMJ_SMTP_PORT ?? 587;
+  const port = Number(rawPort || 587);
+  const secureSource =
+    settings?.smtpSecure != null ? settings.smtpSecure : process.env.SMJ_SMTP_SECURE;
+  const secure = String(secureSource || "false") === "true" || secureSource === true;
+  const from = String(mailFromFromSettings || generalEmail || user || process.env.SMJ_MAIL_FROM || "no-reply@smj.local").trim();
+
+  return { host, port, secure, user, pass, from };
+};
+
+const getMailer = (settings = null) => {
+  const { host, port, secure, user, pass } = resolveMailerConfig(settings);
   if (!host || !user || !pass) return null;
   return nodemailer.createTransport({
     host,
@@ -1031,7 +1045,7 @@ exports.sendEmailOtp = async (req, res) => {
 
     const otp = String(Math.floor(1000 + Math.random() * 9000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    const from = String(process.env.SMJ_MAIL_FROM || settings?.mailFrom || settings?.smtpUser || "no-reply@smj.local").trim();
+    const { from } = resolveMailerConfig(settings);
     const logoAttachment = resolveInlineLogoAttachment(settings);
     const emailContent = buildOtpEmail(settings, otp, expiresAt, logoAttachment?.cid || "");
     await transport.sendMail({

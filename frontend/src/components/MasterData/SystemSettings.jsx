@@ -27,6 +27,7 @@ import {
   Sparkles,
   CheckCircle2,
   Filter,
+  Mail,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -1283,6 +1284,7 @@ export default function SystemSettings() {
                   )}
                 </div>
               </div>
+
             </div>
 
             <div className="flex justify-end">
@@ -1300,13 +1302,6 @@ export default function SystemSettings() {
         {/* STOCK & ADMIN TAB */}
         {activeTab === "stock" && (
           <div className="space-y-4 w-full max-w-none">
-            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-teal-50 p-4">
-              <div className="text-lg font-semibold text-gray-900">Admin Settings</div>
-              <p className="mt-1 text-sm text-gray-600">
-                Control protected stock options and manage the main 4-digit admin PIN used for sensitive actions.
-              </p>
-            </div>
-
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-4">
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 space-y-4">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
@@ -1909,14 +1904,13 @@ export default function SystemSettings() {
       {otpDialog.open && (
         <div className="fixed inset-0 z-[120] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 shadow-2xl">
-            <div className="rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-[0.14em] text-emerald-700">Forgot PIN</div>
-              <h3 className="mt-1 text-xl font-semibold text-emerald-900">Reset Login PIN</h3>
-              <p className="mt-1 text-sm text-emerald-700/80">Send OTP, then set your new 4-digit PIN.</p>
-            </div>
+            <div className="text-left text-sm font-semibold text-emerald-800">Forgot PIN</div>
 
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">Email</div>
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
+                <Mail size={14} />
+                Recovery Email
+              </div>
               <div className="mt-1 text-sm font-medium text-emerald-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
               {otpDialog.expiresIn > 0 && (
                 <div className="mt-1 text-xs text-emerald-700">OTP expires in {formatCountdown(otpDialog.expiresIn)}</div>
@@ -1975,6 +1969,10 @@ export default function SystemSettings() {
                   }
                 />
               </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-700">
+              After OTP verification, enter your new 4-digit PIN below.
             </div>
 
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
