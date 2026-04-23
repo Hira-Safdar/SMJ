@@ -20,6 +20,15 @@ import Pin4Input from "../components/Pin4Input";
 
 const OTHER_OPTION = "__OTHER__";
 
+const createEmptyOutputForm = (defaultBagWeightKg = "") => ({
+  productTypeId: "",
+  productMode: "list",
+  productInput: "",
+  numBags: "",
+  perBagWeightKg: defaultBagWeightKg ? String(defaultBagWeightKg) : "",
+  netWeightKg: "",
+});
+
 function todayISODate() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -68,14 +77,7 @@ export default function Production() {
     remarks: "",
   });
 
-  const [outputForm, setOutputForm] = useState({
-    productTypeId: "",
-    productMode: "list",
-    productInput: "",
-    numBags: "",
-    perBagWeightKg: "",
-    netWeightKg: "",
-  });
+  const [outputForm, setOutputForm] = useState(createEmptyOutputForm());
 
   // Delete completed batch confirmation
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -631,12 +633,7 @@ export default function Production() {
         setErrorDialog({ open: true, message: res.data?.message || "Failed to add output." });
       } else {
         setSelectedBatch(res.data.data);
-        setOutputForm({
-          productTypeId: "",
-          numBags: "",
-          perBagWeightKg: settings.defaultBagWeightKg ? String(settings.defaultBagWeightKg) : "",
-          netWeightKg: "",
-        });
+        setOutputForm(createEmptyOutputForm(settings.defaultBagWeightKg));
         // keep output form visible
         await loadSummary();
         await loadBatches();

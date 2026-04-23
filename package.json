@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js"
+    "dev": "nodemon --ignore backend/backups/** --ignore backend/uploads/** backend/server.js"
   },
   "repository": {
     "type": "git",

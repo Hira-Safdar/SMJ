@@ -1,0 +1,405 @@
+{
+  "backupVersion": 3,
+  "exportedAt": "2026-04-23T09:06:37.858Z",
+  "scope": "module",
+  "moduleKey": "gatepasses",
+  "moduleName": "Gate Passes",
+  "includeDropdowns": true,
+  "gatePasses": [
+    {
+      "_id": "69c5148462197880ede36ed4",
+      "type": "IN",
+      "date": "2026-03-26T00:00:00.000Z",
+      "gatePassNo": "GPI-2026-00001",
+      "truckNo": "UYUU-5565",
+      "supplier": "Pakistan Trades",
+      "items": [
+        {
+          "brand": "Pakistan Trades",
+          "itemType": "Paddy",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 4209,
+          "unit": "kg",
+          "bagCount": 0,
+          "bagWeightKg": 0,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 0,
+          "_id": "69c5148462197880ede36ed5"
+        }
+      ],
+      "totalQuantity": 4209,
+      "totalAmount": 0,
+      "driverName": "Ali Khan",
+      "driverContact": "0325-2165022",
+      "freightCharges": 200,
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-03-26T11:12:04.975Z",
+      "updatedAt": "2026-03-26T11:12:04.975Z",
+      "__v": 0
+    },
+    {
+      "_id": "69c5152ffd4ed7c8e647e4f7",
+      "type": "IN",
+      "date": "2026-03-26T00:00:00.000Z",
+      "gatePassNo": "GPI-2026-00002",
+      "truckNo": "LNEB-1234",
+      "supplier": "Bismillah Rice",
+      "items": [
+        {
+          "brand": "Bismillah Rice",
+          "itemType": "Polished Grain",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 32375,
+          "unit": "kg",
+          "bagCount": 500,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0.25,
+          "grossWeightKg": 0,
+          "netWeightKg": 32375,
+          "_id": "69c5152ffd4ed7c8e647e4f8"
+        },
+        {
+          "brand": "SMJ",
+          "itemType": "Paddy",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 77700,
+          "unit": "kg",
+          "bagCount": 1200,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0.25,
+          "grossWeightKg": 0,
+          "netWeightKg": 77700,
+          "_id": "69c5152ffd4ed7c8e647e4f9"
+        }
+      ],
+      "totalQuantity": 110075,
+      "totalAmount": 0,
+      "driverName": "Burak Deniz",
+      "driverContact": "0326-5987451",
+      "freightCharges": 200,
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-03-26T11:14:55.581Z",
+      "updatedAt": "2026-03-26T11:14:55.581Z",
+      "__v": 0
+    },
+    {
+      "_id": "69c518e5fd6c89aebd847ca0",
+      "type": "OUT",
+      "date": "2026-03-26T00:00:00.000Z",
+      "gatePassNo": "GPO-2026-00001",
+      "truckNo": "UYUU-5565",
+      "customer": "Sajjad Asif",
+      "items": [
+        {
+          "brand": "Pakistan Trades",
+          "itemType": "Sella",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 1619,
+          "unit": "kg",
+          "rate": 400,
+          "amount": 647600,
+          "bagCount": 25,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0.23,
+          "grossWeightKg": 1625,
+          "netWeightKg": 1619,
+          "_id": "69c51a6a594e611d3415e8bd"
+        },
+        {
+          "brand": "Anwar Trades",
+          "itemType": "Broken Rice",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 777,
+          "unit": "kg",
+          "rate": 30,
+          "amount": 23310,
+          "bagCount": 12,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0.25,
+          "grossWeightKg": 780,
+          "netWeightKg": 777,
+          "_id": "69c51a6a594e611d3415e8be"
+        },
+        {
+          "brand": "SMJ",
+          "itemType": "Basmati Rice",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 65,
+          "unit": "kg",
+          "rate": 200,
+          "amount": 13000,
+          "bagCount": 1,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 65,
+          "netWeightKg": 65,
+          "_id": "69c51a6a594e611d3415e8bf"
+        }
+      ],
+      "totalQuantity": 2396,
+      "totalAmount": 647600,
+      "driverName": "",
+      "driverContact": "",
+      "paymentStatus": "PAID",
+      "amountPaid": 683910,
+      "remainingAmount": 0,
+      "status": "Pending",
+      "createdAt": "2026-03-26T11:30:46.014Z",
+      "updatedAt": "2026-03-26T11:37:14.485Z",
+      "__v": 0
+    },
+    {
+      "_id": "69ca117a330d6bf185cfa4c8",
+      "type": "IN",
+      "date": "2026-03-30T00:00:00.000Z",
+      "gatePassNo": "GPI-2026-00003",
+      "truckNo": "UYUU-5565",
+      "supplier": "Bismillah Rice",
+      "items": [
+        {
+          "brand": "Bismillah Rice",
+          "itemType": "Kernal",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 1625,
+          "unit": "kg",
+          "bagCount": 25,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 1625,
+          "_id": "69ca117a330d6bf185cfa4c9"
+        }
+      ],
+      "totalQuantity": 1625,
+      "totalAmount": 0,
+      "driverName": "",
+      "driverContact": "",
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-03-30T06:00:26.360Z",
+      "updatedAt": "2026-03-30T06:00:26.360Z",
+      "__v": 0
+    },
+    {
+      "_id": "69ca11df330d6bf185cfa4f1",
+      "type": "IN",
+      "date": "2026-03-30T00:00:00.000Z",
+      "gatePassNo": "GPI-2026-00004",
+      "truckNo": "JHGF-2555",
+      "supplier": "SMJ",
+      "items": [
+        {
+          "brand": "SMJ",
+          "itemType": "Kernal",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 32500,
+          "unit": "kg",
+          "bagCount": 500,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 32500,
+          "_id": "69ca11df330d6bf185cfa4f2"
+        }
+      ],
+      "totalQuantity": 32500,
+      "totalAmount": 0,
+      "driverName": "",
+      "driverContact": "",
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-03-30T06:02:07.897Z",
+      "updatedAt": "2026-03-30T06:02:07.897Z",
+      "__v": 0
+    },
+    {
+      "_id": "69e502dc34351338beb38342",
+      "type": "IN",
+      "date": "2026-04-19T00:00:00.000Z",
+      "gatePassNo": "GPI-2026-00005",
+      "truckNo": "LEB-2456",
+      "supplier": "Lala Rice",
+      "items": [
+        {
+          "brand": "Lala Rice",
+          "itemType": "Broken Rice",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 1300,
+          "unit": "kg",
+          "bagCount": 20,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 1300,
+          "_id": "69e502dc34351338beb38343"
+        }
+      ],
+      "totalQuantity": 1300,
+      "totalAmount": 0,
+      "driverName": "Ali Khan",
+      "driverContact": "",
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-04-19T16:29:16.498Z",
+      "updatedAt": "2026-04-19T16:29:16.498Z",
+      "__v": 0
+    },
+    {
+      "_id": "69e9c587dba491b95863e05c",
+      "type": "IN",
+      "date": "2026-04-23T00:00:00.000Z",
+      "truckNo": "JHGF-2555",
+      "supplier": "Innovista",
+      "items": [
+        {
+          "brand": "Innovista",
+          "itemType": "New Rice",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 81250,
+          "unit": "kg",
+          "bagCount": 1250,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 81250,
+          "_id": "69e9c587dba491b95863e05d"
+        }
+      ],
+      "totalQuantity": 81250,
+      "totalAmount": 0,
+      "driverName": "Mustafa Kamal Pasha",
+      "driverContact": "0325-1469842",
+      "freightCharges": 2000,
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-04-23T07:08:55.014Z",
+      "updatedAt": "2026-04-23T07:08:55.014Z",
+      "gatePassNo": "GPI-2026-00006",
+      "__v": 0
+    },
+    {
+      "_id": "69e9c587dba491b95863e063",
+      "type": "IN",
+      "date": "2026-04-23T00:00:00.000Z",
+      "truckNo": "JHGF-2555",
+      "supplier": "Innovista",
+      "items": [
+        {
+          "brand": "Innovista",
+          "itemType": "New Rice",
+          "stockType": "Production",
+          "customItemName": "",
+          "quantity": 81250,
+          "unit": "kg",
+          "bagCount": 1250,
+          "bagWeightKg": 65,
+          "emptyBagWeightKg": 0,
+          "grossWeightKg": 0,
+          "netWeightKg": 81250,
+          "_id": "69e9c587dba491b95863e064"
+        }
+      ],
+      "totalQuantity": 81250,
+      "totalAmount": 0,
+      "driverName": "Mustafa Kamal Pasha",
+      "driverContact": "0325-1469842",
+      "freightCharges": 2000,
+      "paymentStatus": "PAID",
+      "status": "Pending",
+      "createdAt": "2026-04-23T07:08:55.717Z",
+      "updatedAt": "2026-04-23T07:08:55.717Z",
+      "gatePassNo": "GPI-2026-00007",
+      "__v": 0
+    }
+  ],
+  "meta": {
+    "generatedAt": "2026-04-23T09:06:37.858Z",
+    "modules": [
+      {
+        "key": "settings",
+        "name": "System Settings",
+        "collections": [
+          "settings"
+        ]
+      },
+      {
+        "key": "masters",
+        "name": "Master Data",
+        "collections": [
+          "customers",
+          "productTypes",
+          "expenseCategories"
+        ]
+      },
+      {
+        "key": "accounting",
+        "name": "Accounting",
+        "collections": [
+          "accountingEntities",
+          "accountingParties",
+          "accountingProducts",
+          "accountingFilterTemplates",
+          "accountingGeneratedJournals",
+          "accounts",
+          "journalEntries",
+          "journalLines"
+        ]
+      },
+      {
+        "key": "transactions",
+        "name": "Transactions",
+        "collections": [
+          "transactions"
+        ]
+      },
+      {
+        "key": "gatepasses",
+        "name": "Gate Passes",
+        "collections": [
+          "gatePasses"
+        ]
+      },
+      {
+        "key": "production",
+        "name": "Production",
+        "collections": [
+          "productionBatches"
+        ]
+      },
+      {
+        "key": "stock",
+        "name": "Stock Ledger",
+        "collections": [
+          "stockLedgers"
+        ]
+      },
+      {
+        "key": "expenses",
+        "name": "Expenses",
+        "collections": [
+          "expenseEntries"
+        ]
+      },
+      {
+        "key": "intelligence",
+        "name": "Audit Logs",
+        "collections": [
+          "systemActions"
+        ]
+      }
+    ]
+  }
+}
