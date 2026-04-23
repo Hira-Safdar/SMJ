@@ -1809,34 +1809,6 @@ export default function SystemSettings() {
                     </table>
                   </div>
                 )}
-                {false && filteredHistory.slice(0, 12).map((entry, index) => (
-                  <div
-                    key={`${entry.createdAt || "history"}-${entry.fileName || index}`}
-                    className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-semibold text-gray-900">{entry.moduleName || "Module"}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs ${
-                          entry.action === "RESTORE" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"
-                        }`}>
-                          {entry.action}
-                        </span>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-600 border border-gray-200">
-                          {entry.scope === "full" ? "Full System" : "Module"}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {entry.fileName || "backup.json"} • {entry.recordCount || 0} records • {formatDateTime(entry.createdAt)}
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500 flex flex-wrap gap-2">
-                      <span className="rounded-full bg-white border border-gray-200 px-2 py-1">
-                        {entry.status || "SUCCESS"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
