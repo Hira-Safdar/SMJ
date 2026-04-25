@@ -28,7 +28,7 @@ const REPORT_TABS = [
   { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
   { key: "stock-reports", label: "Stock Reports", icon: <Package size={16} /> },
   { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
-  { key: "gatepass", label: "Gatepass Report", icon: <Truck size={16} /> },
+  { key: "gatepass", label: "Gatepass Reports", icon: <Truck size={16} /> },
   { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
 ];
 
@@ -82,6 +82,14 @@ const shortEntryId = (value) => {
   return raw.slice(-4);
 };
 const fmtDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
+const normalizePaymentStatus = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "Unpaid/Pending";
+  if (raw.includes("partial")) return "Partial Paid";
+  if (raw.includes("paid")) return "Paid";
+  if (raw.includes("unpaid") || raw.includes("pending")) return "Unpaid/Pending";
+  return "Unpaid/Pending";
+};
 const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleDateString("en-US", { month: "long", day: "2-digit" });
@@ -237,6 +245,9 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [invCompanyIds, setInvCompanyIds] = useState([]);
   const [invProductTypeIds, setInvProductTypeIds] = useState([]);
   const [stockFilterOpen, setStockFilterOpen] = useState(false);
+
+  // Gatepass report sub-tabs
+  const [gatepassSubTab, setGatepassSubTab] = useState("history"); // history|inward|outward
 
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
@@ -398,6 +409,44 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     lines.push(`Date: ${stockAsOfDateLabel}`);
     return lines;
   }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockAsOfDateLabel]);
+
+  const gatepassSubTabs = useMemo(
+    () => [
+      { key: "history", label: "History (All)" },
+      { key: "inward", label: "Inward" },
+      { key: "outward", label: "Outward" },
+    ],
+    []
+  );
+
+  const gatepassFilteredRows = useMemo(() => {
+    if (activeTab !== "gatepass") return rows;
+    if (gatepassSubTab === "inward") return (rows || []).filter((r) => String(r?.type || "").trim() === "IN");
+    if (gatepassSubTab === "outward") return (rows || []).filter((r) => String(r?.type || "").trim() === "OUT");
+    return rows;
+  }, [activeTab, gatepassSubTab, rows]);
+
+  const gatepassFilterOptions = useMemo(() => {
+    if (activeTab !== "gatepass") {
+      return { types: ["IN", "OUT"], paymentStatuses: ["Paid", "Partial Paid", "Unpaid/Pending"] };
+    }
+    const types = new Set();
+    (rows || []).forEach((r) => {
+      const type = String(r?.type || "").trim();
+      if (type) types.add(type);
+    });
+    const sortText = (a, b) => String(a).localeCompare(String(b));
+    return {
+      types: Array.from(types.size ? types : new Set(["IN", "OUT"])).sort(sortText),
+      paymentStatuses: ["Paid", "Partial Paid", "Unpaid/Pending"],
+    };
+  }, [activeTab, rows]);
+
+  const gatepassReportContextLines = useMemo(() => {
+    if (activeTab !== "gatepass") return [];
+    const subLabel = gatepassSubTabs.find((t) => t.key === gatepassSubTab)?.label || "History (All)";
+    return [`View: ${subLabel}`, `Date Range: ${stockAsOfDateLabel}`];
+  }, [activeTab, gatepassSubTab, gatepassSubTabs, stockAsOfDateLabel]);
 
   const visibleTabs = useMemo(() => {
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
@@ -573,6 +622,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           (res.data?.data || []).map((r) => ({
             id: r._id,
             ...r,
+            paymentStatusLabel: normalizePaymentStatus(r.paymentStatus),
           }))
         );
         return;
@@ -1295,7 +1345,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
               v || "-"
             ),
         },
-        { key: "type", label: "Type" },
+        { key: "type", label: "Type", filterOptions: gatepassFilterOptions.types },
         { key: "partyName", label: "Party" },
         { key: "companyNames", label: "Company" },
         { key: "productNames", label: "Products" },
@@ -1303,8 +1353,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "totalBags", label: "Bags" },
         { key: "totalWeightKg", label: "Weight (kg)" },
         { key: "totalAmount", label: "Amount (PKR)", render: (v) => fmt(v) },
-        { key: "paymentStatus", label: "Payment" },
-        { key: "status", label: "Status" },
+        { key: "paymentStatusLabel", label: "Payment", filterOptions: gatepassFilterOptions.paymentStatuses },
       ];
     }
     if (activeTab === "ledger") {
@@ -1446,7 +1495,15 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           ),
       },
     ];
-  }, [activeTab, navigate, openLedgerDrill, openVoucherDrill, openStockMovementDrill]);
+  }, [
+    activeTab,
+    gatepassFilterOptions.types,
+    gatepassFilterOptions.paymentStatuses,
+    navigate,
+    openLedgerDrill,
+    openVoucherDrill,
+    openStockMovementDrill,
+  ]);
 
   const title = visibleTabs.find((t) => t.key === activeTab)?.label || "Report";
   const emptyMessage = `No ${title.toLowerCase()} found.`;
@@ -2852,6 +2909,48 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         showClearFilters={false}
                         showExport
                         showPrint
+                        showRecordCount={!(embedded && activeTab === "ledger")}
+                      />
+                    </div>
+                  )
+                ) : activeTab === "gatepass" ? (
+                  loading ? (
+                    <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        {gatepassSubTabs.map((t) => (
+                          <button
+                            key={t.key}
+                            type="button"
+                            onClick={() => setGatepassSubTab(t.key)}
+                            className={`inline-flex items-center rounded-lg border px-3 py-2 text-xs ${
+                              gatepassSubTab === t.key
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <DataTable
+                        title={
+                          gatepassSubTab === "inward"
+                            ? "Gatepass History (Inward)"
+                            : gatepassSubTab === "outward"
+                              ? "Gatepass History (Outward)"
+                              : "Gatepass History (All)"
+                        }
+                        columns={columns}
+                        data={gatepassFilteredRows}
+                        idKey="id"
+                        searchPlaceholder="Search gatepass history..."
+                        emptyMessage={emptyMessage}
+                        rowClassName={reportRowClass}
+                        showExport
+                        showPrint
+                        reportContextLines={gatepassReportContextLines}
                         showRecordCount={!(embedded && activeTab === "ledger")}
                       />
                     </div>

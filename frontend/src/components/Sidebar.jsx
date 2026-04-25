@@ -65,7 +65,7 @@ const MENU = [
       { name: "Accounting & Finance Reports", path: "/reports?tab=acc-reports" },
       { name: "Stock Reports", path: "/reports?tab=stock-reports" },
       { name: "Production Summary", path: "/reports?tab=production-summary" },
-      { name: "Gatepass", path: "/reports?tab=gatepass" },
+      { name: "Gatepass Reports", path: "/reports?tab=gatepass" },
       { name: "Customer List", path: "/reports?tab=customers" },
     ],
   },

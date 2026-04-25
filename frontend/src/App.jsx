@@ -30,6 +30,7 @@ export default function App() {
                   "acc-reports",
                   "stock-reports",
                   "production-summary",
+                  "gatepass",
                   "by-product",
                   "production",
                   "companies",

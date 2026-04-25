@@ -132,7 +132,17 @@ exports.getGatePassReport = async (req, res) => {
       const companyNames = Array.from(
         new Set(
           items
-            .map((it) => String(it?.brand || gp.supplier || "").trim())
+            .map((it) =>
+              String(
+                it?.brand ||
+                  it?.brandName ||
+                  it?.companyName ||
+                  it?.company ||
+                  it?.supplier ||
+                  gp.supplier ||
+                  ""
+              ).trim()
+            )
             .filter(Boolean)
         )
       );
@@ -167,9 +177,7 @@ exports.getGatePassReport = async (req, res) => {
         totalAmount: Number(Number(gp.totalAmount || 0).toFixed(2)),
         paymentStatus: gp.paymentStatus || "-",
         status: gp.status || "-",
-        targetPath: `/gatepass?tab=${gp.type || "IN"}&highlight=${encodeURIComponent(
-          gp.gatePassNo || ""
-        )}`,
+        targetPath: `/gatepass?tab=${gp.type || "IN"}&highlight=${encodeURIComponent(String(gp._id || ""))}`,
       };
     });
 
@@ -241,7 +249,9 @@ exports.getStockMovementReport = async (req, res) => {
       const referenceTarget =
         referenceType === "gatepass"
           ? {
-              path: `/gatepass?tab=${gatePass?.type || (String(reference).startsWith("GPO-") ? "OUT" : "IN")}&highlight=${encodeURIComponent(reference)}`,
+              path: `/gatepass?tab=${
+                gatePass?.type || (String(reference).startsWith("GPO-") ? "OUT" : "IN")
+              }&highlight=${encodeURIComponent(String(gatePass?._id || reference))}`,
             }
           : referenceType === "production"
           ? {
