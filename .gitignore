@@ -18,6 +18,10 @@ yarn-error.log*
 
 # Cache
 .npm-cache/
+frontend/.npm-cache/
+
+# Backend backups (auto-generated)
+backend/backups/
 
 # Editor folders
 .vscode/
