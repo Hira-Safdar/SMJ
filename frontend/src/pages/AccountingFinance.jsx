@@ -9,7 +9,6 @@ import {
   Scale,
   TrendingUp,
   Building2,
-  ArrowUpDown,
   Plus,
   Save,
   X,
@@ -39,7 +38,6 @@ const TABS = [
   { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
   { key: "pl", label: "Profit & Loss", icon: <TrendingUp size={16} /> },
   { key: "balance", label: "Balance Sheet", icon: <Building2 size={16} /> },
-  { key: "cash-flow", label: "Cash Flow", icon: <ArrowUpDown size={16} /> },
 ];
 
 const VOUCHER_TYPES = ["JOURNAL", "PAYMENT", "RECEIPT"];
@@ -426,16 +424,6 @@ export default function AccountingFinance() {
   const [activeGeneratedBalanceId, setActiveGeneratedBalanceId] = useState("");
   const [balanceEditDialog, setBalanceEditDialog] = useState({ open: false, rows: [], sourceId: "" });
 
-  const [cashFlowStart, setCashFlowStart] = useState("");
-  const [cashFlowEnd, setCashFlowEnd] = useState("");
-  const [cashFlowRows, setCashFlowRows] = useState([]);
-  const [cashFlowTotals, setCashFlowTotals] = useState({
-    cashIn: 0,
-    cashOut: 0,
-    netCashFlow: 0,
-    cashInHand: 0,
-  });
-  const [cashFlowLoading, setCashFlowLoading] = useState(false);
 
   const [ledgerEditDialog, setLedgerEditDialog] = useState({ open: false, rows: [], sourceId: "" });
   const [trialEditDialog, setTrialEditDialog] = useState({ open: false, rows: [], sourceId: "" });
@@ -1260,16 +1248,6 @@ export default function AccountingFinance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== "cash-flow") return;
-    const now = new Date();
-    const defaultStart = cashFlowStart || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const defaultEnd = cashFlowEnd || now.toISOString().slice(0, 10);
-    if (!cashFlowStart) setCashFlowStart(defaultStart);
-    if (!cashFlowEnd) setCashFlowEnd(defaultEnd);
-    loadCashFlow({ start: defaultStart, end: defaultEnd }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "journal-entry") return;
@@ -2838,33 +2816,6 @@ export default function AccountingFinance() {
       }
     } else {
       toast.success("Edits applied for this session.");
-    }
-  };
-
-  const loadCashFlow = async (override = {}) => {
-    const start = String(override.start ?? cashFlowStart ?? "").trim();
-    const end = String(override.end ?? cashFlowEnd ?? "").trim();
-    if (!start || !end) return;
-    try {
-      setCashFlowLoading(true);
-      const res = await api.get("/accounting/cash-flow", {
-        params: { range: "custom", startDate: start, endDate: end },
-      });
-      const data = res.data?.data || {};
-      const totals = data.totals || {};
-      setCashFlowRows(Array.isArray(data.rows) ? data.rows : []);
-      setCashFlowTotals({
-        cashIn: Number(totals.cashIn || 0),
-        cashOut: Number(totals.cashOut || 0),
-        netCashFlow: Number(totals.netCashFlow || 0),
-        cashInHand: Number(totals.cashInHand || 0),
-      });
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to load cash flow.");
-      setCashFlowRows([]);
-      setCashFlowTotals({ cashIn: 0, cashOut: 0, netCashFlow: 0, cashInHand: 0 });
-    } finally {
-      setCashFlowLoading(false);
     }
   };
 
@@ -6238,106 +6189,6 @@ export default function AccountingFinance() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "cash-flow" && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-gray-900">Cash Flow</div>
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-gray-600">From</span>
-                <input
-                  type="date"
-                  value={cashFlowStart}
-                  onChange={(e) => setCashFlowStart(e.target.value)}
-                  className="text-xs bg-white border border-gray-300 rounded px-2 py-1"
-                />
-                <span className="text-gray-600">To</span>
-                <input
-                  type="date"
-                  value={cashFlowEnd}
-                  onChange={(e) => setCashFlowEnd(e.target.value)}
-                  className="text-xs bg-white border border-gray-300 rounded px-2 py-1"
-                />
-                <button
-                  type="button"
-                  onClick={() => loadCashFlow({ start: cashFlowStart, end: cashFlowEnd })}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  <RefreshCcw size={14} /> Refresh
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
-                <div className="text-xs text-gray-600">Cash In</div>
-                <div className="text-base font-semibold text-gray-900">
-                  Rs. {round2(cashFlowTotals.cashIn).toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
-                <div className="text-xs text-gray-600">Cash Out</div>
-                <div className="text-base font-semibold text-gray-900">
-                  Rs. {round2(cashFlowTotals.cashOut).toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-                <div className="text-xs text-gray-600">Net Cash Flow</div>
-                <div className="text-base font-semibold text-gray-900">
-                  Rs. {round2(cashFlowTotals.netCashFlow).toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                <div className="text-xs text-gray-600">Cash in Hand</div>
-                <div className="text-base font-semibold text-gray-900">
-                  Rs. {round2(cashFlowTotals.cashInHand).toLocaleString()}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[600px] w-full text-sm">
-                <thead className="bg-gray-50 text-gray-800">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2">Account</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Type</th>
-                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Cash In</th>
-                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Cash Out</th>
-                    <th className="text-right font-semibold px-3 py-2 w-[140px]">Net</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {cashFlowLoading && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
-                        Loading cash flow...
-                      </td>
-                    </tr>
-                  )}
-                  {!cashFlowLoading && cashFlowRows.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-4 text-sm text-gray-500 text-center">
-                        No cash flow data for the selected range.
-                      </td>
-                    </tr>
-                  )}
-                  {!cashFlowLoading &&
-                    cashFlowRows.map((r) => (
-                      <tr key={r.accountId}>
-                        <td className="px-3 py-2">{r.accountName || "-"}</td>
-                        <td className="px-3 py-2">{String(r.subType || "").replace(/_/g, " ")}</td>
-                        <td className="px-3 py-2 text-right">{round2(r.cashIn).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right">{round2(r.cashOut).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right">{round2(r.net).toLocaleString()}</td>
-                      </tr>
-                    ))}
                 </tbody>
               </table>
             </div>

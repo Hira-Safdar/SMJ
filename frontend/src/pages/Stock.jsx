@@ -585,11 +585,19 @@ export default function Stock() {
 
   const activeProductColumns = useMemo(() => {
     if (!showOnlyNonZeroProducts) return allProducts;
-    return allProducts.filter((name) =>
-      (visibleStockTableData || []).some(
-        (row) => Math.round(Number(row.productMap?.[name] || 0)) > 0,
-      ),
-    );
+    const normalizeProductName = (name) => {
+      const raw = String(name || "").trim();
+      return raw.toLowerCase() === "unprocessed paddy" ? "Paddy" : raw;
+    };
+    const activeSet = new Set();
+    (visibleStockTableData || []).forEach((row) => {
+      Object.entries(row.productMap || {}).forEach(([pName, qty]) => {
+        if (Number(qty || 0) > 0) {
+          activeSet.add(normalizeProductName(pName));
+        }
+      });
+    });
+    return allProducts.filter((name) => activeSet.has(normalizeProductName(name)));
   }, [allProducts, visibleStockTableData, showOnlyNonZeroProducts]);
 
   const stockColumns = useMemo(

@@ -54,7 +54,6 @@ const MENU = [
       { name: "Trial Balance", path: "/accounting-finance?tab=trial" },
       { name: "Profit & Loss", path: "/accounting-finance?tab=pl" },
       { name: "Balance Sheet", path: "/accounting-finance?tab=balance" },
-      { name: "Cash Flow", path: "/accounting-finance?tab=cash-flow" },
     ],
   },
   {
