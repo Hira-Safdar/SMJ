@@ -308,20 +308,30 @@ export default function Stock() {
 
   // --------------------------------------------------------------------
   // DATE FILTER LOGIC
-  // applies on BOTH createdAt OR lastUpdated
+  // applies on created/updated plus business dates (row.date and source dates)
   // --------------------------------------------------------------------
   function recordMatchesDate(row) {
-    const created = row.createdAt ? new Date(row.createdAt) : null;
-    const updated = row.lastUpdated ? new Date(row.lastUpdated) : null;
+    const candidates = [
+      row.createdAt,
+      row.lastUpdated,
+      row.date,
+      ...(Array.isArray(row.sources)
+        ? row.sources.flatMap((s) => [s?.dateTime, s?.date]).filter(Boolean)
+        : []),
+    ]
+      .map((v) => {
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? null : d;
+      })
+      .filter(Boolean);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
     if (dateMode === "TODAY") {
-      if ((created && created >= today) || (updated && updated >= today)) {
-        return true;
-      }
-      return false;
+      return candidates.some((d) => d >= today && d < tomorrow);
     }
 
     // RANGE MODE
@@ -331,10 +341,7 @@ export default function Stock() {
     const to = new Date(dateTo);
     to.setHours(23, 59, 59, 999);
 
-    const createdMatch = created && created >= from && created <= to;
-    const updatedMatch = updated && updated >= from && updated <= to;
-
-    return createdMatch || updatedMatch;
+    return candidates.some((d) => d >= from && d <= to);
   }
 
   // --------------------------------------------------------------------
@@ -455,23 +462,35 @@ export default function Stock() {
       }
       grouped.set(key, existing);
     });
-    // Ensure all brands appear
-    allCompanies.forEach((brand) => {
-      const key = brand || "Unbranded";
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          __rowId: key,
-          companyName: key,
-          balanceKg: 0,
-          lastUpdated: null,
-          products: [],
-          productMap: {},
-          sources: [],
-        });
-      }
-    });
+
+    // Show all companies only on default "full view".
+    // When date/company/product filters are applied (especially TODAY),
+    // keep table strictly aligned with filtered movement rows.
+    const shouldBackfillAllCompanies =
+      dateMode === "RANGE" &&
+      !dateFrom &&
+      !dateTo &&
+      companyFilter === "ALL" &&
+      productFilter === "ALL";
+
+    if (shouldBackfillAllCompanies) {
+      allCompanies.forEach((brand) => {
+        const key = brand || "Unbranded";
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            __rowId: key,
+            companyName: key,
+            balanceKg: 0,
+            lastUpdated: null,
+            products: [],
+            productMap: {},
+            sources: [],
+          });
+        }
+      });
+    }
     return Array.from(grouped.values());
-  }, [filteredRows, brandById, brandByName, allCompanies]);
+  }, [filteredRows, brandById, brandByName, allCompanies, dateMode, dateFrom, dateTo, companyFilter, productFilter]);
 
   const stockSummaryCards = useMemo(() => {
     const rows = stockTableData || [];

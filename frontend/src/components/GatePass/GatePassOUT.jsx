@@ -1779,7 +1779,7 @@ export default function GatePassOUT({ highlightId = "" }) {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Empty Bag (kg)</label>
+                    <label className="block text-xs text-gray-500 mb-1">Empty Bag Weight(kg)</label>
                     <input
                       value={it.emptyBagWeightKg || ""}
                       onChange={(e) => updateItemValue(idx, "emptyBagWeightKg", e.target.value)}

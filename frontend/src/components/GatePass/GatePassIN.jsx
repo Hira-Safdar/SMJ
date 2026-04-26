@@ -1725,7 +1725,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Empty Bag (kg)</label>
+                <label className="block text-xs text-gray-500 mb-1">Empty Bag Weight (kg)</label>
                     <input
                       value={items[0]?.emptyBagWeightKg ?? ""}
                       onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}

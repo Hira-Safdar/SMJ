@@ -231,6 +231,12 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [filterTemplates, setFilterTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateDialog, setTemplateDialog] = useState({ open: false, name: "" });
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    open: false,
+    kind: "",
+    item: null,
+    label: "",
+  });
   const [generatedJournalList, setGeneratedJournalList] = useState([]);
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
   const [generatedTrialList, setGeneratedTrialList] = useState([]);
@@ -2435,6 +2441,28 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   };
 
+  const openDeleteConfirm = (kind, item, label) => {
+    setDeleteConfirm({ open: true, kind, item, label: String(label || "").trim() });
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteConfirm({ open: false, kind: "", item: null, label: "" });
+  };
+
+  const confirmDeleteGenerated = async () => {
+    const { kind, item } = deleteConfirm;
+    if (!item || !kind) {
+      closeDeleteConfirm();
+      return;
+    }
+    if (kind === "journal") await handleDeleteGeneratedJournal(item);
+    else if (kind === "ledger") await handleDeleteGeneratedLedger(item);
+    else if (kind === "trial") await handleDeleteGeneratedTrial(item);
+    else if (kind === "pl") await handleDeleteGeneratedPl(item);
+    else if (kind === "balance") await handleDeleteGeneratedBalance(item);
+    closeDeleteConfirm();
+  };
+
   const downloadLedgerDrillPdf = () => {
     const debits = (drill.rows || []).filter((r) => Number(r.debit || 0) > 0);
     const credits = (drill.rows || []).filter((r) => Number(r.credit || 0) > 0);
@@ -2588,7 +2616,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteGeneratedJournal(j)}
+                              onClick={() => openDeleteConfirm("journal", j, j.name)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >
@@ -2645,7 +2673,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteGeneratedLedger(j)}
+                              onClick={() => openDeleteConfirm("ledger", j, j.name)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >
@@ -2702,7 +2730,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteGeneratedTrial(j)}
+                              onClick={() => openDeleteConfirm("trial", j, j.name)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >
@@ -2759,7 +2787,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteGeneratedPl(j)}
+                              onClick={() => openDeleteConfirm("pl", j, j.name)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >
@@ -2816,7 +2844,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteGeneratedBalance(j)}
+                              onClick={() => openDeleteConfirm("balance", j, j.name)}
                               className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                               title="Delete"
                             >
@@ -3064,6 +3092,35 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                   Save
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-4">
+            <div className="text-sm font-semibold text-gray-900">Are you sure?</div>
+            <div className="mt-2 text-sm text-gray-700">
+              {deleteConfirm.label
+                ? `Do you want to delete "${deleteConfirm.label}"?`
+                : "Do you want to delete this report?"}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteConfirm}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteGenerated}
+                className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700"
+              >
+                Yes
+              </button>
             </div>
           </div>
         </div>
