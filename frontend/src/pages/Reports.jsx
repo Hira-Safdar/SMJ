@@ -1122,7 +1122,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     { key: "party", label: "Company Name" },
     { key: "item", label: "Product" },
     { key: "balance", label: "Weight (kg)" },
-    { key: "valuePKR", label: "Value (PKR)", render: (v) => fmt(v) },
   ];
 
   const stockSnapshotToolbarActions = (

@@ -843,7 +843,8 @@ export default function GatePassOUT({ highlightId = "" }) {
                 {isBrandDeletable(brand) ? (
                   <button
                     type="button"
-                    onClick={(e) => {
+                    onMouseDown={(e) => {
+                      e.preventDefault();
                       e.stopPropagation();
                       deleteBrandOption(brand);
                     }}

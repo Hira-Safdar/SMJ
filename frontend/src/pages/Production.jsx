@@ -7,6 +7,7 @@ import {
   SunMedium,
   Moon,
   Activity,
+  Info,
   Trash2,
   Plus,
   CheckCircle2,
@@ -24,6 +25,7 @@ const createEmptyOutputForm = (defaultBagWeightKg = "") => ({
   productTypeId: "",
   productMode: "list",
   productInput: "",
+  shift: "DAY",
   numBags: "",
   perBagWeightKg: defaultBagWeightKg ? String(defaultBagWeightKg) : "",
   netWeightKg: "",
@@ -101,6 +103,8 @@ export default function Production() {
   const [zeroPaddyConfirm, setZeroPaddyConfirm] = useState(false);
   const [zeroPaddyPin, setZeroPaddyPin] = useState("");
   const [zeroingPaddy, setZeroingPaddy] = useState(false);
+  const [summaryShiftView, setSummaryShiftView] = useState("DAY");
+  const [paddyInfoOpen, setPaddyInfoOpen] = useState(false);
 
   // Slip preview (Print opens with this batch)
   const [printBatch, setPrintBatch] = useState(null);
@@ -169,6 +173,13 @@ export default function Production() {
     selectedBatch?.sourceCompanyName &&
     String(selectedBatch.sourceCompanyName).trim().toLowerCase() ===
       ownBrandName.toLowerCase();
+  const paddyDistributionRows = useMemo(
+    () =>
+      (paddyByCompany || [])
+        .filter((r) => Number(r.balanceKg || 0) > 0)
+        .sort((a, b) => Number(b.balanceKg || 0) - Number(a.balanceKg || 0)),
+    [paddyByCompany],
+  );
 
   useEffect(() => {
     const onKey = (e) => {
@@ -619,6 +630,10 @@ export default function Production() {
       numBags: Number(outputForm.numBags),
       perBagWeightKg: Number(outputForm.perBagWeightKg),
     };
+    const shiftHour = outputForm.shift === "NIGHT" ? 21 : 9;
+    const outputDate = new Date(selectedBatch?.date || new Date());
+    outputDate.setHours(shiftHour, 0, 0, 0);
+    payload.outputDate = outputDate.toISOString();
     if (selectedBatch.status === "COMPLETED" && completedBatchUnlocked) {
       payload.adminPin = lastEnteredPin || settings.adminPin || "0000";
     }
@@ -901,7 +916,17 @@ export default function Production() {
         <div className="bg-white p-4 rounded-xl shadow border-l-4 border-amber-400">
           <div className="flex justify-between">
             <div>
-              <div className="text-xs text-gray-500">Unprocessed Paddy Stock</div>
+              <div className="text-xs text-gray-500 flex items-center gap-1">
+                Unprocessed Paddy Stock
+                <button
+                  type="button"
+                  onClick={() => setPaddyInfoOpen(true)}
+                  className="text-amber-600 hover:text-amber-800"
+                  title="View paddy distribution"
+                >
+                  <Info size={13} />
+                </button>
+              </div>
               <div className="text-xl font-bold text-amber-800">
                 {typeof paddyStockKg === "number" ? Math.round(paddyStockKg) : "0"} kg
               </div>
@@ -925,21 +950,36 @@ export default function Production() {
         <div className="bg-white p-4 rounded-xl shadow border-l-4 border-emerald-400">
           <div className="flex justify-between">
             <div>
-              <div className="text-xs text-gray-500">Day / Night Shift (Today)</div>
-              <div className="text-sm font-bold text-emerald-800">
-                Day {Math.round(Number(summary.dayShiftOutputWeightKg || 0))} kg
-              </div>
-              <div className="text-sm font-bold text-sky-700">
-                Night {Math.round(Number(summary.nightShiftOutputWeightKg || 0))} kg
+              <div className="text-xs text-gray-500">Shift Production (Today)</div>
+              <div className={`text-sm font-bold ${summaryShiftView === "DAY" ? "text-emerald-800" : "text-sky-700"}`}>
+                {summaryShiftView === "DAY" ? "Day" : "Night"}{" "}
+                {Math.round(
+                  Number(
+                    summaryShiftView === "DAY"
+                      ? summary.dayShiftOutputWeightKg || 0
+                      : summary.nightShiftOutputWeightKg || 0,
+                  ),
+                )}{" "}
+                kg
               </div>
             </div>
-            <div className="flex gap-1">
-              <div className="bg-emerald-100 p-2 rounded-full">
-                <SunMedium className="text-emerald-700" size={16} />
-              </div>
-              <div className="bg-sky-100 p-2 rounded-full">
-                <Moon className="text-sky-700" size={16} />
-              </div>
+            <div className="flex gap-1 bg-gray-100 rounded-full p-1">
+              <button
+                type="button"
+                onClick={() => setSummaryShiftView("DAY")}
+                className={`p-2 rounded-full ${summaryShiftView === "DAY" ? "bg-emerald-100" : "hover:bg-gray-200"}`}
+                title="Day shift"
+              >
+                <SunMedium className={summaryShiftView === "DAY" ? "text-emerald-700" : "text-gray-500"} size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryShiftView("NIGHT")}
+                className={`p-2 rounded-full ${summaryShiftView === "NIGHT" ? "bg-sky-100" : "hover:bg-gray-200"}`}
+                title="Night shift"
+              >
+                <Moon className={summaryShiftView === "NIGHT" ? "text-sky-700" : "text-gray-500"} size={16} />
+              </button>
             </div>
           </div>
         </div>
@@ -1574,6 +1614,28 @@ export default function Production() {
                             </div>
                           )}
                           {fieldErrors.outputProduct && <p className="text-[10px] text-red-600 col-span-3">{fieldErrors.outputProduct}</p>}
+                          <div className="col-span-3 flex items-center gap-1 border rounded px-1 py-1 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => setOutputForm((f) => ({ ...f, shift: "DAY" }))}
+                              className={`flex-1 inline-flex items-center justify-center gap-1 rounded px-2 py-1 ${
+                                outputForm.shift === "DAY" ? "bg-emerald-100 text-emerald-700" : "text-gray-600 hover:bg-gray-100"
+                              }`}
+                            >
+                              <SunMedium size={12} />
+                              Day Shift
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOutputForm((f) => ({ ...f, shift: "NIGHT" }))}
+                              className={`flex-1 inline-flex items-center justify-center gap-1 rounded px-2 py-1 ${
+                                outputForm.shift === "NIGHT" ? "bg-sky-100 text-sky-700" : "text-gray-600 hover:bg-gray-100"
+                              }`}
+                            >
+                              <Moon size={12} />
+                              Night Shift
+                            </button>
+                          </div>
                           <input
                             type="number"
                             value={outputForm.numBags}
@@ -1836,6 +1898,50 @@ export default function Production() {
               >
                 {zeroingPaddy ? "Setting..." : "Zero paddy stock"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paddyInfoOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6 max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-gray-900">Unprocessed Paddy Distribution</h3>
+              <button onClick={() => setPaddyInfoOpen(false)} className="text-gray-500 hover:text-gray-700">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              Company-wise available unprocessed paddy stock.
+            </p>
+            <div className="overflow-auto border rounded">
+              {paddyDistributionRows.length === 0 ? (
+                <div className="p-3 text-sm text-gray-500">No paddy stock available.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-amber-50 text-amber-800 sticky top-0">
+                    <tr>
+                      <th className="p-2 text-left">Company</th>
+                      <th className="p-2 text-right">Kg</th>
+                      <th className="p-2 text-right">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paddyDistributionRows.map((r, idx) => {
+                      const kg = Number(r.balanceKg || 0);
+                      const share = paddyStockKg > 0 ? (kg / paddyStockKg) * 100 : 0;
+                      return (
+                        <tr key={`${r.companyName}-${idx}`} className="border-t">
+                          <td className="p-2">{r.companyName || "-"}</td>
+                          <td className="p-2 text-right">{Math.round(kg)}</td>
+                          <td className="p-2 text-right">{share.toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>

@@ -934,15 +934,16 @@ export default function GatePassIN({ highlightId = "" }) {
                   >
                     {brand}
                   </button>
-                  {deletable ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteBrandOption(brand);
-                      }}
-                      className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
-                      title="Remove company"
+                {deletable ? (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      deleteBrandOption(brand);
+                    }}
+                    className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
+                    title="Remove company"
                     >
                       <X size={14} />
                     </button>

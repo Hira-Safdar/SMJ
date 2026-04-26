@@ -373,6 +373,7 @@ export default function AccountingFinance() {
   const [ledgerPreviewOpen, setLedgerPreviewOpen] = useState(true);
   const [ledgerPreviewRows, setLedgerPreviewRows] = useState([]);
   const [ledgerHighlightId, setLedgerHighlightId] = useState("");
+  const [ledgerHighlightSide, setLedgerHighlightSide] = useState("");
   const [generatedLedgerList, setGeneratedLedgerList] = useState([]);
   const [activeGeneratedLedgerId, setActiveGeneratedLedgerId] = useState("");
 
@@ -1098,11 +1099,12 @@ export default function AccountingFinance() {
     setGeneratedJournalList(res.data?.data || []);
   };
 
-  const openLedgerFromLf = (entryId) => {
+  const openLedgerFromLf = (entryId, side = "") => {
     if (!entryId) return;
     setActiveTab("ledger");
     setSearchParams({ tab: "ledger" });
     setLedgerHighlightId(String(entryId));
+    setLedgerHighlightSide(String(side || "").toLowerCase());
     setLedgerPreviewOpen(true);
   };
 
@@ -5209,10 +5211,10 @@ export default function AccountingFinance() {
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
-                            {entry.showDate && entry.lf ? (
+                            {entry.lf ? (
                               <button
                                 type="button"
-                                onClick={() => openLedgerFromLf(entry.entryId)}
+                                onClick={() => openLedgerFromLf(entry.entryId, entry.side)}
                                 className="text-emerald-700 hover:underline text-xs"
                                 title="Open ledger entry"
                               >
@@ -5281,10 +5283,10 @@ export default function AccountingFinance() {
                               entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
                             } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
-                            {entry.showDate && entry.lf ? (
+                            {entry.lf ? (
                               <button
                                 type="button"
-                                onClick={() => openLedgerFromLf(entry.entryId)}
+                                onClick={() => openLedgerFromLf(entry.entryId, entry.side)}
                                 className="text-emerald-700 hover:underline text-xs"
                                 title="Open ledger entry"
                               >
@@ -5656,22 +5658,28 @@ export default function AccountingFinance() {
                       </tr>
                     )}
                     {ledgerPreviewRows.map((r, idx) => {
-                      const isHighlight =
-                        ledgerHighlightId &&
-                        (String(r.drEntryId || "") === String(ledgerHighlightId) ||
-                          String(r.crEntryId || "") === String(ledgerHighlightId));
-                      const cellBorder = isHighlight ? "border-emerald-400" : "border-gray-200";
-                      const cellBg = isHighlight ? "bg-emerald-50" : "";
+                      const highlightDebit =
+                        !!ledgerHighlightId &&
+                        String(r.drEntryId || "") === String(ledgerHighlightId) &&
+                        (!ledgerHighlightSide || ledgerHighlightSide === "debit");
+                      const highlightCredit =
+                        !!ledgerHighlightId &&
+                        String(r.crEntryId || "") === String(ledgerHighlightId) &&
+                        (!ledgerHighlightSide || ledgerHighlightSide === "credit");
+                      const debitBorder = highlightDebit ? "border border-emerald-300" : "border border-gray-200";
+                      const creditBorder = highlightCredit ? "border border-sky-300" : "border border-gray-200";
+                      const debitBg = highlightDebit ? "bg-emerald-50" : "";
+                      const creditBg = highlightCredit ? "bg-sky-50" : "";
                       return (
                         <tr key={`ledger-row-${idx}`}>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} whitespace-pre-line`}>{r.drDate}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.drRef}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.drJr}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} text-right`}>{r.drAmount}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} whitespace-pre-line`}>{r.crDate}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.crRef}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg}`}>{r.crJr}</td>
-                          <td className={`px-2 py-2 border ${cellBorder} ${cellBg} text-right`}>{r.crAmount}</td>
+                          <td className={`px-2 py-2 ${debitBorder} ${debitBg} whitespace-pre-line`}>{r.drDate}</td>
+                          <td className={`px-2 py-2 ${debitBorder} ${debitBg}`}>{r.drRef}</td>
+                          <td className={`px-2 py-2 ${debitBorder} ${debitBg}`}>{r.drJr}</td>
+                          <td className={`px-2 py-2 ${debitBorder} ${debitBg} text-right`}>{r.drAmount}</td>
+                          <td className={`px-2 py-2 ${creditBorder} ${creditBg} whitespace-pre-line`}>{r.crDate}</td>
+                          <td className={`px-2 py-2 ${creditBorder} ${creditBg}`}>{r.crRef}</td>
+                          <td className={`px-2 py-2 ${creditBorder} ${creditBg}`}>{r.crJr}</td>
+                          <td className={`px-2 py-2 ${creditBorder} ${creditBg} text-right`}>{r.crAmount}</td>
                         </tr>
                       );
                     })}

@@ -11,7 +11,6 @@ import {
   Download,
   FileText,
   Printer,
-  Factory,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Pin4Input from "../components/Pin4Input";
@@ -44,7 +43,6 @@ export default function Stock() {
   const [stockRows, setStockRows] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const activeTab = "production";
 
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [productFilter, setProductFilter] = useState("ALL");
@@ -81,6 +79,14 @@ export default function Stock() {
     pin: "",
     pinError: "",
   });
+  const [cardInfoDialog, setCardInfoDialog] = useState({
+    open: false,
+    title: "",
+    subtitle: "",
+    items: [],
+  });
+  const [hideZeroStockRows, setHideZeroStockRows] = useState(false);
+  const [showOnlyNonZeroProducts, setShowOnlyNonZeroProducts] = useState(true);
 
   // --------------------------------------------------------------------
   // LOAD DATA
@@ -228,6 +234,11 @@ export default function Stock() {
       : "";
     return byId || byName || "Unbranded";
   };
+
+  const normalizeText = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase();
 
   const allCompanies = useMemo(() => {
     const s = new Set();
@@ -386,6 +397,18 @@ export default function Stock() {
     return "OK";
   }
 
+  function statusLabel(status) {
+    if (status === "OUT") return "Out of Stock";
+    if (status === "LOW") return "Low Stock";
+    return "In Stock";
+  }
+
+  function statusBadgeClass(status) {
+    if (status === "OUT") return "bg-red-100 text-red-700 border border-red-200";
+    if (status === "LOW") return "bg-amber-100 text-amber-700 border border-amber-200";
+    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  }
+
   function cellColor(status) {
     if (status === "OUT") return "text-red-700";
     if (status === "LOW") return "text-yellow-700";
@@ -416,7 +439,15 @@ export default function Stock() {
       const pName = String(rawName).toLowerCase() === "unprocessed paddy" ? "Paddy" : rawName;
       existing.productMap[pName] = (existing.productMap[pName] || 0) + kg;
       if (Array.isArray(row.sources)) {
-        existing.sources.push(...row.sources);
+        existing.sources.push(
+          ...row.sources.map((s) => ({
+            ...s,
+            productTypeName:
+              String(s?.productTypeName || "").trim() ||
+              String(s?.productName || "").trim() ||
+              String(row.productTypeName || "").trim(),
+          })),
+        );
       }
       const updated = row.lastUpdated ? new Date(row.lastUpdated) : null;
       if (updated && (!existing.lastUpdated || updated > new Date(existing.lastUpdated))) {
@@ -442,9 +473,109 @@ export default function Stock() {
     return Array.from(grouped.values());
   }, [filteredRows, brandById, brandByName, allCompanies]);
 
+  const stockSummaryCards = useMemo(() => {
+    const rows = stockTableData || [];
+    const totalCompanies = rows.length;
+    const zeroCompanies = rows.filter((r) => Number(r.balanceKg || 0) <= 0).length;
+    const lowCompanies = rows.filter((r) => {
+      const qty = Number(r.balanceKg || 0);
+      return qty > 0 && qty <= lowKg;
+    }).length;
+    const inStockCompanies = rows.filter((r) => Number(r.balanceKg || 0) > lowKg).length;
+    const totalKg = rows.reduce((sum, r) => sum + Number(r.balanceKg || 0), 0);
+    return { totalCompanies, zeroCompanies, lowCompanies, inStockCompanies, totalKg };
+  }, [stockTableData, lowKg]);
+
+  const visibleStockTableData = useMemo(
+    () =>
+      hideZeroStockRows
+        ? (stockTableData || []).filter((r) => Number(r.balanceKg || 0) > 0)
+        : stockTableData,
+    [stockTableData, hideZeroStockRows],
+  );
+
+  const sortedStockTableData = useMemo(() => {
+    const statusRank = { OUT: 0, LOW: 1, OK: 2 };
+    return [...(visibleStockTableData || [])].sort((a, b) => {
+      const sa = statusRank[statusOfWeight(a.balanceKg || 0)];
+      const sb = statusRank[statusOfWeight(b.balanceKg || 0)];
+      if (sa !== sb) return sa - sb;
+      const qa = Number(a.balanceKg || 0);
+      const qb = Number(b.balanceKg || 0);
+      if (qa !== qb) return qa - qb;
+      return String(a.companyName || "").localeCompare(String(b.companyName || ""));
+    });
+  }, [visibleStockTableData, lowKg]);
+
+  const cardInfoData = useMemo(() => {
+    // Keep card info aligned with the currently visible table rows only.
+    const rows = sortedStockTableData || [];
+    const dedupeNames = (list) => {
+      const seen = new Set();
+      const out = [];
+      list.forEach((r) => {
+        const name = String(r.companyName || "Unbranded").trim() || "Unbranded";
+        const key = normalizeText(name);
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(name);
+        }
+      });
+      return out.sort((a, b) => a.localeCompare(b));
+    };
+    return {
+      companies: dedupeNames(rows),
+      out: dedupeNames(rows.filter((r) => Number(r.balanceKg || 0) <= 0)),
+      low: dedupeNames(
+        rows.filter((r) => {
+          const qty = Number(r.balanceKg || 0);
+          return qty > 0 && qty <= lowKg;
+        }),
+      ),
+      in: dedupeNames(rows.filter((r) => Number(r.balanceKg || 0) > lowKg)),
+    };
+  }, [sortedStockTableData, lowKg]);
+
+  const openCardInfo = (type) => {
+    const details = {
+      companies: {
+        title: "Companies",
+        subtitle: "Companies in current stock view.",
+        items: cardInfoData.companies,
+      },
+      out: {
+        title: "Out of Stock",
+        subtitle: "Companies with 0 kg stock.",
+        items: cardInfoData.out,
+      },
+      low: {
+        title: "Low Stock",
+        subtitle: `Companies with stock between 1 and ${lowKg} kg.`,
+        items: cardInfoData.low,
+      },
+      in: {
+        title: "In Stock",
+        subtitle: `Companies with stock above ${lowKg} kg.`,
+        items: cardInfoData.in,
+      },
+    };
+    const info = details[type];
+    if (!info) return;
+    setCardInfoDialog({ open: true, ...info });
+  };
+
+  const activeProductColumns = useMemo(() => {
+    if (!showOnlyNonZeroProducts) return allProducts;
+    return allProducts.filter((name) =>
+      (visibleStockTableData || []).some(
+        (row) => Math.round(Number(row.productMap?.[name] || 0)) > 0,
+      ),
+    );
+  }, [allProducts, visibleStockTableData, showOnlyNonZeroProducts]);
+
   const stockColumns = useMemo(
     () => {
-      const productCols = allProducts.map((name) => ({
+      const productCols = activeProductColumns.map((name) => ({
         key: `prod_${name}`,
         label: name,
         align: "center",
@@ -481,6 +612,27 @@ export default function Stock() {
       },
       ...productCols,
       {
+        key: "balanceKg",
+        label: "Total Stock (kg)",
+        align: "right",
+        render: (_value, row) => {
+          const qty = Math.round(Number(row.balanceKg || 0));
+          return <span className={cellColor(statusOfWeight(qty))}>{qty}</span>;
+        },
+      },
+      {
+        key: "__status",
+        label: "Status",
+        render: (_value, row) => {
+          const status = statusOfWeight(row.balanceKg || 0);
+          return (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(status)}`}>
+              {statusLabel(status)}
+            </span>
+          );
+        },
+      },
+      {
         key: "lastUpdated",
         label: "Updated",
         render: (_value, row) =>
@@ -488,24 +640,48 @@ export default function Stock() {
       },
     ];
     },
-    [allProducts, brandById, brandByName, cellColor, statusOfWeight],
+    [activeProductColumns, brandById, brandByName, cellColor],
   );
 
-  const exportRows = useMemo(() => {
-    return stockTableData.map((r) => {
-      const row = {
-        "Company Name": getBrand(r) || "-",
-      };
-      allProducts.forEach((p) => {
-        row[p] = Math.round(Number(r.productMap?.[p] || 0));
-      });
-      row.Updated = r.lastUpdated ? new Date(r.lastUpdated).toLocaleString() : "-";
-      return row;
-    });
-  }, [stockTableData, allProducts, brandById, brandByName]);
+  const stockRowClassName = (row) => {
+    const status = statusOfWeight(row.balanceKg || 0);
+    if (status === "OUT") return "bg-red-50/60";
+    if (status === "LOW") return "bg-amber-50/60";
+    return "";
+  };
+
+  const exportColumns = useMemo(
+    () => [
+      "Company Name",
+      ...activeProductColumns,
+      "Total Stock (kg)",
+      "Status",
+      "Updated",
+    ],
+    [activeProductColumns],
+  );
+
+  const exportRows = useMemo(
+    () =>
+      (sortedStockTableData || []).map((r) => {
+        const row = { "Company Name": getBrand(r) || "-" };
+        activeProductColumns.forEach((p) => {
+          row[p] = Math.round(Number(r.productMap?.[p] || 0));
+        });
+        row["Total Stock (kg)"] = Math.round(Number(r.balanceKg || 0));
+        row.Status = statusLabel(statusOfWeight(r.balanceKg || 0));
+        row.Updated = r.lastUpdated ? new Date(r.lastUpdated).toLocaleString() : "-";
+        return row;
+      }),
+    [sortedStockTableData, activeProductColumns, brandById, brandByName, lowKg],
+  );
 
   const handleExportExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const sheetRows = [
+      exportColumns,
+      ...exportRows.map((r) => exportColumns.map((c) => r[c] ?? "")),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(sheetRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ProductionStock");
     XLSX.writeFile(
@@ -537,16 +713,10 @@ export default function Stock() {
       };
     } catch {}
     // revert to legacy: no custom header
-    const body = exportRows.map((r) => [
-      r["Company Name"],
-      r.Products,
-      r["Stock (kg)"],
-      r.Status,
-      r.Updated,
-    ]);
+    const body = exportRows.map((r) => exportColumns.map((c) => r[c] ?? ""));
     autoTable(doc, {
       startY: 18,
-      head: [["Company Name", "Products", "Stock (kg)", "Status", "Updated"]],
+      head: [exportColumns],
       body,
       styles: { fontSize: 8 },
     });
@@ -617,13 +787,7 @@ export default function Stock() {
   return (
     <div className="space-y-6 w-full">
           {/* HEADER */}
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-emerald-800">
-                Production Stock Overview
-              </h2>
-            </div>
-
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className="p-2 rounded-lg hover:bg-gray-100"
@@ -991,7 +1155,7 @@ export default function Stock() {
                           {(sourceModalRow.sources || []).map((s, i) => (
                             <tr key={i} className="border-t">
                               <td className="p-2">
-                                {s.productTypeName || sourceModalRow.companyName || "-"}
+                                {String(s.productTypeName || s.productName || "").trim() || "-"}
                               </td>
                               <td className="p-2">{s.sourceType}</td>
                             <td className="p-2">{s.refNo}</td>
@@ -1116,20 +1280,133 @@ export default function Stock() {
           )}
 
           {/* MAIN GRID (TABLE LEFT, DONUT RIGHT) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="bg-white rounded-lg border border-gray-100 p-3">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-gray-500">
+                <span>Companies</span>
+                <button
+                  type="button"
+                  className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
+                  title="View companies"
+                  onClick={() => openCardInfo("companies")}
+                >
+                  <Info size={12} />
+                </button>
+              </div>
+              <div className="text-xl font-semibold text-gray-900">{stockSummaryCards.totalCompanies}</div>
+            </div>
+            <div className="bg-white rounded-lg border border-red-100 p-3">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-red-500">
+                <span>Out of Stock</span>
+                <button
+                  type="button"
+                  className="p-0.5 rounded hover:bg-red-100 text-red-300"
+                  title="View out-of-stock companies"
+                  onClick={() => openCardInfo("out")}
+                >
+                  <Info size={12} />
+                </button>
+              </div>
+              <div className="text-xl font-semibold text-red-700">{stockSummaryCards.zeroCompanies}</div>
+            </div>
+            <div className="bg-white rounded-lg border border-amber-100 p-3">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-amber-500">
+                <span>Low Stock</span>
+                <button
+                  type="button"
+                  className="p-0.5 rounded hover:bg-amber-100 text-amber-300"
+                  title="View low-stock companies"
+                  onClick={() => openCardInfo("low")}
+                >
+                  <Info size={12} />
+                </button>
+              </div>
+              <div className="text-xl font-semibold text-amber-700">{stockSummaryCards.lowCompanies}</div>
+            </div>
+            <div className="bg-white rounded-lg border border-emerald-100 p-3">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-emerald-500">
+                <span>In Stock</span>
+                <button
+                  type="button"
+                  className="p-0.5 rounded hover:bg-emerald-100 text-emerald-300"
+                  title="View in-stock companies"
+                  onClick={() => openCardInfo("in")}
+                >
+                  <Info size={12} />
+                </button>
+              </div>
+              <div className="text-xl font-semibold text-emerald-700">{stockSummaryCards.inStockCompanies}</div>
+            </div>
+          </div>
+
+          {cardInfoDialog.open && (
+            <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-4 w-full max-w-md shadow-xl max-h-[80vh] overflow-hidden flex flex-col">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">{cardInfoDialog.title}</h3>
+                    <p className="text-xs text-gray-500">{cardInfoDialog.subtitle}</p>
+                  </div>
+                  <button
+                    className="text-gray-500 hover:text-gray-700"
+                    onClick={() =>
+                      setCardInfoDialog({ open: false, title: "", subtitle: "", items: [] })
+                    }
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="overflow-auto border rounded">
+                  {cardInfoDialog.items.length === 0 ? (
+                    <div className="p-3 text-xs text-gray-500">No companies found.</div>
+                  ) : (
+                    <ul className="divide-y">
+                      {cardInfoDialog.items.map((name, idx) => (
+                        <li key={`${name}-${idx}`} className="px-3 py-2 text-sm text-gray-700">
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* LEFT: TABLE */}
             <div className="lg:col-span-8 bg-white rounded-lg shadow p-4">
-              <div className="text-sm font-semibold text-emerald-800 mb-2">
-                Stock Items
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2">
+                <div className="text-sm font-semibold text-emerald-800">
+                  Stock Items
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowOnlyNonZeroProducts((v) => !v)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    {showOnlyNonZeroProducts
+                      ? "Show all product columns"
+                      : "Show only non-zero products"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHideZeroStockRows((v) => !v)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    {hideZeroStockRows ? "Show zero-stock in table" : "Hide zero-stock from table"}
+                  </button>
+                </div>
               </div>
               <DataTable
                 title="Production Stock"
                 columns={stockColumns}
-                data={loading ? [] : stockTableData}
+                data={loading ? [] : sortedStockTableData}
                 idKey="__rowId"
                 emptyMessage={loading ? "Loading..." : "No stock records found."}
                 pageSize={10}
-                rowClassName={() => ""}
+                rowClassName={stockRowClassName}
                 showSearch={false}
                 showFilters={false}
                 showClearFilters={false}
