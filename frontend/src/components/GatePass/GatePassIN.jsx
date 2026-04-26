@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useState } from "react";
-import { Edit2, Trash2, Printer, X, Plus } from "lucide-react";
+import { Edit2, Trash2, Printer, X, Plus, ChevronDown } from "lucide-react";
 import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
@@ -60,6 +60,8 @@ export default function GatePassIN({ highlightId = "" }) {
   const [editingId, setEditingId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [brandModal, setBrandModal] = useState(createBrandModalState);
+  const [stockRows, setStockRows] = useState([]);
+  const [openBrandDropdown, setOpenBrandDropdown] = useState(null);
 
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({
@@ -85,6 +87,25 @@ export default function GatePassIN({ highlightId = "" }) {
       return c;
     });
 
+  const clearItemFieldError = (idx, field) =>
+    setErrors((prev) => {
+      const rowErrors = Array.isArray(prev.itemRows) ? [...prev.itemRows] : [];
+      if (!rowErrors[idx]?.[field]) return prev;
+      rowErrors[idx] = { ...(rowErrors[idx] || {}) };
+      delete rowErrors[idx][field];
+      return { ...prev, itemRows: rowErrors };
+    });
+
+  const renderFieldError = (message) => (
+    <p
+      className={`mt-1 min-h-[1rem] text-xs ${
+        message ? "text-red-500" : "text-transparent"
+      }`}
+    >
+      {message || " "}
+    </p>
+  );
+
   // Validation functions
   const validateTruckNo = (v) => {
     if (!v) return "Truck number is required.";
@@ -108,6 +129,51 @@ export default function GatePassIN({ highlightId = "" }) {
     return hasItems;
   };
 
+  const getCompanyIdentityKey = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\b(trade|trades|trader|traders|trading)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const findSimilarBrand = (value) => {
+    const base = getCompanyIdentityKey(value);
+    if (!base) return "";
+    return (
+      (brandOptions || []).find((brand) => {
+        const current = getCompanyIdentityKey(brand);
+        return current && (current === base || current.includes(base) || base.includes(current));
+      }) || ""
+    );
+  };
+
+  const getItemDisplayName = (item = {}) =>
+    String(
+      item?.productMode === "input"
+        ? item?.productInput || ""
+        : item?.productName || item?.customName || ""
+    ).trim();
+
+  const hasItemContent = (item = {}) =>
+    Boolean(
+      String(item?.brand || item?.brandInput || "").trim() ||
+        getItemDisplayName(item) ||
+        String(item?.bagCount || "").trim() ||
+        Number(item?.netWeightKg || 0) > 0
+    );
+
+  const validateItemRow = (item = {}) => {
+    const rowErrors = {};
+    if (!String(item?.brand || "").trim()) rowErrors.brand = "Select company name.";
+    if (!getItemDisplayName(item)) rowErrors.productName = "Select product name.";
+    if (!String(item?.bagCount || "").trim() || Number(item?.bagCount || 0) <= 0) {
+      rowErrors.bagCount = "Enter number of bags.";
+    }
+    if (Number(item?.netWeightKg || 0) <= 0) rowErrors.netWeightKg = "Net weight is required.";
+    return rowErrors;
+  };
+
   const validateField = (name, value) => {
     let msg = "";
     if (name === "date") msg = value ? "" : "Date is required.";
@@ -125,14 +191,14 @@ export default function GatePassIN({ highlightId = "" }) {
   const validateForm = () => {
     const e0 = form.date ? "" : "Date is required.";
     const e1 = validateTruckNo(form.truckNo);
-    const hasItem = (items || []).some((it) => {
-      const name = String(
-        it?.productMode === "input"
-          ? it?.productInput || ""
-          : it?.productName || it?.customName || ""
-      ).trim();
-      return String(it?.brand || "").trim() && name && Number(it?.netWeightKg || 0) > 0;
-    });
+    const itemRows = (items || []).map((it) => validateItemRow(it));
+    const hasItem = (items || []).some(
+      (it) =>
+        String(it?.brand || "").trim() &&
+        getItemDisplayName(it) &&
+        Number(it?.bagCount || 0) > 0 &&
+        Number(it?.netWeightKg || 0) > 0
+    );
     const e2 = needsBrand()
       ? form.supplier || hasItem
         ? ""
@@ -149,10 +215,11 @@ export default function GatePassIN({ highlightId = "" }) {
     if (e3) newErr.driverName = e3;
     if (e4) newErr.driverContact = e4;
     if (e5) newErr.freightCharges = e5;
-    if (!hasItem) newErr.items = "Add at least one item with net weight.";
+    if (itemRows.some((row) => Object.keys(row).length > 0)) newErr.itemRows = itemRows;
+    else if (!hasItem) newErr.items = "Add at least one item with net weight.";
     setErrors(newErr);
     if (Object.keys(newErr).length > 0) {
-      const firstKey = Object.keys(newErr)[0];
+      const firstKey = Object.keys(newErr)[0] === "itemRows" ? "items" : Object.keys(newErr)[0];
       setTimeout(() => {
         document.getElementById(`field-${firstKey}`)?.scrollIntoView({
           behavior: "smooth",
@@ -189,7 +256,12 @@ export default function GatePassIN({ highlightId = "" }) {
     lists.flat().forEach((value) => {
       const clean = normalizeCompanyName(value);
       if (!clean) return;
-      const key = normalizeText(clean);
+      const key = String(clean)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\b(trade|trades|trader|traders|trading)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!map.has(key)) map.set(key, clean);
     });
     return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
@@ -254,6 +326,20 @@ export default function GatePassIN({ highlightId = "" }) {
     return () => window.removeEventListener("product:refresh", onProductRefresh);
   }, []);
 
+  const loadStock = async () => {
+    try {
+      const res = await api.get("/stock/current");
+      setStockRows(res.data?.data || []);
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadStock();
+    const onRefresh = () => loadStock();
+    window.addEventListener("stock:refresh", onRefresh);
+    return () => window.removeEventListener("stock:refresh", onRefresh);
+  }, []);
+
 
   // Fetch rows
   const fetchRows = async () => {
@@ -300,9 +386,21 @@ export default function GatePassIN({ highlightId = "" }) {
   const ensureBrandOption = async (name) => {
     const clean = toTitleCase(String(name || "").trim());
     if (!clean) return "";
-    const exists = (brandOptions || []).some((b) => normalizeText(b) === normalizeText(clean));
-    if (exists) return clean;
-    const nextOptions = Array.from(new Set([...(brandOptions || []), clean])).sort();
+    const existing = findSimilarBrand(clean);
+    if (existing) {
+      if (normalizeText(existing) !== normalizeText(clean)) {
+        toast.error(`Similar company already exists: "${existing}".`);
+      }
+      return existing;
+    }
+    const nextOptions = Array.from(
+      new Map(
+        [...(brandOptions || []), clean].map((value) => [
+          normalizeText(value),
+          toTitleCase(value),
+        ])
+      ).values()
+    ).sort();
     setBrandOptions(nextOptions);
     try {
       await api.put("/settings", { brandOptions: nextOptions });
@@ -341,6 +439,24 @@ export default function GatePassIN({ highlightId = "" }) {
   function normalizeText(v) {
     return String(v || "").trim().toLowerCase();
   }
+
+  const getStockBrand = (row) =>
+    String(row?.brandName || row?.companyName || row?.brand || "").trim();
+
+  const companyStockTotals = React.useMemo(() => {
+    const map = new Map();
+    (stockRows || []).forEach((row) => {
+      const brand = getStockBrand(row);
+      if (!brand) return;
+      const qty = Number(row.balanceKg || 0);
+      const key = normalizeText(brand);
+      map.set(key, (map.get(key) || 0) + qty);
+    });
+    return map;
+  }, [stockRows]);
+
+  const isBrandDeletable = (brand) =>
+    Number(companyStockTotals.get(normalizeText(brand)) || 0) <= 0;
 
   const makeProductRow = (name, template = null) => {
     const bag = Number(template?.conversionFactors?.Bag || 65);
@@ -404,12 +520,12 @@ export default function GatePassIN({ highlightId = "" }) {
   const validateBrandModalBeforeSave = (modal) => {
     const valueError = validateBrandValue(getBrandModalName(modal));
     const brandName = getBrandModalName(modal);
-    const brandExists = (brandOptions || []).some(
-      (b) => normalizeText(b) === normalizeText(brandName)
-    );
+    const existingBrand = findSimilarBrand(brandName);
     const isNewBrand = String(modal.valueOther || "").trim().length > 0;
     const duplicateBrandError =
-      brandExists && isNewBrand ? "Company Name already exists." : "";
+      existingBrand && isNewBrand
+        ? `Similar company already exists: "${existingBrand}".`
+        : "";
     const rows = Array.isArray(modal.productRows) ? modal.productRows : [];
     const rowErrors = rows.map((row) => validateBrandRow(row));
     const hasRowErrors = rowErrors.some((e) => Object.keys(e).length > 0);
@@ -564,10 +680,15 @@ export default function GatePassIN({ highlightId = "" }) {
       toast.error("Please fix company name form errors.");
       return;
     }
-    const brandName = getBrandModalName(brandModal);
+    const brandName = findSimilarBrand(getBrandModalName(brandModal)) || getBrandModalName(brandModal);
 
     const nextOptions = Array.from(
-      new Set([...(brandOptions || []), brandName])
+      new Map(
+        [...(brandOptions || []), brandName].map((value) => [
+          getCompanyIdentityKey(value),
+          toTitleCase(value),
+        ])
+      ).values()
     ).sort();
     setBrandModal((prev) => ({ ...prev, saving: true }));
     try {
@@ -635,6 +756,53 @@ export default function GatePassIN({ highlightId = "" }) {
     }
   };
 
+  const deleteBrandOption = async (brandName) => {
+    if (!isBrandDeletable(brandName)) {
+      toast.error("This company cannot be removed because stock still exists.");
+      return;
+    }
+    setConfirmDialog({
+      open: true,
+      title: "Delete Company Name",
+      message: `Type "${brandName}" to remove this company from the list.`,
+      expectedText: brandName,
+      onConfirm: async () => {
+        try {
+          const matchingProducts = (productCatalog || []).filter(
+            (row) => getCompanyIdentityKey(row?.brand) === getCompanyIdentityKey(brandName)
+          );
+          for (const product of matchingProducts) {
+            if (product?._id) {
+              await api.delete(`/product-types/${product._id}`);
+            }
+          }
+          const nextOptions = (brandOptions || []).filter(
+            (brand) => getCompanyIdentityKey(brand) !== getCompanyIdentityKey(brandName)
+          );
+          await api.put("/settings", { brandOptions: nextOptions });
+          setBrandOptions(nextOptions);
+          const pRes = await api.get("/product-types");
+          setProductCatalog(pRes.data?.data || []);
+          setItems((prev) =>
+            (prev || []).map((item) =>
+              getCompanyIdentityKey(item?.brand) === getCompanyIdentityKey(brandName)
+                ? { ...item, brand: "", productName: "" }
+                : item
+            )
+          );
+          if (getCompanyIdentityKey(form.supplier) === getCompanyIdentityKey(brandName)) {
+            setForm((prev) => ({ ...prev, supplier: "" }));
+          }
+          setOpenBrandDropdown(null);
+          toast.success("Company removed.");
+          window.dispatchEvent(new Event("product:refresh"));
+        } catch (err) {
+          toast.error(err?.response?.data?.message || "Failed to remove company.");
+        }
+      },
+    });
+  };
+
   const handleItemChange = (idx, field, value) => {
     const updated = [...items];
     const cleanInt = (v, max = 8) => String(v || "").replace(/\D/g, "").slice(0, max);
@@ -682,6 +850,110 @@ export default function GatePassIN({ highlightId = "" }) {
 
     updated[idx] = row;
     setItems(updated);
+    if (field === "brand" || field === "productName" || field === "bagCount") {
+      clearItemFieldError(idx, field);
+    }
+    if (field === "bagCount" || field === "bagWeightKg" || field === "emptyBagWeightKg" || field === "emptyBagWeightKgBlur") {
+      clearItemFieldError(idx, "netWeightKg");
+    }
+  };
+
+  const renderBrandDropdown = (item, idx) => {
+    const selectedLabel = String(item?.brand || "").trim();
+    const errorMessage = errors.itemRows?.[idx]?.brand || (idx === 0 ? errors.supplier : "");
+    const filteredBrands = (brandOptions || []).filter((brand) =>
+      !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))
+    );
+    return (
+      <div className="relative">
+        <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
+            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
+          }`}>
+          <input
+            value={selectedLabel}
+            onFocus={() => setOpenBrandDropdown(idx)}
+            onChange={(e) => {
+              const next = sanitizeBrandText(e.target.value, 100);
+              setItems((prev) => {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], brand: next, productName: "" };
+                return updated;
+              });
+              if (idx === 0) {
+                setForm((prev) => ({ ...prev, supplier: next }));
+                clearFieldError("supplier");
+              }
+              clearItemFieldError(idx, "brand");
+              setOpenBrandDropdown(idx);
+            }}
+            onBlur={async () => {
+              const typed = String(item?.brand || "").trim();
+              if (typed) {
+                const resolved = await ensureBrandOption(typed);
+                setItems((prev) => {
+                  const updated = [...prev];
+                  updated[idx] = { ...updated[idx], brand: resolved || typed };
+                  return updated;
+                });
+                if (idx === 0) {
+                  setForm((prev) => ({ ...prev, supplier: resolved || typed }));
+                }
+              }
+              setTimeout(() => setOpenBrandDropdown(null), 120);
+            }}
+            placeholder="Type company name"
+            className="flex-1 bg-transparent outline-none"
+          />
+          <ChevronDown size={16} className="text-gray-400" />
+        </div>
+        {openBrandDropdown === idx ? (
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+            {filteredBrands.map((brand, optionIdx) => {
+              const deletable = isBrandDeletable(brand);
+              return (
+                <div
+                  key={`${brand}-${optionIdx}`}
+                  className="flex items-center gap-2 border-t border-gray-100 px-3 py-2"
+                >
+                  <button
+                    type="button"
+                    onMouseDown={() => {
+                      setItems((prev) => {
+                        const updated = [...prev];
+                        updated[idx] = { ...updated[idx], brand, productName: "" };
+                        return updated;
+                      });
+                      if (idx === 0) {
+                        setForm((prev) => ({ ...prev, supplier: brand }));
+                        clearFieldError("supplier");
+                      }
+                      clearItemFieldError(idx, "brand");
+                      setOpenBrandDropdown(null);
+                    }}
+                    className="flex-1 text-left text-sm text-gray-700 hover:text-emerald-700"
+                  >
+                    {brand}
+                  </button>
+                  {deletable ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteBrandOption(brand);
+                      }}
+                      className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
+                      title="Remove company"
+                    >
+                      <X size={14} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   const handleSubmit = async (e) => {
@@ -1169,7 +1441,17 @@ export default function GatePassIN({ highlightId = "" }) {
                 Cancel
               </button>
               <button
-                onClick={confirmDialog.onConfirm}
+                onClick={async () => {
+                  await confirmDialog.onConfirm?.();
+                  setConfirmDialog({
+                    open: false,
+                    title: "",
+                    message: "",
+                    onConfirm: null,
+                    expectedText: "",
+                  });
+                  setConfirmInput("");
+                }}
                 disabled={
                   confirmDialog.expectedText &&
                   confirmInput !== confirmDialog.expectedText
@@ -1214,7 +1496,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 errors.date ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {errors.date && <p className="text-xs text-red-500 mt-1">{errors.date}</p>}
+            {renderFieldError(errors.date)}
           </div>
 
           {/* Truck No */}
@@ -1231,9 +1513,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 errors.truckNo ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {errors.truckNo && (
-              <p className="text-xs text-red-500 mt-1">{errors.truckNo}</p>
-            )}
+            {renderFieldError(errors.truckNo)}
           </div>
 
           {/* Driver Name */}
@@ -1250,9 +1530,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 errors.driverName ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {errors.driverName && (
-              <p className="text-xs text-red-500 mt-1">{errors.driverName}</p>
-            )}
+            {renderFieldError(errors.driverName)}
           </div>
 
           {/* Driver Contact */}
@@ -1270,11 +1548,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 errors.driverContact ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {errors.driverContact && (
-              <p className="text-xs text-red-500 mt-1">
-                {errors.driverContact}
-              </p>
-            )}
+            {renderFieldError(errors.driverContact)}
           </div>
 
           {/* Freight Charges */}
@@ -1291,9 +1565,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 errors.freightCharges ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {errors.freightCharges && (
-              <p className="text-xs text-red-500 mt-1">{errors.freightCharges}</p>
-            )}
+            {renderFieldError(errors.freightCharges)}
           </div>
         </div>
 
@@ -1302,9 +1574,7 @@ export default function GatePassIN({ highlightId = "" }) {
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
             Products
           </h3>
-          {errors.items && (
-            <p className="text-xs text-red-500 mb-2">{errors.items}</p>
-          )}
+          <div className="mb-2">{renderFieldError(errors.items)}</div>
           <div className="p-3 bg-gray-50 rounded-lg space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-xs text-gray-600">
@@ -1343,85 +1613,8 @@ export default function GatePassIN({ highlightId = "" }) {
                     Company Name
                   </label>
                 </div>
-                {items[0]?.brandMode !== "input" ? (
-                  <select
-                    value={items[0]?.brand ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === OTHER_OPTION) {
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = { ...updated[0], brandMode: "input", brandInput: "" };
-                          return updated;
-                        });
-                        return;
-                      }
-                      setItems((prev) => {
-                        const updated = [...prev];
-                        updated[0] = { ...updated[0], brand: v, productName: "" };
-                        return updated;
-                      });
-                      setForm((prev) => ({ ...prev, supplier: v }));
-                      clearFieldError("supplier");
-                    }}
-                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                      errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                    }`}
-                  >
-                    <option value="">Select company name</option>
-                    {brandOptions.map((b, idx) => (
-                      <option key={`${b}-${idx}`} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                    <option value={OTHER_OPTION}>Add New</option>
-                  </select>
-                ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    value={items[0]?.brandInput ?? ""}
-                      onChange={(e) =>
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = {
-                            ...updated[0],
-                            brandInput: sanitizeBrandText(e.target.value, 100),
-                          };
-                          return updated;
-                        })
-                      }
-                      placeholder="Enter company name"
-                      className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-                        errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const name = await ensureBrandOption(items[0]?.brandInput || "");
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = {
-                            ...updated[0],
-                            brand: name,
-                            brandInput: "",
-                            brandMode: "list",
-                          };
-                          return updated;
-                        });
-                        if (name) {
-                          setForm((prev) => ({ ...prev, supplier: name }));
-                        }
-                      }}
-                      className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
-                    >
-                      List
-                    </button>
-                  </div>
-                )}
-                {errors.supplier && (
-                  <p className="text-xs text-red-500 mt-1">{errors.supplier}</p>
-                )}
+                {renderBrandDropdown(items[0], 0)}
+                {renderFieldError(errors.itemRows?.[0]?.brand || errors.supplier)}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Product Name</label>
@@ -1439,9 +1632,14 @@ export default function GatePassIN({ highlightId = "" }) {
                         return;
                       }
                       handleItemChange(0, "productName", v);
+                      clearItemFieldError(0, "productName");
                     }}
                     disabled={!String(items[0]?.brand || "").trim()}
-                    className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                      errors.itemRows?.[0]?.productName
+                        ? "border-red-500 bg-red-50"
+                        : "border-gray-300"
+                    }`}
                   >
                     <option value="">
                       {items[0]?.brand ? "Select product" : "Select company first"}
@@ -1468,7 +1666,11 @@ export default function GatePassIN({ highlightId = "" }) {
                         })
                       }
                       placeholder="Enter product name"
-                      className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                        errors.itemRows?.[0]?.productName
+                          ? "border-red-500 bg-red-50"
+                          : "border-gray-300"
+                      }`}
                     />
                     <button
                       type="button"
@@ -1486,6 +1688,7 @@ export default function GatePassIN({ highlightId = "" }) {
                           };
                           return updated;
                         });
+                        clearItemFieldError(0, "productName");
                       }}
                       className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
                     >
@@ -1493,6 +1696,7 @@ export default function GatePassIN({ highlightId = "" }) {
                     </button>
                   </div>
                 )}
+                {renderFieldError(errors.itemRows?.[0]?.productName)}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
@@ -1500,8 +1704,13 @@ export default function GatePassIN({ highlightId = "" }) {
                   value={items[0]?.bagCount ?? ""}
                   onChange={(e) => handleItemChange(0, "bagCount", e.target.value)}
                   placeholder="0"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                    errors.itemRows?.[0]?.bagCount
+                      ? "border-red-500 bg-red-50"
+                      : "border-gray-300"
+                  }`}
                 />
+                {renderFieldError(errors.itemRows?.[0]?.bagCount)}
               </div>
             </div>
             <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
@@ -1531,8 +1740,13 @@ export default function GatePassIN({ highlightId = "" }) {
                 <input
                   value={items[0]?.netWeightKg ?? ""}
                   readOnly
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
+                    errors.itemRows?.[0]?.netWeightKg
+                      ? "border-red-500"
+                      : "border-gray-300"
+                  }`}
                 />
+                {renderFieldError(errors.itemRows?.[0]?.netWeightKg)}
               </div>
             </div>
 
@@ -1547,81 +1761,8 @@ export default function GatePassIN({ highlightId = "" }) {
                         <label className="block text-xs text-gray-500 mb-1">
                           Company Name
                         </label>
-                        {it?.brandMode !== "input" ? (
-                          <select
-                            value={it?.brand ?? ""}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (v === OTHER_OPTION) {
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    brandMode: "input",
-                                    brandInput: "",
-                                  };
-                                  return updated;
-                                });
-                                return;
-                              }
-                              setItems((prev) => {
-                                const updated = [...prev];
-                                updated[realIdx] = { ...updated[realIdx], brand: v, productName: "" };
-                                return updated;
-                              });
-                            }}
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                              errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                            }`}
-                          >
-                            <option value="">Select company name</option>
-                            {brandOptions.map((b, idx2) => (
-                              <option key={`${b}-${idx2}`} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                            <option value={OTHER_OPTION}>Add New</option>
-                          </select>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={it?.brandInput ?? ""}
-                              onChange={(e) =>
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    brandInput: sanitizeBrandText(e.target.value, 100),
-                                  };
-                                  return updated;
-                                })
-                              }
-                              placeholder="Enter company name"
-                              className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-                                errors.supplier ? "border-red-500 bg-red-50" : "border-gray-300"
-                              }`}
-                            />
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const name = await ensureBrandOption(it?.brandInput || "");
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    brand: name,
-                                    brandInput: "",
-                                    brandMode: "list",
-                                  };
-                                  return updated;
-                                });
-                              }}
-                              className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
-                            >
-                              List
-                            </button>
-                          </div>
-                        )}
+                        {renderBrandDropdown(it, realIdx)}
+                        {renderFieldError(errors.itemRows?.[realIdx]?.brand)}
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Product Name</label>
@@ -1643,9 +1784,14 @@ export default function GatePassIN({ highlightId = "" }) {
                                 return;
                               }
                               handleItemChange(realIdx, "productName", v);
+                              clearItemFieldError(realIdx, "productName");
                             }}
                             disabled={!String(it?.brand || "").trim()}
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                              errors.itemRows?.[realIdx]?.productName
+                                ? "border-red-500 bg-red-50"
+                                : "border-gray-300"
+                            }`}
                           >
                             <option value="">
                               {it?.brand ? "Select product" : "Select company first"}
@@ -1672,7 +1818,11 @@ export default function GatePassIN({ highlightId = "" }) {
                                 })
                               }
                               placeholder="Enter product name"
-                              className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                              className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                                errors.itemRows?.[realIdx]?.productName
+                                  ? "border-red-500 bg-red-50"
+                                  : "border-gray-300"
+                              }`}
                             />
                             <button
                               type="button"
@@ -1690,6 +1840,7 @@ export default function GatePassIN({ highlightId = "" }) {
                                   };
                                   return updated;
                                 });
+                                clearItemFieldError(realIdx, "productName");
                               }}
                               className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
                             >
@@ -1697,14 +1848,20 @@ export default function GatePassIN({ highlightId = "" }) {
                             </button>
                           </div>
                         )}
+                        {renderFieldError(errors.itemRows?.[realIdx]?.productName)}
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
                         <input
                           value={it?.bagCount ?? ""}
                           onChange={(e) => handleItemChange(realIdx, "bagCount", e.target.value)}
-                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                            errors.itemRows?.[realIdx]?.bagCount
+                              ? "border-red-500 bg-red-50"
+                              : "border-gray-300"
+                          }`}
                         />
+                        {renderFieldError(errors.itemRows?.[realIdx]?.bagCount)}
                       </div>
                       </div>
                       <div className="grid md:grid-cols-3 gap-3 items-end">
@@ -1734,8 +1891,13 @@ export default function GatePassIN({ highlightId = "" }) {
                           <input
                             value={it?.netWeightKg ?? ""}
                             readOnly
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100"
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
+                              errors.itemRows?.[realIdx]?.netWeightKg
+                                ? "border-red-500"
+                                : "border-gray-300"
+                            }`}
                           />
+                          {renderFieldError(errors.itemRows?.[realIdx]?.netWeightKg)}
                           </div>
                           <button
                             type="button"
@@ -1894,9 +2056,7 @@ export default function GatePassIN({ highlightId = "" }) {
                       onChange={(e) =>
                         setBrandModal((prev) => {
                           const next = sanitizeBrandText(e.target.value, 100);
-                          const match = (brandOptions || []).find(
-                            (b) => normalizeText(b) === normalizeText(next)
-                          );
+                          const match = findSimilarBrand(next);
                           if (match) {
                             return {
                               ...prev,
@@ -1905,7 +2065,7 @@ export default function GatePassIN({ highlightId = "" }) {
                               productRows: getBrandProducts(match),
                             errors: {
                               ...(prev.errors || {}),
-                              value: "Company Name already exists.",
+                              value: `Similar company already exists: "${match}".`,
                             },
                             };
                           }
