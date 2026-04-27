@@ -875,7 +875,7 @@ export default function GatePassIN({ highlightId = "" }) {
   };
 
   const renderBrandDropdown = (item, idx) => {
-    const selectedLabel = String(item?.brand || "").trim();
+    const selectedLabel = String(item?.brand || "");
     const errorMessage = errors.itemRows?.[idx]?.brand || (idx === 0 ? errors.supplier : "");
     const filteredBrands = (brandOptions || []).filter((brand) =>
       !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))

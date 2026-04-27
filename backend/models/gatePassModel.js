@@ -1,5 +1,6 @@
 // backend/models/gatePassModel.js
 const mongoose = require("mongoose");
+const companyNamePattern = /^[A-Za-z0-9\s.,&()\-]+$/;
 
 const ItemSchema = new mongoose.Schema(
   {
@@ -113,9 +114,9 @@ const GatePassSchema = new mongoose.Schema(
       validate: {
         validator: function (v) {
           if (!v) return true;
-          return /^[A-Za-z\s]+$/.test(v);
+          return companyNamePattern.test(v);
         },
-        message: "Supplier name: letters and spaces only.",
+        message: "Supplier name contains invalid characters.",
       },
     },
 

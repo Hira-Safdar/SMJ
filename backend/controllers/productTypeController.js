@@ -1,13 +1,14 @@
 const ProductType = require("../models/productTypeModel");
 
 const normalizeText = (text) => (text ? text.toLowerCase().trim().replace(/\s+/g, " ") : "");
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const checkSimilarProduct = async (name, brand, excludeId = null) => {
   const normalized = normalizeText(name);
   const brandNorm = normalizeText(brand || "");
   const query = {
-    name: { $regex: new RegExp(`^${normalized}$`, "i") },
-    brand: { $regex: new RegExp(`^${brandNorm}$`, "i") },
+    name: { $regex: new RegExp(`^${escapeRegex(normalized)}$`, "i") },
+    brand: { $regex: new RegExp(`^${escapeRegex(brandNorm)}$`, "i") },
   };
   if (excludeId) query._id = { $ne: excludeId };
   return await ProductType.findOne(query);

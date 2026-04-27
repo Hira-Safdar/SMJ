@@ -780,85 +780,34 @@ export default function GatePassOUT({ highlightId = "" }) {
   const renderBrandDropdown = (item, idx) => {
     const errorMessage = errors.itemRows?.[idx]?.brand;
     const selectedLabel = String(item?.brand || "").trim();
-    const filteredBrands = (brandOptions || []).filter((brand) =>
-      !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))
-    );
+    const stockCompanyOptions = Array.from(
+      new Set(
+        [...(brandsInStock || []), ...(selectedLabel ? [selectedLabel] : [])].filter(Boolean)
+      )
+    ).sort((a, b) => String(a).localeCompare(String(b)));
     return (
-      <div className="relative">
-        <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
-            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
-          }`}>
-          <input
-            value={selectedLabel}
-            onFocus={() => setOpenBrandDropdown(idx)}
-            onChange={(e) => {
-              const next = String(e.target.value || "").slice(0, 100);
-              setItems((prev) => {
-                const updated = [...prev];
-                updated[idx] = { ...updated[idx], brand: next, productName: "" };
-                return updated;
-              });
-              clearItemFieldError(idx, "brand");
-              setOpenBrandDropdown(idx);
-            }}
-            onBlur={async () => {
-              const typed = String(item?.brand || "").trim();
-              if (typed) {
-                const resolved = await ensureBrandOption(typed);
-                setItems((prev) => {
-                  const updated = [...prev];
-                  updated[idx] = { ...updated[idx], brand: resolved || typed };
-                  return updated;
-                });
-              }
-              setTimeout(() => setOpenBrandDropdown(null), 120);
-            }}
-            placeholder="Type company name"
-            className="flex-1 bg-transparent outline-none"
-          />
-          <ChevronDown size={16} className="text-gray-400" />
-        </div>
-        {openBrandDropdown === idx ? (
-          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-            {filteredBrands.map((brand, optionIdx) => (
-              <div
-                key={`${brand}-${optionIdx}`}
-                className="flex items-center gap-2 border-t border-gray-100 px-3 py-2"
-              >
-                <button
-                  type="button"
-                  onMouseDown={() => {
-                    setItems((prev) => {
-                      const updated = [...prev];
-                      updated[idx] = { ...updated[idx], brand, productName: "" };
-                      return updated;
-                    });
-                    clearItemFieldError(idx, "brand");
-                    setOpenBrandDropdown(null);
-                  }}
-                  className="flex-1 text-left text-sm text-gray-700 hover:text-emerald-700"
-                >
-                  {brand}
-                </button>
-                {isBrandDeletable(brand) ? (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      deleteBrandOption(brand);
-                    }}
-                    className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
-                    title="Remove company"
-                  >
-                    <X size={14} />
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      <select
+        value={selectedLabel}
+        onChange={(e) => {
+          const brand = String(e.target.value || "");
+          setItems((prev) => {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], brand, productName: "" };
+            return updated;
+          });
+          clearItemFieldError(idx, "brand");
+        }}
+        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+          errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
+        }`}
+      >
+        <option value="">Select company</option>
+        {stockCompanyOptions.map((brand, optionIdx) => (
+          <option key={`${brand}-${optionIdx}`} value={brand}>
+            {brand}
+          </option>
+        ))}
+      </select>
     );
   };
   const addRow = () =>
@@ -1696,7 +1645,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           <div className="p-3 bg-gray-50 rounded-lg space-y-3">
             {(items || []).map((it, idx) => (
               <div key={`out-item-${idx}`} className="space-y-3">
-                <div className="grid md:grid-cols-5 gap-3 items-end">
+                <div className="grid md:grid-cols-5 gap-3 items-start">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Company Name</label>
                     {renderBrandDropdown(it, idx)}
@@ -1790,8 +1739,6 @@ export default function GatePassOUT({ highlightId = "" }) {
                       className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                     />
                   </div>
-                </div>
-                <div className="grid md:grid-cols-5 gap-3 items-end">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Gross Weight (kg)</label>
                     <input

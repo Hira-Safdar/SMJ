@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const productTypeSchema = new mongoose.Schema(
   {
@@ -86,8 +87,8 @@ productTypeSchema.pre("save", async function (next) {
     const brandNorm = (this.brand || "").toLowerCase().trim();
     const existing = await mongoose.model("ProductType").findOne({
       _id: { $ne: this._id },
-      name: { $regex: new RegExp(`^${normalizedName}$`, "i") },
-      brand: { $regex: new RegExp(`^${brandNorm}$`, "i") },
+      name: { $regex: new RegExp(`^${escapeRegex(normalizedName)}$`, "i") },
+      brand: { $regex: new RegExp(`^${escapeRegex(brandNorm)}$`, "i") },
     });
     if (existing) {
       const error = new Error(

@@ -702,18 +702,6 @@ export default function Stock() {
         },
       },
       {
-        key: "__status",
-        label: "Status",
-        render: (_value, row) => {
-          const status = statusOfWeight(row.balanceKg || 0);
-          return (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(status)}`}>
-              {statusLabel(status)}
-            </span>
-          );
-        },
-      },
-      {
         key: "lastUpdated",
         label: "Updated",
         render: (_value, row) =>
