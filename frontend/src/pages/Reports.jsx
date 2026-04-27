@@ -85,9 +85,9 @@ const fmtDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
 const normalizePaymentStatus = (value) => {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "Unpaid/Pending";
+  if (raw.includes("unpaid") || raw.includes("pending")) return "Unpaid/Pending";
   if (raw.includes("partial")) return "Partial Paid";
   if (raw.includes("paid")) return "Paid";
-  if (raw.includes("unpaid") || raw.includes("pending")) return "Unpaid/Pending";
   return "Unpaid/Pending";
 };
 const formatMonthDay = (iso) => {
