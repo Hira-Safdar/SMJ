@@ -329,7 +329,44 @@ export default function Stock() {
       companyNames,
     });
     const deletedCount = Number(res?.data?.deletedCount || 0);
-    toast.success(`Deleted ${deletedCount} stock ledger record(s).`);
+    const selectedKeys = new Set(
+      companyNames.map((name) => normalizeText(name))
+    );
+
+    const matchingProducts = (products || []).filter((p) =>
+      selectedKeys.has(normalizeText(p?.brand))
+    );
+    for (const product of matchingProducts) {
+      if (product?._id) {
+        try {
+          await api.delete(`/product-types/${product._id}`);
+        } catch {}
+      }
+    }
+
+    const nextBrandOptions = (settings?.brandOptions || []).filter(
+      (name) => !selectedKeys.has(normalizeText(name))
+    );
+    try {
+      await api.put("/settings", { brandOptions: nextBrandOptions });
+    } catch {}
+
+    setSettings((prev) => ({ ...prev, brandOptions: nextBrandOptions }));
+
+    try {
+      const pRes = await api.get("/product-types");
+      setProducts(pRes.data?.data || []);
+    } catch {}
+
+    if (companyFilter !== "ALL" && selectedKeys.has(normalizeText(companyFilter))) {
+      setCompanyFilter("ALL");
+    }
+
+    toast.success(
+      `Deleted ${deletedCount} stock ledger record(s) and removed ${companyNames.length} compan${
+        companyNames.length === 1 ? "y" : "ies"
+      }.`
+    );
     await loadData();
   }
 
