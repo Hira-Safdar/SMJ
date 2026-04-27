@@ -333,16 +333,6 @@ export default function Stock() {
     await loadData();
   }
 
-  async function handleDeleteAllStockByPin(adminPin) {
-    const res = await api.post("/stock/delete-ledgers", {
-      adminPin: String(adminPin || "").trim(),
-      all: true,
-    });
-    const deletedCount = Number(res?.data?.deletedCount || 0);
-    toast.success(`Deleted ${deletedCount} stock ledger record(s).`);
-    await loadData();
-  }
-
   // --------------------------------------------------------------------
   // APPLY FILTERS (auto, no button)
   // --------------------------------------------------------------------
@@ -1378,15 +1368,7 @@ export default function Stock() {
                       }
                     : undefined
                 }
-                deleteAll={
-                  settings.additionalStockSettingsEnabled
-                    ? {
-                        description:
-                          "Yeh action tamam stock ledger records permanently delete karega.",
-                        onConfirm: handleDeleteAllStockByPin,
-                      }
-                    : undefined
-                }
+                bulkDeleteAlign="right"
               />
             </div>
 

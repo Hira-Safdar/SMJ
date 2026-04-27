@@ -100,9 +100,6 @@ export default function Production() {
     adminPin: "0000",
     additionalStockSettingsEnabled: false,
   });
-  const [zeroPaddyConfirm, setZeroPaddyConfirm] = useState(false);
-  const [zeroPaddyPin, setZeroPaddyPin] = useState("");
-  const [zeroingPaddy, setZeroingPaddy] = useState(false);
   const [summaryShiftView, setSummaryShiftView] = useState("DAY");
   const [paddyInfoOpen, setPaddyInfoOpen] = useState(false);
 
@@ -189,7 +186,6 @@ export default function Production() {
         else if (deleteConfirmOpen) { setDeleteConfirmOpen(false); setDeleteConfirmInput(""); }
         else if (completeConfirmOpen) setCompleteConfirmOpen(false);
         else if (showSlip) { setShowSlip(false); setPrintBatch(null); }
-        else if (zeroPaddyConfirm) { setZeroPaddyConfirm(false); setZeroPaddyPin(""); }
       } else if (e.key === "Enter") {
         if (completeConfirmOpen && selectedBatch) { e.preventDefault(); handleCompleteBatch(); }
         else if (deleteInProcessConfirmOpen && selectedBatch) { e.preventDefault(); doDeleteBatch(true); setDeleteInProcessConfirmOpen(false); }
@@ -206,15 +202,12 @@ export default function Production() {
           } else {
             setPinDialog((p) => ({ ...p, pinError: "Incorrect PIN." }));
           }
-        } else if (zeroPaddyConfirm && zeroPaddyPin.length === 4) {
-          e.preventDefault();
-          handleZeroPaddyStock();
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pinDialog.open, pinDialog.pin, pinDialog.onSuccess, errorDialog.open, deleteConfirmOpen, deleteConfirmInput, deleteInProcessConfirmOpen, completeConfirmOpen, showSlip, zeroPaddyConfirm, zeroPaddyPin.length, selectedBatch, settings.adminPin]);
+  }, [pinDialog.open, pinDialog.pin, pinDialog.onSuccess, errorDialog.open, deleteConfirmOpen, deleteConfirmInput, deleteInProcessConfirmOpen, completeConfirmOpen, showSlip, selectedBatch, settings.adminPin]);
 
   async function loadPaddyStock() {
     try {
@@ -825,31 +818,6 @@ export default function Production() {
     doDeleteBatch(false);
   }
 
-  async function handleZeroPaddyStock() {
-    if (!zeroPaddyPin.trim()) {
-      setErrorDialog({ open: true, message: "Enter admin PIN." });
-      return;
-    }
-    setZeroingPaddy(true);
-    try {
-      const res = await api.post("/stock/zero-paddy", { adminPin: zeroPaddyPin.trim() });
-      if (res.data?.success) {
-        setZeroPaddyConfirm(false);
-        setZeroPaddyPin("");
-        await loadPaddyStock();
-      } else {
-        setErrorDialog({ open: true, message: res.data?.message || "Failed to zero paddy stock." });
-      }
-    } catch (err) {
-      setErrorDialog({
-        open: true,
-        message: err.response?.data?.message || err.message || "Failed to zero paddy stock.",
-      });
-    } finally {
-      setZeroingPaddy(false);
-    }
-  }
-
   const currentBatchList =
     activeTab === "IN_PROCESS"
       ? inProcessBatches
@@ -930,15 +898,6 @@ export default function Production() {
               <div className="text-xl font-bold text-amber-800">
                 {typeof paddyStockKg === "number" ? Math.round(paddyStockKg) : "0"} kg
               </div>
-              {settings.additionalStockSettingsEnabled && (
-                <button
-                  type="button"
-                  onClick={() => setZeroPaddyConfirm(true)}
-                  className="mt-2 text-xs text-amber-700 hover:text-amber-800 underline"
-                >
-                  Set paddy stock to zero
-                </button>
-              )}
             </div>
             <div className="bg-amber-100 p-2 rounded-full">
               <Box className="text-amber-700" size={18} />
@@ -1867,40 +1826,6 @@ export default function Production() {
           batch={printBatch || selectedBatch}
           millInfo={millInfo}
         />
-      )}
-
-      {/* Zero paddy confirmation - 4 digit PIN */}
-      {zeroPaddyConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Set paddy stock to zero</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              This will remove all paddy ledger entries (from Gate Pass In). Paddy stock will show 0. Batches and other stock are not affected.
-            </p>
-            <p className="text-xs text-gray-600 mb-2">Admin PIN:</p>
-            <Pin4Input
-              value={zeroPaddyPin}
-              onChange={(v) => setZeroPaddyPin(v.slice(0, 4))}
-              className="mb-4"
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => { setZeroPaddyConfirm(false); setZeroPaddyPin(""); }}
-                disabled={zeroingPaddy}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleZeroPaddyStock}
-                disabled={zeroingPaddy || zeroPaddyPin.length !== 4}
-                className="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 text-sm"
-              >
-                {zeroingPaddy ? "Setting..." : "Zero paddy stock"}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {paddyInfoOpen && (

@@ -41,6 +41,7 @@ export default function DataTable({
   toolbarActions,
   deleteAll,
   bulkDelete,
+  bulkDeleteAlign = "left",
   highlightId = "",
   highlightKey = "id",
   reportContextLines = [],
@@ -341,13 +342,17 @@ export default function DataTable({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handlePrint]);
 
+  const hasBulkDelete = bulkDelete && typeof bulkDelete.onConfirm === "function";
+  const showBulkDeleteOnRight = hasBulkDelete && bulkDeleteAlign === "right";
+  const showBulkDeleteOnLeft = hasBulkDelete && !showBulkDeleteOnRight;
+
   const showToolbar =
     showSearch ||
     showFilters ||
     showExport ||
     showPrint ||
     toolbarActions ||
-    (bulkDelete && typeof bulkDelete.onConfirm === "function") ||
+    hasBulkDelete ||
     (deleteAll && typeof deleteAll.onConfirm === "function");
 
   return (
@@ -384,7 +389,7 @@ export default function DataTable({
               />
             </div>
           )}
-          {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+          {showBulkDeleteOnLeft && (
             <button
               type="button"
               onClick={() =>
@@ -423,9 +428,28 @@ export default function DataTable({
               <X size={16} /> Clear
             </button>
           )}
-          {(showExport || showPrint || toolbarActions || (bulkDelete && typeof bulkDelete.onConfirm === "function") || (deleteAll && typeof deleteAll.onConfirm === "function")) && (
+          {(showExport || showPrint || toolbarActions || showBulkDeleteOnRight || (deleteAll && typeof deleteAll.onConfirm === "function")) && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               {toolbarActions}
+              {showBulkDeleteOnRight && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDeleteAllDialog({
+                      open: true,
+                      pin: "",
+                      pinError: "",
+                      confirming: false,
+                      mode: "selected",
+                    })
+                  }
+                  disabled={selectedRows.length === 0}
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Delete selected records"
+                >
+                  <Trash2 size={16} /> {bulkDelete?.label || "Delete Selected"} ({selectedRows.length})
+                </button>
+              )}
               {deleteAll && typeof deleteAll.onConfirm === "function" && (
                 <button
                   type="button"
