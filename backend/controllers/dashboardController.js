@@ -117,8 +117,12 @@ const getDashboardStats = async (req, res) => {
         pendingPayments += rem;
         pendingGatePass += rem;
         pendingGatePassDetails.push({
+          _id: gp._id,
           customer: gp.customer || "Customer",
           gatePassNo: gp.gatePassNo || "-",
+          paymentStatus: gp.paymentStatus || "UNPAID",
+          amountPaid: paid,
+          totalAmount: Number(gp.totalAmount || 0),
           remainingAmount: rem,
         });
       }

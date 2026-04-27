@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Edit2, Trash2, Printer, X, Plus, ChevronDown } from "lucide-react";
+import { Edit2, Trash2, Printer, X, Plus, ChevronDown, Coins } from "lucide-react";
 import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
@@ -1027,9 +1027,50 @@ export default function GatePassOUT({ highlightId = "" }) {
             ]
       );
 
+    const total = Math.round(Number(row.totalAmount || 0));
+    const paidRaw = Math.round(Number(row.amountPaid || 0));
+    const remainingRaw = Math.max(Math.round(Number(row.remainingAmount || 0)), 0);
+    const statusRaw = String(row.paymentStatus || "").toUpperCase();
+    let nextStatus = ["PAID", "UNPAID", "PARTIAL"].includes(statusRaw) ? statusRaw : "PAID";
+    let nextPaid = paidRaw;
+    let nextRemaining = remainingRaw;
+    if (nextStatus === "PAID") {
+      nextPaid = total;
+      nextRemaining = 0;
+    } else if (nextStatus === "UNPAID") {
+      nextPaid = 0;
+      nextRemaining = total;
+    } else {
+      if (nextPaid <= 0 && nextRemaining >= 0) nextPaid = Math.max(total - nextRemaining, 0);
+      nextRemaining = Math.max(total - nextPaid, 0);
+    }
+    setPaymentInfo({
+      status: nextStatus,
+      amountPaid: nextStatus === "UNPAID" ? "" : String(nextPaid),
+      remaining: String(nextRemaining),
+    });
+
     setEditingId(row._id);
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const quickMarkPaid = async (row) => {
+    if (!row?._id) return;
+    const total = Math.round(Number(row.totalAmount || 0));
+    try {
+      const res = await api.put(`/gatepasses/${row._id}`, {
+        paymentStatus: "PAID",
+        amountPaid: total,
+        remainingAmount: 0,
+      });
+      if (res.data && res.data.success === false) throw new Error(res.data.message || "Update failed");
+      toast.success("Payment marked as PAID.");
+      fetchRows();
+      window.dispatchEvent(new Event("stock:refresh"));
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update payment.");
+    }
   };
 
   const handleDelete = (row) => {
@@ -1254,12 +1295,36 @@ export default function GatePassOUT({ highlightId = "" }) {
       render: (val) => (val != null ? Math.round(Number(val)) : "0"),
     },
     {
+      key: "paymentStatus",
+      label: "Payment",
+      render: (val) => String(val || "-"),
+    },
+    {
+      key: "amountPaid",
+      label: "Paid",
+      render: (val) => Math.round(Number(val || 0)),
+    },
+    {
+      key: "remainingAmount",
+      label: "Remaining",
+      render: (val) => Math.round(Number(val || 0)),
+    },
+    {
       key: "actions",
       label: "Actions",
       align: "center",
       skipExport: true,
       render: (_, row) => (
         <div className="flex justify-center gap-2">
+          {Number(row?.remainingAmount || 0) > 0 && (
+            <button
+              onClick={() => quickMarkPaid(row)}
+              className="p-1 rounded hover:bg-emerald-50"
+              title="Mark as paid"
+            >
+              <Coins className="w-4 h-4 text-emerald-700" />
+            </button>
+          )}
           <button
             onClick={() => handleEdit(row)}
             className="p-1 rounded hover:bg-emerald-50"
