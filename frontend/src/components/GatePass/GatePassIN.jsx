@@ -340,6 +340,21 @@ export default function GatePassIN({ highlightId = "" }) {
     return () => window.removeEventListener("stock:refresh", onRefresh);
   }, []);
 
+  useEffect(() => {
+    const stockBrands = Array.from(
+      new Set(
+        (stockRows || [])
+          .map((r) => normalizeCompanyName(getStockBrand(r)))
+          .filter(Boolean)
+      )
+    ).sort();
+    if (stockBrands.length) {
+      setBrandOptions((prev) =>
+        mergeOptionsCaseInsensitive(prev || [], stockBrands)
+      );
+    }
+  }, [stockRows]);
+
 
   // Fetch rows
   const fetchRows = async () => {
@@ -796,6 +811,7 @@ export default function GatePassIN({ highlightId = "" }) {
           setOpenBrandDropdown(null);
           toast.success("Company removed.");
           window.dispatchEvent(new Event("product:refresh"));
+          window.dispatchEvent(new Event("stock:refresh"));
         } catch (err) {
           toast.error(err?.response?.data?.message || "Failed to remove company.");
         }

@@ -96,24 +96,26 @@ export default function Stock() {
   }, []);
 
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const res = await api.get("/settings");
-        if (res.data?.data) setSettings(res.data.data);
-      } catch {}
-    };
-    loadSettings();
+    refreshSettings();
   }, []);
 
   useEffect(() => {
-    const loadProducts = async () => {
-      try {
-        const res = await api.get("/product-types");
-        setProducts(res.data?.data || []);
-      } catch {}
-    };
-    loadProducts();
+    refreshProducts();
   }, []);
+
+  async function refreshSettings() {
+    try {
+      const res = await api.get("/settings");
+      if (res.data?.data) setSettings(res.data.data);
+    } catch {}
+  }
+
+  async function refreshProducts() {
+    try {
+      const res = await api.get("/product-types");
+      setProducts(res.data?.data || []);
+    } catch {}
+  }
 
 
 
@@ -132,9 +134,20 @@ export default function Stock() {
   useEffect(() => {
     const onRefresh = () => {
       loadData();
+      refreshSettings();
+      refreshProducts();
     };
     window.addEventListener("stock:refresh", onRefresh);
     return () => window.removeEventListener("stock:refresh", onRefresh);
+  }, []);
+
+  useEffect(() => {
+    const onProductRefresh = () => {
+      refreshSettings();
+      refreshProducts();
+    };
+    window.addEventListener("product:refresh", onProductRefresh);
+    return () => window.removeEventListener("product:refresh", onProductRefresh);
   }, []);
 
   async function handleSaveStockThresholds(pinToSave) {
@@ -209,14 +222,27 @@ export default function Stock() {
       .trim()
       .toLowerCase();
 
+  const getCompanyIdentityKey = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\b(trade|trades|trader|traders|trading)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
   const allCompanies = useMemo(() => {
-    const s = new Set();
-    (settings?.brandOptions || []).forEach((b) => b && s.add(b));
-    stockRows.forEach((r) => {
-      const brand = getBrand(r);
-      if (brand) s.add(brand);
+    const map = new Map();
+    (settings?.brandOptions || []).forEach((b) => {
+      const name = String(b || "").trim();
+      const key = getCompanyIdentityKey(name);
+      if (name && key && !map.has(key)) map.set(key, name);
     });
-    return Array.from(s);
+    stockRows.forEach((r) => {
+      const brand = String(getBrand(r) || "").trim();
+      const key = getCompanyIdentityKey(brand);
+      if (brand && key && !map.has(key)) map.set(key, brand);
+    });
+    return Array.from(map.values());
   }, [stockRows, brandById, brandByName, settings]);
 
   const allProducts = useMemo(() => {
@@ -352,6 +378,8 @@ export default function Stock() {
     } catch {}
 
     setSettings((prev) => ({ ...prev, brandOptions: nextBrandOptions }));
+    window.dispatchEvent(new Event("product:refresh"));
+    window.dispatchEvent(new Event("stock:refresh"));
 
     try {
       const pRes = await api.get("/product-types");
