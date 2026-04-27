@@ -40,6 +40,7 @@ export default function DataTable({
   onRowAction,
   toolbarActions,
   deleteAll,
+  bulkDelete,
   highlightId = "",
   highlightKey = "id",
   reportContextLines = [],
@@ -56,7 +57,9 @@ export default function DataTable({
     pin: "",
     pinError: "",
     confirming: false,
+    mode: "all",
   });
+  const [selectedKeys, setSelectedKeys] = useState([]);
   const [printHeader, setPrintHeader] = useState({ name: "", address: "", email: "", logoUrl: "" });
   const tableBodyRef = useRef(null);
 
@@ -139,6 +142,52 @@ export default function DataTable({
     if (!highlightId) return -1;
     return filteredData.findIndex((row) => String(row?.[highlightKey]) === String(highlightId));
   }, [filteredData, highlightId, highlightKey]);
+
+  const getRowKey = useCallback(
+    (row, idx) => String(row?.[idKey] ?? idx),
+    [idKey]
+  );
+
+  useEffect(() => {
+    setSelectedKeys((prev) => {
+      if (!prev.length) return prev;
+      const allowed = new Set(filteredData.map((row, idx) => getRowKey(row, idx)));
+      return prev.filter((k) => allowed.has(k));
+    });
+  }, [filteredData, getRowKey]);
+
+  const pageKeys = useMemo(
+    () => pageData.map((row, idx) => getRowKey(row, start + idx)),
+    [pageData, start, getRowKey]
+  );
+  const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
+  const selectedRows = useMemo(
+    () => filteredData.filter((row, idx) => selectedKeySet.has(getRowKey(row, idx))),
+    [filteredData, selectedKeySet, getRowKey]
+  );
+  const allPageSelected = pageKeys.length > 0 && pageKeys.every((k) => selectedKeySet.has(k));
+  const anyPageSelected = pageKeys.some((k) => selectedKeySet.has(k));
+
+  const togglePageSelection = () => {
+    setSelectedKeys((prev) => {
+      const prevSet = new Set(prev);
+      if (allPageSelected) {
+        pageKeys.forEach((k) => prevSet.delete(k));
+      } else {
+        pageKeys.forEach((k) => prevSet.add(k));
+      }
+      return Array.from(prevSet);
+    });
+  };
+
+  const toggleRowSelection = (key) => {
+    setSelectedKeys((prev) => {
+      const s = new Set(prev);
+      if (s.has(key)) s.delete(key);
+      else s.add(key);
+      return Array.from(s);
+    });
+  };
 
   useEffect(() => {
     if (highlightIndex < 0) return;
@@ -292,7 +341,14 @@ export default function DataTable({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handlePrint]);
 
-  const showToolbar = showSearch || showFilters || showExport || showPrint || toolbarActions;
+  const showToolbar =
+    showSearch ||
+    showFilters ||
+    showExport ||
+    showPrint ||
+    toolbarActions ||
+    (bulkDelete && typeof bulkDelete.onConfirm === "function") ||
+    (deleteAll && typeof deleteAll.onConfirm === "function");
 
   return (
     <div className="space-y-3">
@@ -328,6 +384,25 @@ export default function DataTable({
               />
             </div>
           )}
+          {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+            <button
+              type="button"
+              onClick={() =>
+                setDeleteAllDialog({
+                  open: true,
+                  pin: "",
+                  pinError: "",
+                  confirming: false,
+                  mode: "selected",
+                })
+              }
+              disabled={selectedRows.length === 0}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Delete selected records"
+            >
+              <Trash2 size={16} /> {bulkDelete?.label || "Delete Selected"} ({selectedRows.length})
+            </button>
+          )}
           {showFilters && (
             <button
               type="button"
@@ -348,14 +423,14 @@ export default function DataTable({
               <X size={16} /> Clear
             </button>
           )}
-          {(showExport || showPrint || toolbarActions) && (
+          {(showExport || showPrint || toolbarActions || (bulkDelete && typeof bulkDelete.onConfirm === "function") || (deleteAll && typeof deleteAll.onConfirm === "function")) && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               {toolbarActions}
               {deleteAll && typeof deleteAll.onConfirm === "function" && (
                 <button
                   type="button"
                   onClick={() =>
-                    setDeleteAllDialog({ open: true, pin: "", pinError: "", confirming: false })
+                    setDeleteAllDialog({ open: true, pin: "", pinError: "", confirming: false, mode: "all" })
                   }
                   className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 text-sm text-red-700 hover:bg-red-50"
                   title="Delete all records"
@@ -406,10 +481,15 @@ export default function DataTable({
                 <Trash2 className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900">Delete All</h3>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {deleteAllDialog.mode === "selected" ? "Delete Selected" : "Delete All"}
+                </h3>
                 <p className="text-xs text-gray-600 mt-1">
-                  {deleteAll?.description ||
-                    "This will permanently delete all records for this table."}
+                  {deleteAllDialog.mode === "selected"
+                    ? bulkDelete?.description ||
+                      "This will permanently delete selected records for this table."
+                    : deleteAll?.description ||
+                      "This will permanently delete all records for this table."}
                 </p>
               </div>
             </div>
@@ -422,10 +502,25 @@ export default function DataTable({
                   setDeleteAllDialog((d) => ({ ...d, pin: v.slice(0, 4), pinError: "" }))
                 }
                 onComplete={async (pin) => {
+                  const mode = deleteAllDialog.mode === "selected" ? "selected" : "all";
                   setDeleteAllDialog((d) => ({ ...d, confirming: true, pinError: "" }));
                   try {
-                    await deleteAll.onConfirm(pin);
-                    setDeleteAllDialog({ open: false, pin: "", pinError: "", confirming: false });
+                    if (mode === "selected") {
+                      if (!(bulkDelete && typeof bulkDelete.onConfirm === "function")) {
+                        throw new Error("Selected delete is not available.");
+                      }
+                      if (!selectedRows.length) {
+                        throw new Error("No rows selected.");
+                      }
+                      await bulkDelete.onConfirm(pin, selectedRows);
+                      setSelectedKeys([]);
+                    } else {
+                      if (!(deleteAll && typeof deleteAll.onConfirm === "function")) {
+                        throw new Error("Delete all is not available.");
+                      }
+                      await deleteAll.onConfirm(pin);
+                    }
+                    setDeleteAllDialog({ open: false, pin: "", pinError: "", confirming: false, mode: "all" });
                   } catch (e) {
                     setDeleteAllDialog((d) => ({
                       ...d,
@@ -455,6 +550,7 @@ export default function DataTable({
               <button
                 type="button"
                 onClick={async () => {
+                  const mode = deleteAllDialog.mode === "selected" ? "selected" : "all";
                   const pin = String(deleteAllDialog.pin || "").slice(0, 4);
                   if (pin.length !== 4) {
                     setDeleteAllDialog((d) => ({ ...d, pinError: "Enter 4-digit PIN" }));
@@ -462,8 +558,22 @@ export default function DataTable({
                   }
                   setDeleteAllDialog((d) => ({ ...d, confirming: true, pinError: "" }));
                   try {
-                    await deleteAll.onConfirm(pin);
-                    setDeleteAllDialog({ open: false, pin: "", pinError: "", confirming: false });
+                    if (mode === "selected") {
+                      if (!(bulkDelete && typeof bulkDelete.onConfirm === "function")) {
+                        throw new Error("Selected delete is not available.");
+                      }
+                      if (!selectedRows.length) {
+                        throw new Error("No rows selected.");
+                      }
+                      await bulkDelete.onConfirm(pin, selectedRows);
+                      setSelectedKeys([]);
+                    } else {
+                      if (!(deleteAll && typeof deleteAll.onConfirm === "function")) {
+                        throw new Error("Delete all is not available.");
+                      }
+                      await deleteAll.onConfirm(pin);
+                    }
+                    setDeleteAllDialog({ open: false, pin: "", pinError: "", confirming: false, mode: "all" });
                   } catch (e) {
                     setDeleteAllDialog((d) => ({
                       ...d,
@@ -531,6 +641,19 @@ export default function DataTable({
         <table className="w-full text-sm">
           <thead className="bg-emerald-50 text-emerald-800">
             <tr>
+              {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+                <th className="p-2 text-center w-10">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    ref={(el) => {
+                      if (!el) return;
+                      el.indeterminate = anyPageSelected && !allPageSelected;
+                    }}
+                    onChange={togglePageSelection}
+                  />
+                </th>
+              )}
               {columns.map((col) => (
                 <th
                   key={col.key}
@@ -577,6 +700,16 @@ export default function DataTable({
                   rowClassName ? rowClassName(row) : ""
                 }`}
               >
+                {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+                  <td className="p-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedKeySet.has(getRowKey(row, globalIndex))}
+                      onChange={() => toggleRowSelection(getRowKey(row, globalIndex))}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </td>
+                )}
                 {columns.map((col) => (
                   <td
                     key={col.key}
@@ -589,7 +722,7 @@ export default function DataTable({
             )})}
             {pageData.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="p-6 text-center text-gray-400">
+                <td colSpan={columns.length + (bulkDelete && typeof bulkDelete.onConfirm === "function" ? 1 : 0)} className="p-6 text-center text-gray-400">
                   {emptyMessage}
                 </td>
               </tr>

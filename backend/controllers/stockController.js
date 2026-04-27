@@ -324,6 +324,68 @@ async function verifyAdminPinAndAdditionalSetting(req, res) {
   return true;
 }
 
+async function verifyAdminPin(req, res) {
+  const pin = req.body && req.body.adminPin != null ? String(req.body.adminPin).trim() : "";
+  if (!pin) {
+    res.status(403).json({ success: false, message: "Admin PIN is required." });
+    return false;
+  }
+  const settings = await SystemSettings.findOne({}).select("adminPin").lean();
+  const expectedPin = (settings && settings.adminPin) || "0000";
+  if (pin !== String(expectedPin).trim()) {
+    res.status(403).json({ success: false, message: "Invalid admin PIN." });
+    return false;
+  }
+  return true;
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+exports.deleteLedgers = async (req, res) => {
+  try {
+    const ok = await verifyAdminPin(req, res);
+    if (!ok) return;
+
+    const all = Boolean(req.body?.all);
+    if (all) {
+      const result = await StockLedger.deleteMany({});
+      return res.json({
+        success: true,
+        message: "All stock ledger records removed.",
+        deletedCount: result?.deletedCount || 0,
+      });
+    }
+
+    const companyNames = Array.isArray(req.body?.companyNames)
+      ? req.body.companyNames
+          .map((v) => String(v || "").trim())
+          .filter(Boolean)
+      : [];
+    if (!companyNames.length) {
+      return res.status(400).json({
+        success: false,
+        message: "companyNames array is required for selected delete.",
+      });
+    }
+
+    const regexes = companyNames.map((name) => new RegExp(`^${escapeRegex(name)}$`, "i"));
+    const result = await StockLedger.deleteMany({ companyName: { $in: regexes } });
+    return res.json({
+      success: true,
+      message: "Selected stock ledger records removed.",
+      deletedCount: result?.deletedCount || 0,
+    });
+  } catch (err) {
+    console.error("deleteLedgers error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete stock ledger records.",
+    });
+  }
+};
+
 exports.clearLedgers = async (req, res) => {
   try {
     const ok = await verifyAdminPinAndAdditionalSetting(req, res);

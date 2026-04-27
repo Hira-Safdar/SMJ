@@ -5,7 +5,6 @@ import {
   Filter,
   X,
   Info,
-  Trash2,
   Lock,
   Settings,
   Download,
@@ -52,11 +51,6 @@ export default function Stock() {
   const [dateTo, setDateTo] = useState("");
 
   const [showFilters, setShowFilters] = useState(false);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [clearConfirmText, setClearConfirmText] = useState("");
-  const [clearPin, setClearPin] = useState("");
-  const [clearing, setClearing] = useState(false);
-  const [lastClearedAt, setLastClearedAt] = useState(null);
   const [sourceModalRow, setSourceModalRow] = useState(null);
   const [settings, setSettings] = useState({
     additionalStockSettingsEnabled: false,
@@ -173,31 +167,6 @@ export default function Stock() {
       }));
     } finally {
       setSavingThresholds(false);
-    }
-  }
-
-  async function handleClearAllStock() {
-    if (clearConfirmText !== "REMOVE ALL STOCK") {
-      toast.error('Type "REMOVE ALL STOCK" to confirm');
-      return;
-    }
-    if (clearPin.length !== 4) {
-      toast.error("Enter 4-digit admin PIN");
-      return;
-    }
-    try {
-      setClearing(true);
-      await api.post("/stock/clear-ledgers", { adminPin: clearPin.trim() });
-      toast.success("All previous stock has been removed.");
-      setShowClearConfirm(false);
-      setClearConfirmText("");
-      setClearPin("");
-      setLastClearedAt(Date.now());
-      loadData();
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to clear stock");
-    } finally {
-      setClearing(false);
     }
   }
 
@@ -342,6 +311,36 @@ export default function Stock() {
     to.setHours(23, 59, 59, 999);
 
     return candidates.some((d) => d >= from && d <= to);
+  }
+
+  async function handleDeleteSelectedStock(adminPin, selectedRows) {
+    const companyNames = Array.from(
+      new Set(
+        (selectedRows || [])
+          .map((r) => String(r?.companyName || "").trim())
+          .filter(Boolean)
+      )
+    );
+    if (!companyNames.length) {
+      throw new Error("No rows selected.");
+    }
+    const res = await api.post("/stock/delete-ledgers", {
+      adminPin: String(adminPin || "").trim(),
+      companyNames,
+    });
+    const deletedCount = Number(res?.data?.deletedCount || 0);
+    toast.success(`Deleted ${deletedCount} stock ledger record(s).`);
+    await loadData();
+  }
+
+  async function handleDeleteAllStockByPin(adminPin) {
+    const res = await api.post("/stock/delete-ledgers", {
+      adminPin: String(adminPin || "").trim(),
+      all: true,
+    });
+    const deletedCount = Number(res?.data?.deletedCount || 0);
+    toast.success(`Deleted ${deletedCount} stock ledger record(s).`);
+    await loadData();
   }
 
   // --------------------------------------------------------------------
@@ -841,15 +840,6 @@ export default function Stock() {
               >
                 <Printer size={15} /> Print
               </button>
-              {settings.additionalStockSettingsEnabled && (
-                <button
-                  className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
-                  onClick={() => setShowClearConfirm(true)}
-                >
-                  <Trash2 size={16} />
-                  Remove all previous stock
-                </button>
-              )}
             </div>
             </div>
 
@@ -1079,67 +1069,6 @@ export default function Stock() {
                     className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 text-sm"
                   >
                     {savingThresholds ? "Saving…" : "Save"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* CLEAR ALL STOCK CONFIRMATION MODAL */}
-          {showClearConfirm && (
-            <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-4 w-full max-w-md shadow-xl">
-                <h3 className="text-sm font-semibold text-red-800 mb-2">
-                  Remove all previous stock
-                </h3>
-                <p className="text-xs text-gray-600 mb-3">
-                  This will permanently remove all stock ledgers, production
-                  batches, and transactions. This action cannot be undone.
-                </p>
-                <p className="text-xs text-gray-700 mb-2">
-                  Type <strong>REMOVE ALL STOCK</strong> to confirm:
-                </p>
-                <input
-                  type="text"
-                  className="w-full border border-gray-300 p-2 rounded text-sm mb-3"
-                  value={clearConfirmText}
-                  onChange={(e) => setClearConfirmText(e.target.value)}
-                  placeholder="REMOVE ALL STOCK"
-                />
-                <p className="text-xs text-gray-600 mb-2">Admin PIN:</p>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength="8"
-                  className="w-full border border-gray-300 p-2 rounded text-sm mb-4"
-                  value={clearPin}
-                  onChange={(e) =>
-                    setClearPin(e.target.value.replace(/\D/g, "").slice(0, 8))
-                  }
-                  placeholder="PIN"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-100"
-                    onClick={() => {
-                      setShowClearConfirm(false);
-                      setClearConfirmText("");
-                      setClearPin("");
-                    }}
-                    disabled={clearing}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-                    onClick={handleClearAllStock}
-                    disabled={
-                      clearing ||
-                      clearConfirmText !== "REMOVE ALL STOCK" ||
-                      clearPin.length !== 4
-                    }
-                  >
-                    {clearing ? "Removing…" : "Remove all stock"}
                   </button>
                 </div>
               </div>
@@ -1439,6 +1368,25 @@ export default function Stock() {
                 showClearFilters={false}
                 showExport={false}
                 showPrint={false}
+                bulkDelete={
+                  settings.additionalStockSettingsEnabled
+                    ? {
+                        label: "Del",
+                        description:
+                          "Selected companies ke stock ledger records permanently delete ho jayenge.",
+                        onConfirm: handleDeleteSelectedStock,
+                      }
+                    : undefined
+                }
+                deleteAll={
+                  settings.additionalStockSettingsEnabled
+                    ? {
+                        description:
+                          "Yeh action tamam stock ledger records permanently delete karega.",
+                        onConfirm: handleDeleteAllStockByPin,
+                      }
+                    : undefined
+                }
               />
             </div>
 
@@ -1485,3 +1433,4 @@ export default function Stock() {
     </div>
   );
 }
+
