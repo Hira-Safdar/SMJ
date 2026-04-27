@@ -36,7 +36,6 @@ export default function Dashboard() {
   });
   const [showPendingInfo, setShowPendingInfo] = useState(false);
   const [pendingDetails, setPendingDetails] = useState([]);
-  const [pendingPayInput, setPendingPayInput] = useState({});
   const [stockSummary, setStockSummary] = useState({
     productionKg: 0,
   });
@@ -77,30 +76,6 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData();
   }, []);
-
-  const updatePendingPayment = async (entry) => {
-    const id = String(entry?._id || "");
-    if (!id) return;
-    const total = Math.max(0, Number(entry?.totalAmount || 0));
-    const raw = String(pendingPayInput[id] ?? "").replace(/\D/g, "");
-    const paidNow = Math.max(0, Number(raw || 0));
-    if (!paidNow) return;
-    const alreadyPaid = Math.max(0, Number(entry?.amountPaid || 0));
-    const nextPaid = Math.min(total, alreadyPaid + paidNow);
-    const remaining = Math.max(total - nextPaid, 0);
-    const status = remaining <= 0 ? "PAID" : "PARTIAL";
-    try {
-      await axios.put(`http://localhost:5000/api/gatepasses/${id}`, {
-        paymentStatus: status,
-        amountPaid: nextPaid,
-        remainingAmount: remaining,
-      });
-      setPendingPayInput((prev) => ({ ...prev, [id]: "" }));
-      await fetchDashboardData();
-    } catch (err) {
-      console.error("Pending payment update failed:", err);
-    }
-  };
 
   const cards = [
     {
@@ -254,10 +229,8 @@ export default function Dashboard() {
                 <div className="text-xs text-gray-400">No pending payments</div>
               ) : (
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1 thin-scrollbar">
-                  {pendingDetails.map((p, i) => {
-                    const key = String(p._id || `${p.gatePassNo}-${i}`);
-                    return (
-                      <div key={key} className="rounded border border-gray-100 p-2 text-xs">
+                  {pendingDetails.map((p, i) => (
+                      <div key={String(p._id || `${p.gatePassNo}-${i}`)} className="rounded border border-gray-100 p-2 text-xs">
                         <div className="flex items-center justify-between">
                           <div className="flex flex-col">
                             <span className="font-medium text-gray-700">{p.customer || "Customer"}</span>
@@ -270,26 +243,8 @@ export default function Dashboard() {
                         <div className="mt-1 text-[11px] text-gray-500">
                           Paid: Rs. {Number(p.amountPaid || 0).toLocaleString()}
                         </div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <input
-                            value={pendingPayInput[key] || ""}
-                            onChange={(e) =>
-                              setPendingPayInput((prev) => ({ ...prev, [key]: e.target.value.replace(/\D/g, "").slice(0, 10) }))
-                            }
-                            placeholder="Paid now"
-                            className="w-24 rounded border border-gray-300 px-2 py-1 text-xs outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => updatePendingPayment(p)}
-                            className="rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700"
-                          >
-                            Update
-                          </button>
-                        </div>
                       </div>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
             <div className="flex items-center justify-between border-t pt-2 mt-3 text-sm">
