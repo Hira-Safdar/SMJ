@@ -982,18 +982,22 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
+    const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase();
     const snapshot = await buildBusinessSnapshot();
     const intent = detectIntent(cleanMessage);
-    const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase();
+    const shouldForceRemote = forceProvider === "huggingface";
 
     const ragCtx = await retrieveKnowledgeContext(cleanMessage);
     const ragText = formatKnowledgeForPrompt(ragCtx);
 
     // Deterministic answers for key queries to avoid hallucination (always allowed, even when HF is enabled).
-    const direct = answerFromSnapshot(intent, snapshot);
-    const manualDirect = direct == null ? await answerFromManual(intent, cleanMessage) : null;
+    const direct = shouldForceRemote ? null : answerFromSnapshot(intent, snapshot);
+    const manualDirect =
+      shouldForceRemote || direct != null ? null : await answerFromManual(intent, cleanMessage);
     const dbDirect =
-      direct == null && manualDirect == null ? await answerFromDatabase(intent) : null;
+      shouldForceRemote || direct != null || manualDirect != null
+        ? null
+        : await answerFromDatabase(intent);
 
     const ai =
       direct != null
@@ -1109,11 +1113,13 @@ exports.getConfig = async (_req, res) => {
   const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_TOKEN || "";
   const hfModel = process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "";
   const debug = String(process.env.AI_DEBUG || "").trim() === "1";
+  const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase() || null;
 
   res.json({
     success: true,
     data: {
       aiDebug: debug,
+      forceProvider,
       hfModel: hfModel || null,
       hfModelSet: !!hfModel,
       hfTokenSet: !!hfToken,
