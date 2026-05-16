@@ -4707,7 +4707,7 @@ export default function AccountingFinance() {
       {activeTab === "journal-entry" && showJournalFilters && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 w-full max-w-3xl">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900">Filters</div>
               <button
                 type="button"
@@ -5349,7 +5349,7 @@ export default function AccountingFinance() {
       {activeTab === "ledger" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <button
                   type="button"
@@ -5364,8 +5364,8 @@ export default function AccountingFinance() {
                 </button>
                 Ledger Preview
               </div>
-              <div className="flex-1 flex justify-center gap-2 flex-wrap items-center min-w-0">
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+              <div className="flex w-full flex-wrap items-stretch gap-2 xl:flex-1 xl:justify-center xl:items-center min-w-0">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Range</span>
                   <select
                     value={ledgerGenerateRange}
@@ -5393,7 +5393,7 @@ export default function AccountingFinance() {
                         applyLedgerFiltersOnly({ range: v }).catch(() => {});
                       }
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
                   >
                     {RANGE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -5403,7 +5403,7 @@ export default function AccountingFinance() {
                   </select>
                 </div>
                 {(ledgerGenerateRange === "day" || ledgerGenerateRange === "particular") && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Date</span>
                     <input
                       type="date"
@@ -5413,12 +5413,12 @@ export default function AccountingFinance() {
                         setLedgerGenerateDate(v);
                         applyLedgerFiltersOnly({ range: ledgerGenerateRange, date: v }).catch(() => {});
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[100px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[100px] sm:flex-none"
                     />
                   </div>
                 )}
                 {ledgerGenerateRange === "month" && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Month</span>
                     <input
                       type="month"
@@ -5428,12 +5428,12 @@ export default function AccountingFinance() {
                         setLedgerGenerateDate(v);
                         applyLedgerFiltersOnly({ range: "month", date: v }).catch(() => {});
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[90px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
                     />
                   </div>
                 )}
                 {ledgerGenerateRange === "year" && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Year</span>
                     <input
                       type="number"
@@ -5443,13 +5443,13 @@ export default function AccountingFinance() {
                         setLedgerGenerateDate(v);
                         applyLedgerFiltersOnly({ range: "year", date: v }).catch(() => {});
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[70px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[70px] sm:flex-none"
                     />
                   </div>
                 )}
                 {ledgerGenerateRange === "custom" && (
                   <>
-                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                       <span className="text-xs text-gray-600">From</span>
                       <input
                         type="date"
@@ -5459,10 +5459,10 @@ export default function AccountingFinance() {
                           setLedgerGenerateStart(v);
                           applyLedgerFiltersOnly({ range: "custom", start: v, end: ledgerGenerateEnd }).catch(() => {});
                         }}
-                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                        className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[95px] sm:flex-none"
                       />
                     </div>
-                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                       <span className="text-xs text-gray-600">To</span>
                       <input
                         type="date"
@@ -5472,12 +5472,12 @@ export default function AccountingFinance() {
                           setLedgerGenerateEnd(v);
                           applyLedgerFiltersOnly({ range: "custom", start: ledgerGenerateStart, end: v }).catch(() => {});
                         }}
-                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                        className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[95px] sm:flex-none"
                       />
                     </div>
                   </>
                 )}
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Account</span>
                   <select
                     value={ledgerFilterAccountId}
@@ -5487,7 +5487,7 @@ export default function AccountingFinance() {
                         setLedgerGenerateName(getSuggestedLedgerName({ accountId: e.target.value }));
                       applyLedgerFiltersOnly().catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[120px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[120px] sm:flex-none"
                   >
                     <option value="">Select account</option>
                     {(accountOptions || []).map((a) => (
@@ -5497,7 +5497,7 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Company</span>
                   <select
                     value={ledgerFilterCompanyId || ledgerFilterCompanyName}
@@ -5508,7 +5508,7 @@ export default function AccountingFinance() {
                       setLedgerFilterCompanyName(match ? match.name : v);
                       applyLedgerFiltersOnly().catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   >
                     <option value="">All</option>
                     {(companyOptions || []).map((c) => (
@@ -5518,7 +5518,7 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Customer</span>
                   <select
                     value={ledgerFilterPartyName}
@@ -5526,7 +5526,7 @@ export default function AccountingFinance() {
                       setLedgerFilterPartyName(e.target.value);
                       applyLedgerFiltersOnly().catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   >
                     <option value="">All</option>
                     {(customerOptions || []).map((c) => (
@@ -5537,7 +5537,7 @@ export default function AccountingFinance() {
                   </select>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -5553,7 +5553,7 @@ export default function AccountingFinance() {
                     setLedgerNameTouched(false);
                     applyLedgerFiltersOnly({ range: "all", date: "", start: "", end: "" }).catch(() => {});
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Clear Filters"
                 >
                   Clear
@@ -5561,7 +5561,7 @@ export default function AccountingFinance() {
                 <button
                   type="button"
                   onClick={() => openLedgerEditor({ rows: ledgerPreviewRows, sourceId: activeGeneratedLedgerId || "" })}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Edit layout"
                   disabled={ledgerPreviewRows.length === 0}
                 >
@@ -5575,7 +5575,7 @@ export default function AccountingFinance() {
                     setLedgerNameTouched(false);
                     setLedgerGenerateOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 sm:w-auto"
                 >
                   <Printer size={16} /> Generate
                 </button>
@@ -5587,7 +5587,7 @@ export default function AccountingFinance() {
                   <span>Dr.</span>
                   <span>Cr.</span>
                 </div>
-                <table className="w-full text-sm border border-gray-200 table-fixed">
+                <table className="min-w-[980px] w-full text-sm border border-gray-200 table-fixed">
                   <thead className="bg-gray-50 text-gray-800">
                     <tr>
                       <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
@@ -5728,7 +5728,7 @@ export default function AccountingFinance() {
       {activeTab === "trial" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <button
                   type="button"
@@ -5743,8 +5743,8 @@ export default function AccountingFinance() {
                 </button>
                 Trial Balance Preview
               </div>
-              <div className="flex-1 flex justify-center gap-2">
-                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+              <div className="flex w-full flex-wrap items-stretch gap-2 xl:flex-1 xl:justify-center">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">From</span>
                   <input
                     type="date"
@@ -5757,19 +5757,19 @@ export default function AccountingFinance() {
                       if (!trialNameTouched) setTrialGenerateName(getSuggestedTrialName({ range: "custom", start: v }));
                       applyTrialFiltersOnly({ range: "custom", start: v }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   />
                   <span className="text-xs text-gray-600">To</span>
                   <input
                     type="date"
                     value={trialGenerateEnd}
                     disabled
-                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none opacity-70"
                     title="Auto calculated (1 year range)"
                   />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -5787,7 +5787,7 @@ export default function AccountingFinance() {
                     setTrialNameTouched(false);
                     applyTrialFiltersOnly({ range: "custom", start }).catch(() => {});
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Clear Filters"
                 >
                   Clear
@@ -5801,7 +5801,7 @@ export default function AccountingFinance() {
                         : buildTrialLayoutRows({ rows: trialRows, totals: trialTotals });
                     openTrialEditor({ rows: base, sourceId: activeGeneratedTrialId || "" });
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Edit layout"
                   disabled={trialRows.length === 0 && trialLayoutRows.length === 0}
                 >
@@ -5815,7 +5815,7 @@ export default function AccountingFinance() {
                     setTrialNameTouched(false);
                     setTrialGenerateOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 sm:w-auto"
                 >
                   <Printer size={16} /> Generate
                 </button>
@@ -5997,8 +5997,8 @@ export default function AccountingFinance() {
                 Profit &amp; Loss Preview
               </div>
 
-              <div className="flex-1 flex justify-center">
-                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+              <div className="flex w-full flex-wrap items-stretch gap-2 xl:flex-1 xl:justify-center">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">From</span>
                   <input
                     type="date"
@@ -6011,20 +6011,20 @@ export default function AccountingFinance() {
                       if (!plNameTouched) setPlGenerateName(getSuggestedPlName({ start: v }));
                       applyPlFiltersOnly({ start: v }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   />
                   <span className="text-xs text-gray-600">To</span>
                   <input
                     type="date"
                     value={plGenerateEnd}
                     disabled
-                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none opacity-70"
                     title="Auto calculated (1 year range)"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -6040,7 +6040,7 @@ export default function AccountingFinance() {
                     setPlNameTouched(false);
                     applyPlFiltersOnly({ start }).catch(() => {});
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Clear Filters"
                 >
                   Clear
@@ -6049,7 +6049,7 @@ export default function AccountingFinance() {
                   type="button"
                   onClick={() => openPlEditor({ rows: plPreviewRows })}
                   disabled={!plPreviewRows.length}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 sm:w-auto"
                 >
                   <Pencil size={16} /> Edit
                 </button>
@@ -6061,7 +6061,7 @@ export default function AccountingFinance() {
                     setPlNameTouched(false);
                     setPlGenerateOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 sm:w-auto"
                 >
                   <Printer size={16} /> Generate
                 </button>
@@ -6076,7 +6076,7 @@ export default function AccountingFinance() {
                   </div>
                   <div className="text-xs text-gray-700">{plGenerateEnd}</div>
                 </div>
-                <table className="w-full text-sm border border-black table-fixed">
+                <table className="min-w-[720px] w-full text-sm border border-black table-fixed">
                   <thead className="bg-white text-gray-900">
                     <tr>
                       <th className="text-left font-semibold px-2 py-2 border border-black">Dr.</th>
@@ -6215,8 +6215,8 @@ export default function AccountingFinance() {
                 Balance Sheet Preview
               </div>
 
-              <div className="flex-1 flex justify-center">
-                <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+              <div className="flex w-full flex-wrap items-stretch gap-2 xl:flex-1 xl:justify-center">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">From</span>
                   <input
                     type="date"
@@ -6229,20 +6229,20 @@ export default function AccountingFinance() {
                       if (!balanceNameTouched) setBalanceGenerateName(getSuggestedBalanceName({ start: v }));
                       applyBalanceFiltersOnly({ start: v }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   />
                   <span className="text-xs text-gray-600">To</span>
                   <input
                     type="date"
                     value={balanceGenerateEnd}
                     disabled
-                    className="text-xs bg-transparent focus:outline-none w-[110px] opacity-70"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none opacity-70"
                     title="Auto calculated (1 year range)"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -6258,7 +6258,7 @@ export default function AccountingFinance() {
                     setBalanceNameTouched(false);
                     applyBalanceFiltersOnly({ start }).catch(() => {});
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Clear Filters"
                 >
                   Clear
@@ -6267,7 +6267,7 @@ export default function AccountingFinance() {
                   type="button"
                   onClick={() => openBalanceEditor({ rows: balancePreviewRows, sourceId: activeGeneratedBalanceId || "" })}
                   disabled={!balancePreviewRows.length}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 sm:w-auto"
                 >
                   <Pencil size={16} /> Edit
                 </button>
@@ -6279,7 +6279,7 @@ export default function AccountingFinance() {
                     setBalanceNameTouched(false);
                     setBalanceGenerateOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 sm:w-auto"
                 >
                   <Printer size={16} /> Generate
                 </button>
@@ -6295,7 +6295,7 @@ export default function AccountingFinance() {
                   <div className="text-sm font-semibold text-gray-900">Balance Sheet</div>
                   <div className="text-xs text-gray-700">as at {balanceGenerateEnd || "-"}</div>
                 </div>
-                <table className="w-full text-sm border border-black table-fixed">
+                <table className="min-w-[760px] w-full text-sm border border-black table-fixed">
                   <thead className="bg-white text-gray-900">
                     <tr>
                       <th className="text-left font-semibold px-2 py-2 border border-black">Assets</th>

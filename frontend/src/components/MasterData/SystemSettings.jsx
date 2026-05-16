@@ -296,7 +296,11 @@ export default function SystemSettings() {
         const [settingsRes] = await Promise.all([api.get("/settings"), loadBackupModules({ silent: true })]);
         if (settingsRes.data && settingsRes.data.data) {
           const s = settingsRes.data.data;
-          setSettings((prev) => ({ ...prev, ...s }));
+          setSettings((prev) => ({
+            ...prev,
+            ...s,
+            logoUrl: toAbsoluteLogoUrl(s.logoUrl || s.logo || s.logoPath || ""),
+          }));
           savedGeneralEmailRef.current = String(s.email || "").trim();
         }
       } catch (err) {
@@ -307,7 +311,20 @@ export default function SystemSettings() {
   }, []);
 
   useEffect(() => {
-    const refresh = () => loadBackupModules({ silent: true });
+    const refresh = async () => {
+      await loadBackupModules({ silent: true });
+      try {
+        const settingsRes = await api.get("/settings");
+        if (settingsRes.data?.data) {
+          const s = settingsRes.data.data;
+          setSettings((prev) => ({
+            ...prev,
+            ...s,
+            logoUrl: toAbsoluteLogoUrl(s.logoUrl || s.logo || s.logoPath || ""),
+          }));
+        }
+      } catch (_) {}
+    };
     window.addEventListener("smj-settings-updated", refresh);
     const intervalId = window.setInterval(
       () => loadBackupModules({ silent: true }),
@@ -331,6 +348,15 @@ export default function SystemSettings() {
 
   const handleChange = (k, v) => {
     setSettings((s) => ({ ...s, [k]: v }));
+  };
+
+  const toAbsoluteLogoUrl = (value) => {
+    const url = String(value || "").trim();
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = api.defaults.baseURL || "";
+    const origin = base.replace(/\/api\/?$/i, "");
+    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
   };
 
   useEffect(() => {
@@ -575,7 +601,9 @@ export default function SystemSettings() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       if (res.data && res.data.logoUrl) {
-        handleChange("logoUrl", res.data.logoUrl);
+        handleChange("logoUrl", toAbsoluteLogoUrl(res.data.logoUrl));
+        setLogoFile(null);
+        window.dispatchEvent(new Event("smj-settings-updated"));
         toast.success("Logo uploaded");
       }
     } catch (err) {

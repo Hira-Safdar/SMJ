@@ -592,10 +592,17 @@ exports.uploadLogo = async (req, res) => {
     const protocol = req.protocol;
     const publicUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
 
+    const all = await SystemSettings.find({}).sort({ createdAt: 1 }).select("_id");
+    const primary = all[0] || null;
+    if (all.length > 1) {
+      const duplicateIds = all.slice(1).map((d) => d._id);
+      await SystemSettings.deleteMany({ _id: { $in: duplicateIds } });
+    }
+
     const updated = await SystemSettings.findOneAndUpdate(
-      {},
+      primary ? { _id: primary._id } : {},
       { $set: { logoUrl: publicUrl } },
-      { new: true, upsert: true }
+      { new: true, upsert: true, runValidators: true, sort: { createdAt: 1 } }
     );
 
     res.json({ success: true, data: updated, logoUrl: publicUrl });
