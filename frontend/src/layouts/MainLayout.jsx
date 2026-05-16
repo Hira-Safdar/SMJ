@@ -515,6 +515,9 @@ export default function MainLayout({ children }) {
             </div>
           )}
           <div>{children}</div>
+          <footer className="mt-6 border-t border-gray-200 pt-4 text-center text-xs text-gray-500">
+            Copyright © 2026. Developed by Hira Safdar.
+          </footer>
         </main>
       </div>
         </>

@@ -6730,7 +6730,9 @@ export default function AccountingFinance() {
 
                     <div className="grid md:grid-cols-6 gap-3 items-start">
                       <div>
-                        <label className="block text-xs text-gray-600 mb-1">Date</label>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Date <span className="text-red-500">*</span>
+                        </label>
                         <input
                           type="date"
                           value={e.date || ""}
@@ -6766,7 +6768,9 @@ export default function AccountingFinance() {
                       </div>
 
                       <div className="md:col-span-2">
-                        <label className="block text-xs text-gray-600 mb-1">Company</label>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Company <span className="text-red-500">*</span>
+                        </label>
                         <select
                           value={e.companyId || ""}
                           onChange={(ev) => setEntryCompany(e.entryId, ev.target.value)}
@@ -6824,10 +6828,18 @@ export default function AccountingFinance() {
                       <table className="min-w-[700px] w-full text-sm table-fixed">
                         <thead className="bg-emerald-50 text-emerald-900">
                           <tr>
-                            <th className="text-left font-semibold px-3 py-2 w-[200px]">Debit Account</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[110px]">Debit Amount</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[200px]">Credit Account</th>
-                            <th className="text-left font-semibold px-3 py-2 w-[110px]">Credit Amount</th>
+                            <th className="text-left font-semibold px-3 py-2 w-[200px]">
+                              Debit Account <span className="text-red-500">*</span>
+                            </th>
+                            <th className="text-left font-semibold px-3 py-2 w-[110px]">
+                              Debit Amount <span className="text-red-500">*</span>
+                            </th>
+                            <th className="text-left font-semibold px-3 py-2 w-[200px]">
+                              Credit Account <span className="text-red-500">*</span>
+                            </th>
+                            <th className="text-left font-semibold px-3 py-2 w-[110px]">
+                              Credit Amount <span className="text-red-500">*</span>
+                            </th>
                             <th className="text-left font-semibold px-3 py-2 w-[45px]"></th>
                           </tr>
                         </thead>
@@ -6974,7 +6986,9 @@ export default function AccountingFinance() {
                     </div>
 
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">Narration</label>
+                      <label className="block text-xs text-gray-600 mb-1">
+                        Narration <span className="text-red-500">*</span>
+                      </label>
                       <input
                         value={e.narration || ""}
                         onChange={(ev) => patchEntry(e.entryId, { narration: ev.target.value })}
