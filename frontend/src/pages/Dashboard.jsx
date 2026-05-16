@@ -9,7 +9,7 @@ import {
   Tooltip,
 } from "recharts";
 import "react-datepicker/dist/react-datepicker.css";
-import axios from "axios";
+import api from "../services/api";
 
 const leftAccent = {
   teal: "border-teal-400",
@@ -47,7 +47,7 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/dashboard");
+      const res = await api.get("/dashboard");
       const data = res.data.data || {};
 
       setStats({
