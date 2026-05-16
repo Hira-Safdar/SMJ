@@ -11,10 +11,22 @@ const { initAIManualSync } = require("./services/aiManualSync");
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
+const allowedOrigins = new Set(["https://smj-91v8.vercel.app"]);
+
 // Middleware
 app.use(
   cors({
-    origin: "https://smj-91v8.vercel.app",
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        return callback(null, true);
+      }
+
+      if (/^https:\/\/smj-91v8-[a-z0-9-]+-hira-safdars-projects\.vercel\.app$/i.test(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
   })
 );
