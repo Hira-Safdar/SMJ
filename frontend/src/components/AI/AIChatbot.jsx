@@ -44,6 +44,7 @@ export default function AIChatbot() {
   const didDragRef = useRef(false);
 
   const messagesEndRef = useRef(null);
+  const isMobile = typeof window !== "undefined" ? window.innerWidth < 640 : false;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -190,6 +191,14 @@ export default function AIChatbot() {
   const GAP = 8;
   const getChatStyle = () => {
     if (typeof window === "undefined") return { left: position.x, top: position.y };
+    if (window.innerWidth < 640) {
+      return {
+        left: 12,
+        right: 12,
+        top: Math.max(12, window.innerHeight * 0.08),
+        bottom: 12,
+      };
+    }
     let left = position.x;
     let top = position.y;
     if (position.x + CHAT_W + GAP > window.innerWidth) left = Math.max(0, position.x - CHAT_W - GAP);
@@ -218,13 +227,18 @@ export default function AIChatbot() {
       {isOpen && (
         <div
           ref={containerRef}
-          className="fixed w-96 h-[500px] max-h-[90vh] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200"
+          className="fixed w-[calc(100vw-24px)] max-w-96 h-[min(78vh,500px)] sm:h-[500px] sm:max-h-[90vh] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200"
           style={chatStyle}
         >
           {/* Header - drag to move (buttons still clickable) */}
           <div
-            className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white p-4 rounded-t-2xl flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
-            onMouseDown={(e) => { if (!e.target.closest("button")) handleDragStart(e); }}
+            className={`bg-gradient-to-r from-emerald-500 to-emerald-600 text-white p-4 rounded-t-2xl flex items-center justify-between select-none ${
+              isMobile ? "" : "cursor-grab active:cursor-grabbing"
+            }`}
+            onMouseDown={(e) => {
+              if (isMobile) return;
+              if (!e.target.closest("button")) handleDragStart(e);
+            }}
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
