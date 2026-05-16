@@ -577,10 +577,10 @@ export default function MainLayout({ children }) {
                         <img
                           src={settings.logoUrl}
                           alt="SMJ logo"
-                          className="h-24 w-24 object-contain sm:h-28 sm:w-28"
+                          className="h-36 w-36 object-contain sm:h-32 sm:w-32"
                         />
                       ) : (
-                        <Building2 size={96} />
+                        <Building2 size={132} />
                       )}
                     </div>
                   </div>

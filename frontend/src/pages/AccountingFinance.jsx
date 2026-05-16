@@ -6820,8 +6820,8 @@ export default function AccountingFinance() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-gray-200 overflow-x-hidden">
-                      <table className="w-full text-sm table-fixed">
+                    <div className="rounded-xl border border-gray-200 overflow-x-auto">
+                      <table className="min-w-[700px] w-full text-sm table-fixed">
                         <thead className="bg-emerald-50 text-emerald-900">
                           <tr>
                             <th className="text-left font-semibold px-3 py-2 w-[200px]">Debit Account</th>
