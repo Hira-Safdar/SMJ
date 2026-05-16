@@ -4817,7 +4817,7 @@ export default function AccountingFinance() {
       {activeTab === "journal-report" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <button
                   type="button"
@@ -4832,8 +4832,8 @@ export default function AccountingFinance() {
                 </button>
                 Journal Preview
               </div>
-              <div className="flex-1 flex justify-center gap-2 flex-wrap items-center">
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+              <div className="flex w-full flex-wrap items-stretch gap-2 xl:flex-1 xl:justify-center xl:items-center">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Range</span>
                   <select
                     value={journalGenerateRange}
@@ -4875,7 +4875,7 @@ export default function AccountingFinance() {
                       }
                       applyJournalFiltersOnly({ range: v });
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
                   >
                     <option value="all">All</option>
                     <option value="day">Today</option>
@@ -4886,7 +4886,7 @@ export default function AccountingFinance() {
                   </select>
                 </div>
                 {(journalGenerateRange === "day" || journalGenerateRange === "particular") && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Date</span>
                     <input
                       type="date"
@@ -4897,12 +4897,12 @@ export default function AccountingFinance() {
                         if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v }));
                         applyJournalFiltersOnly({ range: journalGenerateRange, date: v });
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[100px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[100px] sm:flex-none"
                     />
                   </div>
                 )}
                 {journalGenerateRange === "month" && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Month</span>
                     <input
                       type="month"
@@ -4913,12 +4913,12 @@ export default function AccountingFinance() {
                         if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "month" }));
                         applyJournalFiltersOnly({ range: "month", date: v });
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[90px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
                     />
                   </div>
                 )}
                 {journalGenerateRange === "year" && (
-                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                  <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                     <span className="text-xs text-gray-600">Year</span>
                     <select
                       value={journalGenerateDate}
@@ -4928,7 +4928,7 @@ export default function AccountingFinance() {
                         if (!journalNameTouched) setJournalGenerateName(getSuggestedJournalName({ date: v, range: "year" }));
                         applyJournalFiltersOnly({ range: "year", date: v });
                       }}
-                      className="text-xs bg-transparent focus:outline-none w-[70px]"
+                      className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[70px] sm:flex-none"
                     >
                       {Array.from({ length: 21 }).map((_, i) => {
                         const y = String(new Date().getFullYear() - 10 + i);
@@ -4943,7 +4943,7 @@ export default function AccountingFinance() {
                 )}
                 {journalGenerateRange === "custom" && (
                   <>
-                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                       <span className="text-xs text-gray-600">From</span>
                       <input
                         type="date"
@@ -4955,10 +4955,10 @@ export default function AccountingFinance() {
                             setJournalGenerateName(getSuggestedJournalName({ start: v, end: journalGenerateEnd }));
                           applyJournalFiltersOnly({ range: "custom", start: v, end: journalGenerateEnd });
                         }}
-                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                        className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[95px] sm:flex-none"
                       />
                     </div>
-                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                    <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                       <span className="text-xs text-gray-600">To</span>
                       <input
                         type="date"
@@ -4970,12 +4970,12 @@ export default function AccountingFinance() {
                             setJournalGenerateName(getSuggestedJournalName({ start: journalGenerateStart, end: v }));
                           applyJournalFiltersOnly({ range: "custom", start: journalGenerateStart, end: v });
                         }}
-                        className="text-xs bg-transparent focus:outline-none w-[95px]"
+                        className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[95px] sm:flex-none"
                       />
                     </div>
                   </>
                 )}
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Company</span>
                   <select
                     value={journalFilterCompanyName}
@@ -4993,7 +4993,7 @@ export default function AccountingFinance() {
                         voucherType: journalFilterVoucherType || undefined,
                       }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   >
                     <option value="">All</option>
                     {companyOptions.map((c) => (
@@ -5003,7 +5003,7 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Customer</span>
                   <select
                     value={journalFilterCustomerName}
@@ -5021,7 +5021,7 @@ export default function AccountingFinance() {
                         voucherType: journalFilterVoucherType || undefined,
                       }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[110px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
                   >
                     <option value="">All</option>
                     {customerOptions.map((c) => (
@@ -5031,7 +5031,7 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-gray-300 bg-white text-xs">
+                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
                   <span className="text-xs text-gray-600">Voucher</span>
                   <select
                     value={journalFilterVoucherType}
@@ -5049,7 +5049,7 @@ export default function AccountingFinance() {
                         voucherType: v || undefined,
                       }).catch(() => {});
                     }}
-                    className="text-xs bg-transparent focus:outline-none w-[90px]"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
                   >
                     <option value="">All</option>
                     {VOUCHER_TYPES.map((t) => (
@@ -5060,12 +5060,12 @@ export default function AccountingFinance() {
                   </select>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 {isJournalReportFilterApplied && (
                   <button
                     type="button"
                     onClick={clearJournalFilters}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                    className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                       title="Clear Filters"
                     >
                       Clear
@@ -5113,7 +5113,7 @@ export default function AccountingFinance() {
                       toast.error(err?.response?.data?.message || "Failed to load journal for editing.");
                     }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
                   title="Edit layout"
                   disabled={reportPreviewEntries.length === 0}
                 >
@@ -5127,15 +5127,15 @@ export default function AccountingFinance() {
                   setJournalNameTouched(false);
                   setJournalGenerateOpen(true);
                 }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 sm:w-auto"
                 >
                   <Printer size={16} /> Generate
                 </button>
               </div>
             </div>
             {journalReportPreviewOpen && (
-            <div className="rounded-xl border border-gray-200 overflow-x-hidden">
-              <table className="w-full text-sm border border-gray-200 table-fixed">
+            <div className="rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="min-w-[680px] w-full text-sm border border-gray-200 table-fixed">
                 <thead className="bg-gray-50 text-gray-800">
                   <tr>
                     <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>

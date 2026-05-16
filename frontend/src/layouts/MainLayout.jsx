@@ -68,6 +68,15 @@ export default function MainLayout({ children }) {
   const isLoginAnimatingOut =
     loginScreenState === "success" || loginScreenState === "closing";
 
+  const toAbsoluteLogoUrl = (value) => {
+    const url = String(value || "").trim();
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = api.defaults.baseURL || "";
+    const origin = base.replace(/\/api\/?$/i, "");
+    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
+  };
+
   const resetLoginTimers = () => {
     loginTimersRef.current.forEach((id) => window.clearTimeout(id));
     loginTimersRef.current = [];
@@ -193,6 +202,16 @@ export default function MainLayout({ children }) {
           companyName: general.companyName || general.millName || prev.companyName || "",
           shortName: general.shortName || prev.shortName || "",
           email: general.email || general.companyEmail || prev.email || "",
+          logoUrl: toAbsoluteLogoUrl(
+            general.logoUrl ||
+              general.logo ||
+              general.logoPath ||
+              data.logoUrl ||
+              data.logo ||
+              data.logoPath ||
+              prev.logoUrl ||
+              ""
+          ),
         }));
       }
     } catch (err) {
@@ -546,18 +565,22 @@ export default function MainLayout({ children }) {
 
               <div className="relative p-5 sm:p-7 md:px-12 md:pb-12 md:pt-20">
                 <div className="mb-5 overflow-hidden rounded-[1.6rem] bg-gradient-to-br from-[#016d73] via-[#0a7379] to-[#045e63] p-5 text-white md:hidden">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
                     <div>
                       <div className="text-3xl font-semibold leading-tight">Hello!</div>
                       <p className="mt-1 text-sm text-teal-100">
                         Welcome to {settings.companyName || settings.shortName || "SMJ"}
                       </p>
                     </div>
-                    <div>
+                    <div className="flex shrink-0 items-center justify-center">
                       {settings.logoUrl ? (
-                        <img src={settings.logoUrl} alt="SMJ logo" className="h-[140px] w-[140px] object-contain" />
+                        <img
+                          src={settings.logoUrl}
+                          alt="SMJ logo"
+                          className="h-24 w-24 object-contain sm:h-28 sm:w-28"
+                        />
                       ) : (
-                        <Building2 size={140} />
+                        <Building2 size={96} />
                       )}
                     </div>
                   </div>
