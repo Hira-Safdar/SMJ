@@ -1371,7 +1371,6 @@ export default function AccountingFinance() {
       };
 
       if (!String(e.date || "").trim()) fields.date = "Date is required.";
-      if (!String(e.companyId || "").trim()) fields.companyId = "Company is required.";
       if (!String(e.narration || "").trim()) fields.narration = "Narration is required.";
 
       const base = (e.lines || [])[0];
@@ -6768,9 +6767,7 @@ export default function AccountingFinance() {
                       </div>
 
                       <div className="md:col-span-2">
-                        <label className="block text-xs text-gray-600 mb-1">
-                          Company <span className="text-red-500">*</span>
-                        </label>
+                        <label className="block text-xs text-gray-600 mb-1">Company</label>
                         <select
                           value={e.companyId || ""}
                           onChange={(ev) => setEntryCompany(e.entryId, ev.target.value)}
