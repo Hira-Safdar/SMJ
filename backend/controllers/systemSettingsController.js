@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
+const mongoose = require("mongoose");
 const SystemSettings = require("../models/systemSettingsModel");
 const ProductType = require("../models/productTypeModel");
 const ExpenseCategory = require("../models/expenseCategoryModel");
@@ -671,6 +672,52 @@ exports.getBackupModules = async (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.clearDatabase = async (req, res) => {
+  try {
+    const confirmation = String(req.body?.confirmation || "").trim();
+    if (confirmation !== "CLEAR") {
+      return res.status(400).json({
+        success: false,
+        message: 'Type "CLEAR" to confirm database reset.',
+      });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: "Database is not connected.",
+      });
+    }
+
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const clearedCollections = [];
+
+    for (const collection of collections) {
+      const name = String(collection?.name || "").trim();
+      if (!name) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const result = await mongoose.connection.db.collection(name).deleteMany({});
+      clearedCollections.push({
+        name,
+        deletedCount: result.deletedCount || 0,
+      });
+    }
+
+    const deletedCount = clearedCollections.reduce((sum, row) => sum + Number(row.deletedCount || 0), 0);
+
+    res.json({
+      success: true,
+      message: "Database cleared successfully.",
+      data: {
+        deletedCount,
+        clearedCollections,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || "Failed to clear database." });
   }
 };
 

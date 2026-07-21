@@ -11,7 +11,15 @@ const { initAIManualSync } = require("./services/aiManualSync");
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
-const allowedOrigins = new Set(["https://smj-91v8.vercel.app"]);
+const allowedOrigins = new Set(
+  (
+    process.env.CORS_ORIGINS ||
+    "https://smj-91v8.vercel.app,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
 // Middleware
 app.use(
@@ -32,11 +40,31 @@ app.use(
 );
 app.use(express.json());
 
+function getHealthPayload() {
+  return {
+    ok: true,
+    service: "SMJ Rice Mill API",
+    mongoState: mongoose.connection.readyState,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 // Test route
 app.get("/", (req, res) => {
   res.send("✅ SMJ Rice Mill API running successfully...");
 });
 const dashboardRoutes = require("./routes/dashboardRoutes");
+app.get("/api", (req, res) => {
+  res.json({
+    ...getHealthPayload(),
+    message: "Use /api/status for health checks or one of the registered API routes.",
+  });
+});
+
+app.get("/api/status", (req, res) => {
+  res.json(getHealthPayload());
+});
+
 app.use("/api/dashboard", dashboardRoutes);
 const companyRoutes = require("./routes/companyRoutes");
 app.use("/api/companies", companyRoutes);
@@ -65,6 +93,15 @@ const accountingRoutes = require("./routes/accountingRoutes");
 app.use("/api/accounting", accountingRoutes);
 const reportsRoutes = require("./routes/reportsRoutes");
 app.use("/api/reports", reportsRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Route not found",
+    path: req.originalUrl,
+    method: req.method,
+  });
+});
 
 // Connect MongoDB
 mongoose

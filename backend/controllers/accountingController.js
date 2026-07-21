@@ -14,6 +14,47 @@ const parseRange = (req) => getDateRangeFromQuery(req.query);
 const toNum = (v) => Number(v || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
 const escRe = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const MANUAL_ACCOUNT_TYPES = ["EXPENSE", "INCOME", "ACCOUNT_PAYABLE"];
+const normalizeAccountType = (value) => String(value || "").trim().toUpperCase();
+const accountSortKey = (row) => `${MANUAL_ACCOUNT_TYPES.indexOf(row.type) === -1 ? 99 : MANUAL_ACCOUNT_TYPES.indexOf(row.type)}-${String(row.createdOn || row.createdAt || "")}-${String(row.name || "")}`;
+const balanceSheetType = (type) => (type === "ACCOUNT_PAYABLE" ? "LIABILITY" : type);
+const parseAccountCreatedOn = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date();
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+const ACCOUNT_CODE_INDEX_FILTER = { code: { $exists: true, $type: "string" } };
+let accountCodeIndexPromise = null;
+const ensureAccountCodeIndex = async () => {
+  if (!accountCodeIndexPromise) {
+    accountCodeIndexPromise = (async () => {
+      try {
+        await Account.updateMany({ code: "" }, { $unset: { code: "" } });
+        const indexes = await Account.collection.indexes();
+        const codeIndex = indexes.find((idx) => idx.name === "code_1");
+        const currentFilter = JSON.stringify(codeIndex?.partialFilterExpression || null);
+        const expectedFilter = JSON.stringify(ACCOUNT_CODE_INDEX_FILTER);
+        if (codeIndex && currentFilter !== expectedFilter) {
+          await Account.collection.dropIndex("code_1");
+        }
+        await Account.collection.createIndex(
+          { code: 1 },
+          {
+            unique: true,
+            partialFilterExpression: ACCOUNT_CODE_INDEX_FILTER,
+            name: "code_1",
+          }
+        );
+      } catch (err) {
+        accountCodeIndexPromise = null;
+        throw err;
+      }
+    })();
+  }
+  await accountCodeIndexPromise;
+};
 
 async function ensureActiveAccountsForLines(lines, errorPrefix = "Invalid account selection.") {
   const ids = [...new Set((lines || []).map((l) => String(l?.accountId || "")).filter(Boolean))];
@@ -667,9 +708,9 @@ exports.getProfitLoss = async (req, res) => {
     res.json({
       success: true,
       data: {
-        income: income.sort((a, b) => a.code.localeCompare(b.code)),
-        cogs: cogs.sort((a, b) => a.code.localeCompare(b.code)),
-        expenses: expenses.sort((a, b) => a.code.localeCompare(b.code)),
+        income: income.sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || ""))),
+        cogs: cogs.sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || ""))),
+        expenses: expenses.sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || ""))),
         totals: { incomeTotal, cogsTotal, expenseTotal, grossProfit, profit },
       },
     });
@@ -717,20 +758,20 @@ exports.getBalanceSheet = async (req, res) => {
         subType: acc.subType || "",
         balance: 0,
       };
-      // Assets: debit-credit. Liab/Equity: credit-debit. Income/Expense excluded from BS.
+      // Assets: debit-credit. Liab/Equity/AP: credit-debit. Income/Expense excluded from BS.
       let delta = toNum(l.debit) - toNum(l.credit);
-      if (acc.type === "LIABILITY" || acc.type === "EQUITY") delta = -delta;
+      if (balanceSheetType(acc.type) === "LIABILITY" || acc.type === "EQUITY") delta = -delta;
       prev.balance += delta;
       balances.set(k, prev);
     });
 
     const rows = Array.from(balances.values())
       .map((r) => ({ ...r, balance: round2(r.balance) }))
-      .filter((r) => ["ASSET", "LIABILITY", "EQUITY"].includes(r.type));
+      .filter((r) => ["ASSET", "LIABILITY", "EQUITY"].includes(balanceSheetType(r.type)));
 
-    const assets = rows.filter((r) => r.type === "ASSET").sort((a, b) => a.code.localeCompare(b.code));
-    const liabilities = rows.filter((r) => r.type === "LIABILITY").sort((a, b) => a.code.localeCompare(b.code));
-    const equity = rows.filter((r) => r.type === "EQUITY").sort((a, b) => a.code.localeCompare(b.code));
+    const assets = rows.filter((r) => balanceSheetType(r.type) === "ASSET").sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || "")));
+    const liabilities = rows.filter((r) => balanceSheetType(r.type) === "LIABILITY").sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || "")));
+    const equity = rows.filter((r) => r.type === "EQUITY").sort((a, b) => String(a.code || a.account || "").localeCompare(String(b.code || b.account || "")));
 
     const totalAssets = round2(assets.reduce((s, r) => s + toNum(r.balance), 0));
     const totalLiabilities = round2(liabilities.reduce((s, r) => s + toNum(r.balance), 0));
@@ -889,8 +930,9 @@ exports.getPartyLedger = async (req, res) => {
 
 exports.getAccounts = async (_req, res) => {
   try {
-    await ensureDefaultAccounts();
-    const data = await Account.find({}).sort({ code: 1 }).lean();
+    await ensureAccountCodeIndex();
+    const data = await Account.find({ type: { $in: MANUAL_ACCOUNT_TYPES } }).lean();
+    data.sort((a, b) => accountSortKey(a).localeCompare(accountSortKey(b)));
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load accounts." });
@@ -899,17 +941,26 @@ exports.getAccounts = async (_req, res) => {
 
 exports.createAccount = async (req, res) => {
   try {
+    await ensureAccountCodeIndex();
     const payload = req.body || {};
+    const name = String(payload.name || "").trim();
+    const type = normalizeAccountType(payload.type);
+    const createdOn = parseAccountCreatedOn(payload.createdOn);
+    if (!name) return res.status(400).json({ success: false, message: "Account name is required." });
+    if (!MANUAL_ACCOUNT_TYPES.includes(type)) {
+      return res.status(400).json({ success: false, message: "Account type must be Expense, Income, or Account Payable." });
+    }
+    if (!createdOn) return res.status(400).json({ success: false, message: "Created On date is invalid." });
     const doc = await Account.create({
-      code: String(payload.code || "").trim(),
-      name: String(payload.name || "").trim(),
-      type: payload.type,
-      subType: String(payload.subType || "").trim(),
-      parentAccountId: payload.parentAccountId || null,
-      isControl: !!payload.isControl,
-      isActive: payload.isActive !== false,
-      journalSide: payload.journalSide || "BOTH",
-      tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [],
+      name,
+      createdOn,
+      type,
+      subType: "",
+      parentAccountId: null,
+      isControl: false,
+      isActive: true,
+      journalSide: "BOTH",
+      tags: [],
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
@@ -919,18 +970,32 @@ exports.createAccount = async (req, res) => {
 
 exports.updateAccount = async (req, res) => {
   try {
+    await ensureAccountCodeIndex();
     const { id } = req.params;
     const payload = req.body || {};
     const patch = {};
-    if (payload.code != null) patch.code = String(payload.code || "").trim();
-    if (payload.name != null) patch.name = String(payload.name || "").trim();
-    if (payload.type != null) patch.type = payload.type;
-    if (payload.subType != null) patch.subType = String(payload.subType || "").trim();
-    if (payload.parentAccountId != null) patch.parentAccountId = payload.parentAccountId || null;
-    if (payload.isControl != null) patch.isControl = !!payload.isControl;
+    if (payload.name != null) {
+      const name = String(payload.name || "").trim();
+      if (!name) return res.status(400).json({ success: false, message: "Account name is required." });
+      patch.name = name;
+    }
+    if (payload.type != null) {
+      const type = normalizeAccountType(payload.type);
+      if (!MANUAL_ACCOUNT_TYPES.includes(type)) {
+        return res.status(400).json({ success: false, message: "Account type must be Expense, Income, or Account Payable." });
+      }
+      patch.type = type;
+      patch.subType = "";
+    }
+    if (payload.createdOn != null) {
+      const createdOn = parseAccountCreatedOn(payload.createdOn);
+      if (!createdOn) return res.status(400).json({ success: false, message: "Created On date is invalid." });
+      patch.createdOn = createdOn;
+    }
     if (payload.isActive != null) patch.isActive = !!payload.isActive;
-    if (payload.journalSide != null) patch.journalSide = payload.journalSide || "BOTH";
-    if (payload.tags != null) patch.tags = Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [];
+    patch.parentAccountId = null;
+    patch.isControl = false;
+    patch.journalSide = "BOTH";
     const doc = await Account.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
     if (!doc) return res.status(404).json({ success: false, message: "Account not found." });
     res.json({ success: true, data: doc });

@@ -17,6 +17,7 @@ const {
   verifyEmailOtp,
   resetPinWithOtp,
   renameBrandEverywhere,
+  clearDatabase,
 } = require("../controllers/systemSettingsController");
 
 const uploadsDir = path.join(__dirname, "../uploads");
@@ -66,5 +67,6 @@ router.post("/otp/send", sendEmailOtp);
 router.post("/otp/verify", verifyEmailOtp);
 router.post("/otp/reset-pin", resetPinWithOtp);
 router.post("/rename-brand", renameBrandEverywhere);
+router.delete("/developer/clear-database", clearDatabase);
 
 module.exports = router;

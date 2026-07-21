@@ -2,11 +2,12 @@ const mongoose = require("mongoose");
 
 const accountSchema = new mongoose.Schema(
   {
-    code: { type: String, required: true, unique: true, trim: true },
+    code: { type: String, trim: true, default: undefined },
     name: { type: String, required: true, trim: true },
+    createdOn: { type: Date, default: Date.now },
     type: {
       type: String,
-      enum: ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS"],
+      enum: ["EXPENSE", "INCOME", "ACCOUNT_PAYABLE", "ASSET", "LIABILITY", "EQUITY", "COGS"],
       required: true,
     },
     subType: { type: String, default: "", trim: true },
@@ -28,5 +29,12 @@ const accountSchema = new mongoose.Schema(
 );
 
 accountSchema.index({ type: 1, subType: 1 });
+accountSchema.index(
+  { code: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { code: { $exists: true, $type: "string" } },
+  }
+);
 
 module.exports = mongoose.model("Account", accountSchema);

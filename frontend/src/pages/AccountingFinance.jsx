@@ -60,13 +60,22 @@ const BOOK_TYPES = [
   { value: "BILLS_PAYABLE", label: "Bills Payable" },
 ];
 
-const ACCOUNT_SUBTYPES = {
-  ASSET: ["CURRENT_ASSET", "FIXED_ASSET", "CASH", "BANK", "INVENTORY", "AR", "OTHER"],
-  LIABILITY: ["CURRENT_LIABILITY", "LONG_TERM_LIABILITY", "AP", "PAYROLL", "OTHER"],
-  EQUITY: ["OWNER_EQUITY", "CAPITAL", "DRAWING", "RESERVE", "OTHER"],
-  INCOME: ["SALES", "SERVICE", "OTHER_INCOME", "OTHER"],
-  EXPENSE: ["PURCHASE", "OPERATING", "PAYROLL", "ADMIN", "SELLING", "OTHER"],
-  COGS: ["COGS", "OTHER"],
+const MANUAL_ACCOUNT_TYPES = [
+  { value: "EXPENSE", label: "Expense" },
+  { value: "INCOME", label: "Income" },
+  { value: "ACCOUNT_PAYABLE", label: "Account Payable" },
+];
+
+const getManualAccountTypeKey = (account = {}) => {
+  const type = String(account.type || "").toUpperCase();
+  if (type === "ACCOUNT_PAYABLE") return "ACCOUNT_PAYABLE";
+  if (type === "INCOME") return "INCOME";
+  return "EXPENSE";
+};
+
+const getManualAccountTypeLabel = (account = {}) => {
+  const key = getManualAccountTypeKey(account);
+  return MANUAL_ACCOUNT_TYPES.find((t) => t.value === key)?.label || "Expense";
 };
 
 const blankLine = () => {
@@ -122,6 +131,20 @@ const toTitleCase = (value) =>
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
   const normalizeCompanyName = (value) => toTitleCase(String(value || "").trim().replace(/\s+/g, " "));
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const toDateInputValue = (value) => {
+    if (!value) return todayIso();
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return todayIso();
+    return d.toISOString().slice(0, 10);
+  };
+  const formatAccountCreatedOn = (row = {}) => {
+    const value = row.createdOn || row.createdAt;
+    if (!value) return "-";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString();
+  };
   const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleDateString("en-US", { month: "long", day: "2-digit" });
@@ -436,18 +459,13 @@ export default function AccountingFinance() {
     mode: "create", // create|edit
     id: "",
     form: {
-      code: "",
       name: "",
-      type: "ASSET",
-      subType: "CURRENT_ASSET",
-      parentAccountId: "",
-      isControl: false,
-      isActive: true,
-      journalSide: "BOTH",
+      manualType: "EXPENSE",
+      createdOn: todayIso(),
     },
   });
   const [accountSaveError, setAccountSaveError] = useState("");
-  const [accountFieldErrors, setAccountFieldErrors] = useState({ code: "", name: "" });
+  const [accountFieldErrors, setAccountFieldErrors] = useState({ name: "", createdOn: "" });
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -817,23 +835,9 @@ export default function AccountingFinance() {
 
   const inferAccountType = (name) => {
     const s = String(name || "").toLowerCase();
-    if (/(cash|bank|asset|inventory|stock)/.test(s)) return "ASSET";
-    if (/(payable|loan|liability|creditor)/.test(s)) return "LIABILITY";
-    if (/(capital|drawing|equity)/.test(s)) return "EQUITY";
+    if (/(payable|creditor)/.test(s)) return "ACCOUNT_PAYABLE";
     if (/(sale|sales|income|revenue)/.test(s)) return "INCOME";
-    if (/(expense|salary|rent|utility|depreciation|loss|wages)/.test(s)) return "EXPENSE";
     return "EXPENSE";
-  };
-
-  const nextAccountCode = (type) => {
-    const baseMap = { ASSET: 1000, LIABILITY: 2000, EQUITY: 3000, INCOME: 4000, EXPENSE: 5000, COGS: 6000 };
-    const base = baseMap[type] || 9000;
-    const codes = (accounts || [])
-      .filter((a) => a.type === type && String(a.code || "").match(/^\d+$/))
-      .map((a) => Number(a.code))
-      .filter((n) => Number.isFinite(n));
-    const max = codes.length ? Math.max(...codes) : base;
-    return String(max + 10);
   };
 
   const createAccountByName = async (name) => {
@@ -851,13 +855,10 @@ export default function AccountingFinance() {
       return String(existing._id);
     }
     const type = inferAccountType(trimmed);
-    const code = nextAccountCode(type);
     const res = await api.post("/accounting/accounts", {
-      code,
       name: trimmed,
       type,
-      subType: "",
-      isControl: false,
+      createdOn: todayIso(),
       journalSide: "BOTH",
     });
     const id = res.data?.data?._id || "";
@@ -867,79 +868,62 @@ export default function AccountingFinance() {
 
   const openNewAccount = () => {
     setAccountSaveError("");
-    setAccountFieldErrors({ code: "", name: "" });
+    setAccountFieldErrors({ name: "", createdOn: "" });
     setAccountDialog({
       open: true,
       mode: "create",
       id: "",
       form: {
-        code: "",
         name: "",
-        type: "ASSET",
-        subType: "CURRENT_ASSET",
-        parentAccountId: "",
-        isControl: false,
-        isActive: true,
-        journalSide: "BOTH",
+        manualType: "EXPENSE",
+        createdOn: todayIso(),
       },
     });
   };
 
   const openEditAccount = (row) => {
     setAccountSaveError("");
-    setAccountFieldErrors({ code: "", name: "" });
+    setAccountFieldErrors({ name: "", createdOn: "" });
     setAccountDialog({
       open: true,
       mode: "edit",
       id: String(row?._id || ""),
       form: {
-        code: String(row?.code || ""),
         name: String(row?.name || ""),
-        type: row?.type || "ASSET",
-        subType: String(row?.subType || ""),
-        parentAccountId: row?.parentAccountId ? String(row.parentAccountId) : "",
-        isControl: !!row?.isControl,
-        isActive: row?.isActive !== false,
-        journalSide: row?.journalSide || "BOTH",
+        manualType: getManualAccountTypeKey(row),
+        createdOn: toDateInputValue(row?.createdOn || row?.createdAt),
       },
     });
   };
 
   const saveAccount = async () => {
     const f = accountDialog.form || {};
-    const code = String(f.code || "").trim();
     const name = String(f.name || "").trim();
+    const createdOn = String(f.createdOn || "").trim();
     const nextErrors = {
-      code: code ? "" : "Account code is required.",
       name: name ? "" : "Account name is required.",
+      createdOn: createdOn ? "" : "Created On is required.",
     };
     setAccountFieldErrors(nextErrors);
-    if (nextErrors.code || nextErrors.name) return;
+    if (nextErrors.name || nextErrors.createdOn) return;
     try {
       setAccountSaveError("");
       setLoading(true);
+      const type = getManualAccountTypeKey({ type: f.manualType });
       if (accountDialog.mode === "edit" && accountDialog.id) {
         await api.put(`/accounting/accounts/${accountDialog.id}`, {
-          code,
           name,
-          type: f.type,
-          subType: String(f.subType || "").trim(),
-          parentAccountId: f.parentAccountId || null,
-          isControl: !!f.isControl,
-          isActive: f.isActive !== false,
-          journalSide: f.journalSide || "BOTH",
+          type,
+          createdOn,
+          journalSide: "BOTH",
         });
         toast.success("Account updated.");
       } else {
         await api.post("/accounting/accounts", {
-          code,
           name,
-          type: f.type,
-          subType: String(f.subType || "").trim(),
-          parentAccountId: f.parentAccountId || null,
-          isControl: !!f.isControl,
-          isActive: f.isActive !== false,
-          journalSide: f.journalSide || "BOTH",
+          type,
+          createdOn,
+          journalSide: "BOTH",
         });
         toast.success("Account created.");
       }
@@ -949,23 +933,6 @@ export default function AccountingFinance() {
       const msg = err?.response?.data?.message || err?.message || "Failed to save account.";
       setAccountSaveError(msg);
       toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const cycleJournalSide = async (account) => {
-    const id = String(account?._id || "");
-    if (!id) return;
-    const current = String(account?.journalSide || "BOTH").toUpperCase();
-    const next = current === "BOTH" ? "DEBIT" : current === "DEBIT" ? "CREDIT" : "BOTH";
-    try {
-      setLoading(true);
-      await api.put(`/accounting/accounts/${id}`, { journalSide: next });
-      setAccounts((prev) => prev.map((a) => (String(a._id) === id ? { ...a, journalSide: next } : a)));
-      toast.success("Account side updated.");
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to update account side.");
     } finally {
       setLoading(false);
     }
@@ -6418,21 +6385,14 @@ export default function AccountingFinance() {
             <DataTable
               title="Chart of Accounts"
               columns={[
-                { key: "code", label: "Code" },
                 { key: "name", label: "Account Name" },
-                { key: "type", label: "Type", filterOptions: ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS"] },
-                { key: "subType", label: "Category" },
                 {
-                  key: "journalSide",
-                  label: "Side",
-                  render: (v) => {
-                    const s = String(v || "BOTH").toUpperCase();
-                    if (s === "DEBIT") return "Debit only";
-                    if (s === "CREDIT") return "Credit only";
-                    return "Both";
-                  },
+                  key: "type",
+                  label: "Type",
+                  filterOptions: ["EXPENSE", "INCOME", "ACCOUNT_PAYABLE"],
+                  render: (_v, row) => getManualAccountTypeLabel(row),
                 },
-                { key: "isActive", label: "Active", render: (v) => (v === false ? "No" : "Yes") },
+                { key: "createdOn", label: "Created On", render: (_v, row) => formatAccountCreatedOn(row) },
                 {
                   key: "actions",
                   label: "Actions",
@@ -6445,14 +6405,6 @@ export default function AccountingFinance() {
                         className="px-2 py-1 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
                       >
                         Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cycleJournalSide(row)}
-                        className="px-2 py-1 rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
-                        title="Toggle Side (Both → Debit → Credit)"
-                      >
-                        Side
                       </button>
                       {row?.isActive === false ? (
                         <button
@@ -6506,87 +6458,22 @@ export default function AccountingFinance() {
                   </button>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-3">
+                <div className="grid gap-3">
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Type</label>
                     <select
-                      value={accountDialog.form.type}
+                      value={accountDialog.form.manualType || "EXPENSE"}
                       onChange={(e) => {
-                        const type = e.target.value;
-                        const sub = (ACCOUNT_SUBTYPES[type] || ["OTHER"])[0];
-                        setAccountDialog((d) => ({ ...d, form: { ...d.form, type, subType: sub } }));
+                        setAccountDialog((d) => ({ ...d, form: { ...d.form, manualType: e.target.value } }));
                       }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     >
-                      {["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS"].map((t) => (
-                        <option key={t} value={t}>
-                          {t}
+                      {MANUAL_ACCOUNT_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
                         </option>
                       ))}
                     </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Category</label>
-                    <select
-                      value={accountDialog.form.subType || ""}
-                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, subType: e.target.value } }))}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    >
-                      {(ACCOUNT_SUBTYPES[accountDialog.form.type] || ["OTHER"]).map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Show In Journal</label>
-                    <select
-                      value={accountDialog.form.journalSide || "BOTH"}
-                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, journalSide: e.target.value } }))}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    >
-                      <option value="BOTH">Debit &amp; Credit</option>
-                      <option value="DEBIT">Debit only</option>
-                      <option value="CREDIT">Credit only</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Code</label>
-                    <div className="flex gap-2">
-                      <input
-                        value={accountDialog.form.code || ""}
-                        readOnly={accountDialog.mode === "create"}
-                        onChange={(e) => {
-                          if (accountDialog.mode === "create") return;
-                          setAccountDialog((d) => ({ ...d, form: { ...d.form, code: e.target.value } }));
-                        }}
-                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                          accountDialog.mode === "create"
-                            ? "bg-gray-100 text-gray-600 border-gray-200"
-                            : accountFieldErrors.code
-                            ? "border-red-300 bg-red-50"
-                            : "border-gray-300"
-                        }`}
-                        placeholder="e.g. 1100"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const type = accountDialog.form.type;
-                          const code = nextAccountCode(type);
-                          setAccountDialog((d) => ({ ...d, form: { ...d.form, code } }));
-                        }}
-                        className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                        title="Auto-generate"
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    {accountFieldErrors.code && <div className="mt-1 text-xs text-red-600">{accountFieldErrors.code}</div>}
                   </div>
 
                   <div>
@@ -6602,45 +6489,17 @@ export default function AccountingFinance() {
                     {accountFieldErrors.name && <div className="mt-1 text-xs text-red-600">{accountFieldErrors.name}</div>}
                   </div>
 
-                  <div className="md:col-span-2">
-                    <label className="block text-xs text-gray-600 mb-1">Parent Account (optional)</label>
-                    <select
-                      value={accountDialog.form.parentAccountId || ""}
-                      onChange={(e) =>
-                        setAccountDialog((d) => ({ ...d, form: { ...d.form, parentAccountId: e.target.value } }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                    >
-                      <option value="">(None)</option>
-                      {(accounts || []).map((a) => (
-                        <option key={a._id} value={a._id}>
-                          {a.code} - {a.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="md:col-span-2 flex items-center gap-4">
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={!!accountDialog.form.isControl}
-                        onChange={(e) =>
-                          setAccountDialog((d) => ({ ...d, form: { ...d.form, isControl: e.target.checked } }))
-                        }
-                      />
-                      Control account
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={accountDialog.form.isActive !== false}
-                        onChange={(e) =>
-                          setAccountDialog((d) => ({ ...d, form: { ...d.form, isActive: e.target.checked } }))
-                        }
-                      />
-                      Active
-                    </label>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Created On</label>
+                    <input
+                      type="date"
+                      value={accountDialog.form.createdOn || todayIso()}
+                      onChange={(e) => setAccountDialog((d) => ({ ...d, form: { ...d.form, createdOn: e.target.value } }))}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                        accountFieldErrors.createdOn ? "border-red-300 bg-red-50" : "border-gray-300"
+                      }`}
+                    />
+                    {accountFieldErrors.createdOn && <div className="mt-1 text-xs text-red-600">{accountFieldErrors.createdOn}</div>}
                   </div>
                 </div>
 
