@@ -32,7 +32,7 @@ import * as XLSX from "xlsx";
 
 const TABS = [
   { key: "coa", label: "Chart of Accounts", icon: <BookOpen size={16} /> },
-  { key: "journal-entry", label: "Journal Entry", icon: <PenSquare size={16} /> },
+  { key: "journal-entry", label: "Daybook Entries", icon: <PenSquare size={16} /> },
   { key: "journal-report", label: "Journal", icon: <BookCopy size={16} /> },
   { key: "ledger", label: "Ledger", icon: <Landmark size={16} /> },
   { key: "trial", label: "Trial Balance", icon: <Scale size={16} /> },
@@ -109,6 +109,13 @@ const blankEntry = ({ like } = {}) => {
   return {
     entryId,
     date: new Date().toISOString().slice(0, 10),
+    cashInHand: like?.cashInHand || "",
+    cashInHandLocked: Boolean(like?.cashInHand),
+    cashInHandSource: like?.cashInHand ? "CARRIED" : "INITIAL",
+    cashInHandEdited: false,
+    accountId: "",
+    amount: "",
+    side: "DEBIT",
     companyId: "",
     companyName: "",
     voucherType: like?.voucherType || "JOURNAL",
@@ -123,6 +130,14 @@ const blankEntry = ({ like } = {}) => {
 
 const n0 = (v) => (v === "" || v == null ? 0 : Number(v || 0) || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
+const isCashAccountLine = (line = {}) =>
+  String(line?.accountSubType || "").toUpperCase() === "CASH" ||
+  /^\s*cash(\s+in\s+hand)?\s*$/i.test(String(line?.accountName || ""));
+const cashInHandAfterEntry = (entry = {}) => {
+  const side = String(entry?.side || "DEBIT").toUpperCase();
+  const effect = side === "CREDIT" ? n0(entry?.amount) : -n0(entry?.amount);
+  return round2(n0(entry?.cashInHand) + effect);
+};
 const normalizeText = (v) => String(v || "").trim().toLowerCase();
 const toTitleCase = (value) =>
   String(value || "")
@@ -299,7 +314,14 @@ function GroupedProductDropdown({
 }
 
 const isEntryActive = (e) => {
-  const hasText = String(e?.companyId || "").trim() || String(e?.customerId || "").trim() || String(e?.productTypeId || "").trim() || String(e?.narration || "").trim();
+  const hasText =
+    String(e?.cashInHand || "").trim() ||
+    String(e?.accountId || "").trim() ||
+    String(e?.amount || "").trim() ||
+    String(e?.companyId || "").trim() ||
+    String(e?.customerId || "").trim() ||
+    String(e?.productTypeId || "").trim() ||
+    String(e?.narration || "").trim();
   const hasLines =
     (e?.lines || []).some((l) => n0(l?.debitAmount) > 0 || n0(l?.creditAmount) > 0 || l?.debitAccountId || l?.creditAccountId);
   return !!(hasText || hasLines);
@@ -345,6 +367,7 @@ export default function AccountingFinance() {
   const [reportFilterCompanyId, setReportFilterCompanyId] = useState("");
   const [reportFilterCustomerName, setReportFilterCustomerName] = useState("");
   const [reportFilterProductId, setReportFilterProductId] = useState("");
+  const [reportFilterAccountId, setReportFilterAccountId] = useState("");
   const [vouchers, setVouchers] = useState([]);
 
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: "", voucherNo: "" });
@@ -584,13 +607,14 @@ export default function AccountingFinance() {
   const entryTotals = useMemo(() => {
     return (entries || []).map((e) => {
       const active = isEntryActive(e);
-      const totalDebit = round2((e.lines || []).reduce((s, l) => s + n0(l.debitAmount), 0));
-      const totalCredit = round2((e.lines || []).reduce((s, l) => s + n0(l.creditAmount), 0));
+      const amount = round2(n0(e.amount));
+      const totalDebit = amount;
+      const totalCredit = amount;
       return {
         entryId: e.entryId,
         totalDebit,
         totalCredit,
-        balanced: !active || (totalDebit > 0 && totalDebit === totalCredit),
+        balanced: !active || amount > 0,
       };
     });
   }, [entries]);
@@ -640,6 +664,9 @@ export default function AccountingFinance() {
   const creditAccountOptions = useMemo(() => {
     return accountOptions.filter((a) => String(a.journalSide || "BOTH").toUpperCase() !== "DEBIT");
   }, [accountOptions]);
+  const daybookAccountOptions = useMemo(() => {
+    return accountOptions.filter((a) => !/^\s*cash(\s+in\s+hand)?\s*$/i.test(String(a.name || "")));
+  }, [accountOptions]);
 
   const productTypesByBrand = useMemo(() => {
     const buckets = new Map(); // brandKey -> { brand, items: [] }
@@ -675,19 +702,13 @@ export default function AccountingFinance() {
   const journalFilterProductLabel = productLabelById.get(String(journalFilterProductId || "")) || "";
   const ledgerFilterProductLabel = productLabelById.get(String(ledgerFilterProductId || "")) || "";
   const isJournalReportFilterApplied = useMemo(() => {
-    const hasCompany = String(reportFilterCompanyName || "").trim().length > 0;
-    const hasCustomer = String(reportFilterCustomerName || "").trim().length > 0;
+    const hasAccount = String(reportFilterAccountId || "").trim().length > 0;
     const hasProduct = String(reportFilterProductId || "").trim().length > 0;
-    const hasVoucherType = String(reportFilterVoucherType || "").trim().length > 0;
-    const hasVoucherNo = String(reportFilterVoucherNo || "").trim().length > 0;
     const hasDateRange = String(reportRangeStart || "").trim().length > 0 || String(reportRangeEnd || "").trim().length > 0;
-    return hasCompany || hasCustomer || hasProduct || hasVoucherType || hasVoucherNo || hasDateRange;
+    return hasAccount || hasProduct || hasDateRange;
   }, [
-    reportFilterCompanyName,
-    reportFilterCustomerName,
+    reportFilterAccountId,
     reportFilterProductId,
-    reportFilterVoucherType,
-    reportFilterVoucherNo,
     reportRangeStart,
     reportRangeEnd,
   ]);
@@ -705,6 +726,7 @@ export default function AccountingFinance() {
     setJournalFilterCustomerName("");
     setJournalFilterProductId("");
     setJournalFilterVoucherType("");
+    setReportFilterAccountId("");
     setJournalGenerateRange("all");
     setJournalGenerateDate("");
     setJournalGenerateStart("");
@@ -721,6 +743,7 @@ export default function AccountingFinance() {
       endDate: "",
       companyName: undefined,
       partyName: undefined,
+      accountId: undefined,
       itemId: undefined,
       voucherType: undefined,
     }).catch(() => {});
@@ -981,7 +1004,38 @@ export default function AccountingFinance() {
       range: "custom",
     };
     const res = await api.get("/accounting/vouchers", { params });
-    setVouchers(res.data?.data || []);
+    setVouchers(
+      (res.data?.data || []).map((row) => {
+        const cashEffect = n0(row?.cashEffect);
+        const side = cashEffect > 0 ? "Credit" : cashEffect < 0 ? "Debit" : "";
+        return { ...row, daybookSide: side };
+      })
+    );
+  };
+
+  const loadLatestCashInHand = async ({ force = false } = {}) => {
+    if (editingVoucherId && !force) return;
+    const res = await api.get("/accounting/vouchers/latest-cash");
+    const latest = res.data?.data || {};
+    if (!latest.hasEntry) return;
+    const nextCash = String(round2(n0(latest.cashAfterEntry)));
+    setEntries((prev) => {
+      const first = prev?.[0] || blankEntry();
+      const hasWork =
+        String(first.accountId || "").trim() ||
+        String(first.amount || "").trim() ||
+        String(first.narration || "").trim();
+      if (hasWork && !force) return prev;
+      return [
+        {
+          ...first,
+          cashInHand: nextCash,
+          cashInHandLocked: true,
+          cashInHandSource: "CARRIED",
+          cashInHandEdited: false,
+        },
+      ];
+    });
   };
 
   const loadGeneratedJournalsEntry = async () => {
@@ -1006,13 +1060,10 @@ export default function AccountingFinance() {
       startDate: reportRangeStart || undefined,
       endDate: reportRangeEnd || undefined,
       ignoreDate: "1",
-      companyName: reportFilterCompanyName || undefined,
-      partyName: reportFilterCustomerName || undefined,
+      accountId: reportFilterAccountId || undefined,
       itemId: reportFilterProductId || undefined,
       itemName: reportFilterProductLabel || undefined,
-      voucherType: reportFilterVoucherType || undefined,
       bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
-      voucherNo: reportFilterVoucherNo || undefined,
       range: "custom",
     };
     const res = await api.get("/accounting/journal", { params });
@@ -1030,13 +1081,10 @@ export default function AccountingFinance() {
         startDate: resolvedStart,
         endDate: resolvedEnd,
         ignoreDate,
-        companyName: reportFilterCompanyName || undefined,
-        partyName: reportFilterCustomerName || undefined,
+        accountId: reportFilterAccountId || undefined,
         itemId: reportFilterProductId || undefined,
         itemName: reportFilterProductLabel || undefined,
-        voucherType: reportFilterVoucherType || undefined,
         bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
-        voucherNo: reportFilterVoucherNo || undefined,
         range: "custom",
         ...override,
       },
@@ -1144,8 +1192,9 @@ export default function AccountingFinance() {
       try {
         setLoading(true);
         await loadVouchers();
+        await loadLatestCashInHand();
       } catch (err) {
-        toast.error(err?.response?.data?.message || "Failed to load vouchers.");
+        toast.error(err?.response?.data?.message || "Failed to load entries.");
       } finally {
         setLoading(false);
       }
@@ -1248,12 +1297,9 @@ export default function AccountingFinance() {
     activeTab,
     reportRangeStart,
     reportRangeEnd,
-    reportFilterCompanyName,
-    reportFilterCustomerName,
+    reportFilterAccountId,
     reportFilterProductId,
     reportFilterBookType,
-    reportFilterVoucherType,
-    reportFilterVoucherNo,
   ]);
 
   const patchEntry = (entryId, patch) => {
@@ -1329,49 +1375,15 @@ export default function AccountingFinance() {
 
     for (const e of activeEntries) {
       const fields = {};
-      const lines = new Map(); // rowId -> { debitAccountId?, debitAmount?, creditAccountId?, creditAmount? }
-
-      const setLineErr = (rowId, key, msg) => {
-        if (!rowId) return;
-        const prev = lines.get(rowId) || {};
-        if (!prev[key]) lines.set(rowId, { ...prev, [key]: msg });
-      };
+      const lines = new Map();
 
       if (!String(e.date || "").trim()) fields.date = "Date is required.";
+      if (!String(e.cashInHand || "").trim()) fields.cashInHand = "Cash in hand is required.";
+      else if (n0(e.cashInHand) < 0) fields.cashInHand = "Cash in hand cannot be negative.";
+      if (!String(e.accountId || "").trim()) fields.accountId = "Account name is required.";
+      if (n0(e.amount) <= 0) fields.amount = "Amount is required.";
+      if (!["DEBIT", "CREDIT"].includes(String(e.side || "").toUpperCase())) fields.side = "Select debit or credit.";
       if (!String(e.narration || "").trim()) fields.narration = "Narration is required.";
-
-      const base = (e.lines || [])[0];
-      if (base) {
-        if (!String(base.debitAccountId || "").trim()) setLineErr(base.rowId, "debitAccountId", "Debit account required.");
-        if (n0(base.debitAmount) <= 0) setLineErr(base.rowId, "debitAmount", "Debit amount required.");
-        if (!String(base.creditAccountId || "").trim()) setLineErr(base.rowId, "creditAccountId", "Credit account required.");
-        if (n0(base.creditAmount) <= 0) setLineErr(base.rowId, "creditAmount", "Credit amount required.");
-      } else {
-        fields.lines = "At least 1 row is required.";
-      }
-
-      (e.lines || []).forEach((l) => {
-        const debitDisabled = l.entryType === "credit";
-        const creditDisabled = l.entryType === "debit";
-        const debitAmt = n0(l.debitAmount);
-        const creditAmt = n0(l.creditAmount);
-
-        if (!debitDisabled) {
-          if (debitAmt > 0 && !String(l.debitAccountId || "").trim()) setLineErr(l.rowId, "debitAccountId", "Required");
-          if (String(l.debitAccountId || "").trim() && debitAmt <= 0) setLineErr(l.rowId, "debitAmount", "Required");
-        }
-        if (!creditDisabled) {
-          if (creditAmt > 0 && !String(l.creditAccountId || "").trim()) setLineErr(l.rowId, "creditAccountId", "Required");
-          if (String(l.creditAccountId || "").trim() && creditAmt <= 0) setLineErr(l.rowId, "creditAmount", "Required");
-        }
-      });
-
-      const td = round2((e.lines || []).reduce((s, l) => s + n0(l.debitAmount), 0));
-      const tc = round2((e.lines || []).reduce((s, l) => s + n0(l.creditAmount), 0));
-      const hasLineInput = (e.lines || []).some(
-        (l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0 || String(l.debitAccountId || "").trim() || String(l.creditAccountId || "").trim()
-      );
-      if (hasLineInput && !(td > 0 && td === tc)) fields.balance = "Debit must equal credit.";
 
       const hasErr = Object.keys(fields).length > 0 || lines.size > 0;
       if (hasErr) ok = false;
@@ -1389,12 +1401,15 @@ export default function AccountingFinance() {
 
   const hasAnyInput = useMemo(() => {
     return (entries || []).some((e) =>
-      (e.lines || []).some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0 || l.debitAccountId || l.creditAccountId)
+      String(e.cashInHand || "").trim() ||
+      String(e.accountId || "").trim() ||
+      String(e.amount || "").trim() ||
+      String(e.narration || "").trim()
     );
   }, [entries]);
 
   const hasAnyAmount = useMemo(() => {
-    return (entries || []).some((e) => (e.lines || []).some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0));
+    return (entries || []).some((e) => n0(e.amount) > 0);
   }, [entries]);
 
   const hasValidationErrors = useMemo(() => {
@@ -1402,55 +1417,34 @@ export default function AccountingFinance() {
     return !validation.ok;
   }, [submitAttempted, validation]);
 
-  const resetEntry = () => {
+  const resetEntry = ({ carryCashInHand = "" } = {}) => {
     setEditingVoucherId("");
     setEditingVoucherNo("");
-    setEntries([blankEntry()]);
+    setEntries([blankEntry({ like: carryCashInHand ? { cashInHand: String(carryCashInHand) } : undefined })]);
     setSubmitAttempted(false);
     setSubmitErrors([]);
   };
 
   const buildSingleVoucherPayload = (entry) => {
-    const lineItems = [];
-    (entry?.lines || []).forEach((l) => {
-      const debitAmt = round2(n0(l.debitAmount));
-      const creditAmt = round2(n0(l.creditAmount));
-      const narration = String(entry?.narration || "").trim();
-      const partyName = String(entry?.customerName || "").trim();
-      const itemName = String(entry?.productName || "").trim();
-      if (debitAmt > 0 && l.debitAccountId) {
-        lineItems.push({
-          accountId: l.debitAccountId,
-          debit: debitAmt,
-          credit: 0,
-          partyName,
-          itemName,
-          remarks: narration,
-        });
-      }
-      if (creditAmt > 0 && l.creditAccountId) {
-        lineItems.push({
-          accountId: l.creditAccountId,
-          debit: 0,
-          credit: creditAmt,
-          partyName,
-          itemName,
-          remarks: narration,
-        });
-      }
-    });
-    if (!lineItems.length) return null;
-    const companyName =
-      String(entry?.companyName || "").trim() ||
-      (entry?.companyId ? String(entry.companyId) : "");
+    const amount = round2(n0(entry?.amount));
+    const accountId = String(entry?.accountId || "").trim();
+    if (!accountId || amount <= 0) return null;
     return {
       date: entry?.date || new Date().toISOString().slice(0, 10),
-      voucherType: entry?.voucherType || "JOURNAL",
-      bookType: "JOURNAL",
-      companyId: entry?.companyId || "",
-      companyName,
+      daybookEntry: true,
+      cashInHand: round2(n0(entry?.cashInHand)),
+      cashInHandSource: entry?.cashInHandEdited ? "MANUAL_EDIT" : entry?.cashInHandSource || "INITIAL",
+      cashInHandEdited: Boolean(entry?.cashInHandEdited),
+      accountId,
+      side: String(entry?.side || "DEBIT").toUpperCase(),
+      amount,
+      voucherType: "JOURNAL",
+      bookType: "CASH_BOOK",
+      companyId: "",
+      companyName: "",
       description: String(entry?.narration || "").trim(),
-      lines: lineItems,
+      narration: String(entry?.narration || "").trim(),
+      lines: [],
     };
   };
 
@@ -1467,55 +1461,58 @@ export default function AccountingFinance() {
       setSubmitErrors([]);
       setLoading(true);
       let savedId = "";
+      let carryCashInHand = "";
       if (editingVoucherId) {
         const payload = buildSingleVoucherPayload(entries[0]);
         if (!payload) {
           toast.error("No valid rows to save.");
           return;
         }
+        carryCashInHand = String(cashInHandAfterEntry(entries[0]));
         const res = await api.put(`/accounting/vouchers/${editingVoucherId}`, payload);
         setEditingVoucherNo(res.data?.data?.voucherNo || editingVoucherNo || "");
         savedId = res.data?.data?._id || editingVoucherId;
-        toast.success("Voucher updated.");
+        toast.success("Entry updated.");
       } else {
         const activeEntries = (entries || []).filter((e) => isEntryActive(e) && buildSingleVoucherPayload(e));
         if (!activeEntries.length) {
           toast.error("No valid rows to save.");
           return;
         }
+        carryCashInHand = String(cashInHandAfterEntry(activeEntries[activeEntries.length - 1]));
         const payloadEntries = activeEntries.map((e) => ({
           date: e.date,
-          voucherType: e.voucherType || "JOURNAL",
-          bookType: "JOURNAL",
-          companyId: e.companyId,
-          companyName: e.companyName,
-          customerId: e.customerId,
-          customerName: e.customerName,
-          productTypeId: e.productTypeId,
-          productName: e.productName,
+          daybookEntry: true,
+          cashInHand: round2(n0(e.cashInHand)),
+          cashInHandSource: e.cashInHandEdited ? "MANUAL_EDIT" : e.cashInHandSource || "INITIAL",
+          cashInHandEdited: Boolean(e.cashInHandEdited),
+          accountId: String(e.accountId || "").trim(),
+          side: String(e.side || "DEBIT").toUpperCase(),
+          amount: round2(n0(e.amount)),
+          voucherType: "JOURNAL",
+          bookType: "CASH_BOOK",
+          companyId: "",
+          companyName: "",
+          customerId: "",
+          customerName: "",
+          productTypeId: "",
+          productName: "",
           narration: e.narration,
-          lines: (buildSingleVoucherPayload(e)?.lines || []).map((l) => ({
-            accountId: l.accountId,
-            debit: l.debit,
-            credit: l.credit,
-            partyName: l.partyName,
-            itemName: l.itemName,
-            remarks: l.remarks,
-          })),
+          lines: [],
         }));
         const res = await api.post("/accounting/vouchers", { entries: payloadEntries });
         const created = res.data?.data?.created || 0;
-        toast.success(created > 1 ? `Saved ${created} vouchers.` : "Voucher saved.");
+        savedId = res.data?.data?.vouchers?.[0]?._id || "";
+        toast.success(created > 1 ? `${created} entries done.` : "Entry done.");
       }
-      if (andNew) resetEntry();
       await loadVouchers();
       if (activeTab === "journal-entry") await loadGeneratedJournalsEntry();
-      resetEntry();
+      resetEntry({ carryCashInHand });
       if (autoPrint && savedId) {
         await handlePrintVoucher(savedId);
       }
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to save voucher.");
+      toast.error(err?.response?.data?.message || "Failed to save entry.");
     } finally {
       setLoading(false);
     }
@@ -1530,47 +1527,34 @@ export default function AccountingFinance() {
       if (!v) throw new Error("Voucher not found.");
       setEditingVoucherId(String(v._id));
       setEditingVoucherNo(v.voucherNo || "");
-      const firstParty = String(v.customerName || "").trim() || (v.lines || []).find((l) => String(l.partyName || "").trim())?.partyName || "";
-      const firstItem = String(v.productName || "").trim() || (v.lines || []).find((l) => String(l.itemName || "").trim())?.itemName || "";
-
-      const debitLines = (v.lines || []).filter((l) => n0(l.debit) > 0);
-      const creditLines = (v.lines || []).filter((l) => n0(l.credit) > 0);
-      const rowCount = Math.max(debitLines.length, creditLines.length, 1);
-      const mappedLines = Array.from({ length: rowCount }).map((_, idx) => {
-        const d = debitLines[idx];
-        const c = creditLines[idx];
-        const entryType = d && c ? "both" : d ? "debit" : "credit";
-        return {
-          rowId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          entryType,
-          isBase: idx === 0,
-          debitAccountId: d ? String(d.accountId || "") : "",
-          debitMode: "list",
-          debitInput: "",
-          creditAccountId: c ? String(c.accountId || "") : "",
-          creditMode: "list",
-          creditInput: "",
-          customerId: "",
-          customerName: "",
-          productTypeId: "",
-          productName: "",
-          debitAmount: d ? String(round2(n0(d.debit))) : "",
-          creditAmount: c ? String(round2(n0(c.credit))) : "",
-        };
-      });
+      const cashLine = (v.lines || []).find(
+        (l) =>
+          String(l.accountSubType || "").toUpperCase() === "CASH" ||
+          /^\s*cash(\s+in\s+hand)?\s*$/i.test(String(l.accountName || ""))
+      );
+      const accountLine = (v.lines || []).find((l) => String(l._id || "") !== String(cashLine?._id || ""));
+      const side = n0(accountLine?.debit) > 0 ? "DEBIT" : "CREDIT";
+      const amount = round2(Math.max(n0(accountLine?.debit), n0(accountLine?.credit)));
       const e = {
         ...blankEntry(),
         entryId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         date: v.date ? new Date(v.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-        voucherType: v.voucherType || "JOURNAL",
-        companyId: v.companyId || "",
-        companyName: v.companyName || "",
-        customerId: v.customerId || "",
-        customerName: firstParty || "",
-        productTypeId: v.productTypeId || "",
-        productName: firstItem || "",
-        narration: v.description || "",
-        lines: mappedLines.length ? mappedLines : [{ ...blankLine(), entryType: "debit", isBase: true }, { ...blankLine(), entryType: "credit" }],
+        cashInHand: v.cashInHand != null ? String(round2(n0(v.cashInHand))) : "",
+        cashInHandLocked: true,
+        cashInHandSource: v.cashInHandSource || "CARRIED",
+        cashInHandEdited: Boolean(v.cashInHandEdited),
+        accountId: accountLine ? String(accountLine.accountId || "") : "",
+        amount: amount > 0 ? String(amount) : "",
+        side,
+        voucherType: "JOURNAL",
+        companyId: "",
+        companyName: "",
+        customerId: "",
+        customerName: "",
+        productTypeId: "",
+        productName: "",
+        narration: v.description || v.narration || "",
+        lines: [{ ...blankLine(), entryType: "both", isBase: true }],
       };
       setEntries([e]);
       setSubmitAttempted(false);
@@ -1693,18 +1677,21 @@ export default function AccountingFinance() {
     sorted.forEach((j) => {
       const date = j?.date;
       const narration = String(j?.description || j?.narration || "").trim();
-      const debits = (j?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
-      const credits = (j?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
+      const visibleLines = (j?.lines || []).filter((l) => !isCashAccountLine(l));
       let dateShown = false;
       const groupRows = [];
 
-      debits.forEach((l) => {
+      visibleLines.forEach((l) => {
+        const debit = round2(n0(l.debit));
+        const credit = round2(n0(l.credit));
+        if (debit <= 0 && credit <= 0) return;
+        const side = debit > 0 ? "debit" : "credit";
         groupRows.push({
           date,
           showDate: !dateShown,
-          side: "debit",
+          side,
           account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
-          amount: round2(n0(l.debit)),
+          amount: side === "debit" ? debit : credit,
           narration,
           isNarrationRow: false,
           lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
@@ -1713,22 +1700,28 @@ export default function AccountingFinance() {
         dateShown = true;
       });
 
-      credits.forEach((l) => {
-        groupRows.push({
-          date,
-          showDate: !dateShown,
-          side: "credit",
-          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
-          amount: round2(n0(l.credit)),
-          narration,
-          isNarrationRow: false,
-          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
-          entryId: String(j?._id || ""),
+      if (!groupRows.length) {
+        (j?.lines || []).forEach((l) => {
+          const debit = round2(n0(l.debit));
+          const credit = round2(n0(l.credit));
+          if (debit <= 0 && credit <= 0) return;
+          const side = debit > 0 ? "debit" : "credit";
+          groupRows.push({
+            date,
+            showDate: !dateShown,
+            side,
+            account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
+            amount: side === "debit" ? debit : credit,
+            narration,
+            isNarrationRow: false,
+            lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
+            entryId: String(j?._id || ""),
+          });
+          dateShown = true;
         });
-        dateShown = true;
-      });
+      }
 
-      if (narration) {
+      if (narration && groupRows.length) {
         groupRows.push({
           date,
           showDate: false,
@@ -1748,12 +1741,21 @@ export default function AccountingFinance() {
         });
       });
     });
+    const lastWithCash = [...sorted].reverse().find((j) => j?.cashAfterEntry != null || j?.cashInHand != null);
+    if (lastWithCash) {
+      rows.push({
+        isCashSummaryRow: true,
+        account: "Cash in Hand",
+        amount: round2(n0(lastWithCash.cashAfterEntry ?? lastWithCash.cashInHand)),
+      });
+    }
     return rows;
   };
 
   const filterJournalsBy = (journals = [], filters = {}) => {
     const startDate = filters.startDate ? new Date(filters.startDate) : null;
     const endDate = filters.endDate ? new Date(`${filters.endDate}T23:59:59.999`) : null;
+    const accountIdFilter = String(filters.accountId || "").trim();
     const companyFilter = normalizeText(filters.companyName || filters.companyId || "");
     const partyFilter = normalizeText(filters.partyName || "");
     const itemId = filters.itemId || "";
@@ -1775,6 +1777,8 @@ export default function AccountingFinance() {
         : normalizeText(j?.voucherType || "").includes(voucherTypeFilter);
       if (!byType) return false;
       const lines = j?.lines || [];
+      const byAccount = !accountIdFilter || lines.some((l) => String(l.accountId || "") === accountIdFilter);
+      if (!byAccount) return false;
       const byParty = !partyFilter
         ? true
         : lines.some((l) => normalizeText(l.partyName || "").includes(partyFilter)) ||
@@ -1794,7 +1798,8 @@ export default function AccountingFinance() {
     const rows = [];
     (entries || []).forEach((entry) => {
       const dateText = entry?.date ? `${formatYear(entry.date)}\n${formatMonthDay(entry.date)}` : "";
-      const lines = entry?.lines || [];
+      const nonCashLines = (entry?.lines || []).filter((l) => !isCashAccountLine(l));
+      const lines = nonCashLines.length ? nonCashLines : entry?.lines || [];
       const narration = String(entry?.description || entry?.narration || "").trim();
       const lf = shortVoucherSeq(entry?.voucherNo || entry?._id || entry?.journalEntryId || "");
       const particulars = [];
@@ -1804,13 +1809,13 @@ export default function AccountingFinance() {
       const creditsOnly = lines.filter((l) => round2(n0(l.credit)) > 0);
       debitsOnly.forEach((l) => {
           const acc = ensureAccountSuffix(String(l.accountName || l.accountCode || "Account"));
-          particulars.push({ text: `By ${acc}`, style: "normal", indent: 0 });
+          particulars.push({ text: acc, style: "normal", indent: 0 });
         debitLines.push(`Rs. ${String(round2(n0(l.debit)))}`);
         creditLines.push("");
       });
       creditsOnly.forEach((l) => {
           const acc = ensureAccountSuffix(String(l.accountName || l.accountCode || "Account"));
-          particulars.push({ text: `To ${acc}`, style: "normal", indent: 1 });
+          particulars.push({ text: acc, style: "normal", indent: 0 });
         debitLines.push("");
         creditLines.push(`Rs. ${String(round2(n0(l.credit)))}`);
       });
@@ -1830,6 +1835,20 @@ export default function AccountingFinance() {
         creditLines,
       });
     });
+    const lastWithCash = [...(entries || [])]
+      .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime())
+      .reverse()
+      .find((entry) => entry?.cashAfterEntry != null || entry?.cashInHand != null);
+    if (lastWithCash) {
+      rows.push({
+        date: "",
+        lf: "",
+        particulars: [{ text: "Cash in Hand", style: "normal", indent: 0 }],
+        debitLines: [`Rs. ${String(round2(n0(lastWithCash.cashAfterEntry ?? lastWithCash.cashInHand)))}`],
+        creditLines: [""],
+        isCashSummaryRow: true,
+      });
+    }
     return rows;
   };
 
@@ -1842,13 +1861,10 @@ export default function AccountingFinance() {
       startDate: resolvedStart,
       endDate: resolvedEnd,
       ignoreDate,
-      companyName: reportFilterCompanyName || undefined,
-      partyName: reportFilterCustomerName || undefined,
+      accountId: reportFilterAccountId || undefined,
       itemId: reportFilterProductId || undefined,
       itemName: reportFilterProductLabel || undefined,
-      voucherType: reportFilterVoucherType || undefined,
       bookType: reportFilterBookType && reportFilterBookType !== "ALL" ? reportFilterBookType : undefined,
-      voucherNo: reportFilterVoucherNo || undefined,
       range: "custom",
       ...override,
     };
@@ -1896,20 +1912,16 @@ export default function AccountingFinance() {
       loadGeneratedJournalsWithOverride({
         startDate: nextStart,
         endDate: nextEnd,
-        companyName: reportFilterCompanyName || undefined,
-        partyName: reportFilterCustomerName || undefined,
+        accountId: reportFilterAccountId || undefined,
         itemId: reportFilterProductId || undefined,
-        voucherType: reportFilterVoucherType || undefined,
       })
         .then((data) => {
           const filtered = filterJournalsBy(data || [], {
             startDate: nextStart,
             endDate: nextEnd,
-            companyName: reportFilterCompanyName || "",
-            partyName: reportFilterCustomerName || "",
+            accountId: reportFilterAccountId || "",
             itemId: reportFilterProductId || "",
             itemName: reportFilterProductLabel || "",
-            voucherType: reportFilterVoucherType || "",
           });
           if (!filtered.length) {
             toast.error("No journals found for the selected filters.");
@@ -1924,11 +1936,13 @@ export default function AccountingFinance() {
               startDate: nextStart,
               endDate: nextEnd,
               companyId: "",
-              companyName: reportFilterCompanyName || "",
-              partyName: reportFilterCustomerName || "",
+              companyName: "",
+              accountId: reportFilterAccountId || "",
+              accountName: accountOptions.find((a) => String(a.id) === String(reportFilterAccountId))?.label || "",
+              partyName: "",
               itemId: reportFilterProductId || "",
               itemName: reportFilterProductLabel || "",
-              voucherType: reportFilterVoucherType || "",
+              voucherType: "",
               reportKey: "journal",
             })
             .then((res) => {
@@ -1981,15 +1995,10 @@ export default function AccountingFinance() {
       loadGeneratedJournalsWithOverride({
         startDate: nextStart,
         endDate: nextEnd,
-        companyName: journalFilterCompanyName || undefined,
-        partyName: journalFilterCustomerName || undefined,
+        accountId: reportFilterAccountId || undefined,
         itemId: journalFilterProductId || undefined,
-        voucherType: journalFilterVoucherType || undefined,
       }).catch(() => {});
-      setReportFilterCompanyName(journalFilterCompanyName || "");
-    setReportFilterCustomerName(journalFilterCustomerName || "");
     setReportFilterProductId(journalFilterProductId || "");
-    setReportFilterVoucherType(journalFilterVoucherType || "");
   };
 
   const buildLedgerPreviewRows = (rows = []) => {
@@ -3701,10 +3710,8 @@ export default function AccountingFinance() {
       setActiveGeneratedJournalId(String(j._id || j.id || ""));
       setReportRangeStart(j.startDate || "");
       setReportRangeEnd(j.endDate || "");
-      setReportFilterCompanyName(j.companyName || "");
-      setReportFilterCustomerName(j.partyName || "");
+      setReportFilterAccountId(j.accountId || "");
       setReportFilterProductId(j.itemId || "");
-      setReportFilterVoucherType(j.voucherType || "");
       setJournalGenerateRange(j.range || "all");
       setJournalGenerateDate(j.rangeDate || "");
       setJournalGenerateStart(j.startDate || "");
@@ -3712,19 +3719,15 @@ export default function AccountingFinance() {
       const data = await loadGeneratedJournalsWithOverride({
         startDate: j.startDate || undefined,
         endDate: j.endDate || undefined,
-        companyName: j.companyName || undefined,
-        partyName: j.partyName || undefined,
+        accountId: j.accountId || undefined,
         itemId: j.itemId || undefined,
-        voucherType: j.voucherType || undefined,
       });
       const filtered = filterJournalsBy(data || [], {
         startDate: j.startDate || "",
         endDate: j.endDate || "",
-        companyName: j.companyName || "",
-        partyName: j.partyName || "",
+        accountId: j.accountId || "",
         itemId: j.itemId || "",
         itemName: j.itemName || "",
-        voucherType: j.voucherType || "",
       });
       const rows = buildReportRowsFromJournals(filtered);
       setJournalPreviewEntries(rows);
@@ -3736,8 +3739,7 @@ export default function AccountingFinance() {
           start: j.startDate || "",
           end: j.endDate || "",
         }),
-        companyName: j.companyName || "",
-        customerName: j.partyName || "",
+        accountName: j.accountName || "",
         productName: j.itemName || "",
       });
       setJournalPreviewOpen(false);
@@ -3755,19 +3757,15 @@ export default function AccountingFinance() {
       const data = await loadGeneratedJournalsWithOverride({
         startDate: j.startDate || undefined,
         endDate: j.endDate || undefined,
-        companyName: j.companyName || undefined,
-        partyName: j.partyName || undefined,
+        accountId: j.accountId || undefined,
         itemId: j.itemId || undefined,
-        voucherType: j.voucherType || undefined,
       });
       const filtered = filterJournalsBy(data || [], {
         startDate: j.startDate || "",
         endDate: j.endDate || "",
-        companyName: j.companyName || "",
-        partyName: j.partyName || "",
+        accountId: j.accountId || "",
         itemId: j.itemId || "",
         itemName: j.itemName || "",
-        voucherType: j.voucherType || "",
       });
       openJournalEditor({ rows: buildGroupedJournalRows(filtered), sourceId });
     };
@@ -3780,22 +3778,19 @@ export default function AccountingFinance() {
         const filterPayload = {
           startDate: j.startDate || reportRangeStart || "",
           endDate: j.endDate || reportRangeEnd || "",
-          companyName: j.companyName || reportFilterCompanyName || "",
-          partyName: j.partyName || reportFilterCustomerName || "",
+          accountId: j.accountId || reportFilterAccountId || "",
+          accountName: j.accountName || accountOptions.find((a) => String(a.id) === String(reportFilterAccountId))?.label || "",
           itemId: j.itemId || reportFilterProductId || "",
           itemName: j.itemName || reportFilterProductLabel || "",
-          voucherType: j.voucherType || reportFilterVoucherType || "",
         };
         let groupedBody = custom;
         if (!groupedBody.length) {
           const data = await fetchGeneratedJournals({
             startDate: filterPayload.startDate || undefined,
             endDate: filterPayload.endDate || undefined,
-            companyName: filterPayload.companyName || undefined,
-            partyName: filterPayload.partyName || undefined,
+            accountId: filterPayload.accountId || undefined,
             itemId: filterPayload.itemId || undefined,
             itemName: filterPayload.itemName || undefined,
-            voucherType: filterPayload.voucherType || undefined,
           });
           const filtered = filterJournalsBy(data || [], filterPayload);
           if (!filtered.length) {
@@ -3823,7 +3818,7 @@ export default function AccountingFinance() {
           doc.text(businessName, centerX, headerY, { align: "center" });
           headerY += 5;
         }
-        const entityName = String(filterPayload.partyName || filterPayload.companyName || "").trim();
+        const entityName = String(filterPayload.accountName || "").trim();
         if (entityName) {
           doc.setFontSize(10);
           doc.text(entityName, centerX, headerY, { align: "center" });
@@ -3964,20 +3959,17 @@ export default function AccountingFinance() {
         const filterPayload = {
           startDate: j.startDate || reportRangeStart || "",
           endDate: j.endDate || reportRangeEnd || "",
-          companyName: j.companyName || reportFilterCompanyName || "",
-          partyName: j.partyName || reportFilterCustomerName || "",
+          accountId: j.accountId || reportFilterAccountId || "",
+          accountName: j.accountName || accountOptions.find((a) => String(a.id) === String(reportFilterAccountId))?.label || "",
           itemId: j.itemId || reportFilterProductId || "",
           itemName: j.itemName || reportFilterProductLabel || "",
-          voucherType: j.voucherType || reportFilterVoucherType || "",
         };
         const data = await fetchGeneratedJournals({
           startDate: filterPayload.startDate || undefined,
           endDate: filterPayload.endDate || undefined,
-          companyName: filterPayload.companyName || undefined,
-          partyName: filterPayload.partyName || undefined,
+          accountId: filterPayload.accountId || undefined,
           itemId: filterPayload.itemId || undefined,
           itemName: filterPayload.itemName || undefined,
-          voucherType: filterPayload.voucherType || undefined,
         });
         const filtered = filterJournalsBy(data || [], filterPayload);
         const grouped = buildGroupedJournalRows(filtered);
@@ -3992,7 +3984,7 @@ export default function AccountingFinance() {
             ? `For ${baseRangeLabel}`
             : "";
         const headerRows = [
-          [String(printSettings?.businessName || printSettings?.companyName || j.companyName || "")],
+          [String(printSettings?.businessName || printSettings?.companyName || filterPayload.accountName || "")],
           ["JOURNAL ENTRIES"],
           [rangeLabel],
           [],
@@ -4042,8 +4034,8 @@ export default function AccountingFinance() {
     const dateVal = opts.date || journalGenerateDate;
     const start = opts.start || journalGenerateStart;
     const end = opts.end || journalGenerateEnd;
-    const company = (opts.companyName || reportFilterCompanyName || "").trim();
-    const customer = (opts.customerName || reportFilterCustomerName || "").trim();
+    const accountName =
+      (opts.accountName || accountOptions.find((a) => String(a.id) === String(reportFilterAccountId))?.label || "").trim();
     const product = (opts.productName || "").trim();
 
     let rangeLabel = "";
@@ -4065,8 +4057,7 @@ export default function AccountingFinance() {
     }
 
       const parts = ["Journal", rangeLabel].filter(Boolean);
-      if (company) parts.push(company);
-      if (customer) parts.push(customer);
+      if (accountName) parts.push(accountName);
       if (product) parts.push(product);
       const base = parts.join(" - ");
       return `${base} ${getShortByStamp()}`;
@@ -4204,7 +4195,6 @@ export default function AccountingFinance() {
   }, [entries, accountOptions]);
 
   const reportPreviewEntries = useMemo(() => {
-    const rows = [];
     const selected = activeGeneratedJournalId
       ? generatedJournalList.find((x) => String(x._id || x.id) === String(activeGeneratedJournalId))
       : null;
@@ -4212,10 +4202,8 @@ export default function AccountingFinance() {
     const filterBase = selected || {
       startDate: reportRangeStart || "",
       endDate: reportRangeEnd || "",
-      companyName: reportFilterCompanyName || "",
-      partyName: reportFilterCustomerName || "",
+      accountId: reportFilterAccountId || "",
       itemId: reportFilterProductId || "",
-      voucherType: reportFilterVoucherType || "",
       productName,
     };
     const hasFilter = (j) => {
@@ -4224,95 +4212,22 @@ export default function AccountingFinance() {
       const inRange =
         (!filterBase.startDate || (d && d >= new Date(filterBase.startDate))) &&
         (!filterBase.endDate || (d && d <= new Date(`${filterBase.endDate}T23:59:59.999`)));
-      const companyFilter = normalizeText(filterBase.companyName || filterBase.companyId || "");
-      const byCompany = !companyFilter
-        ? true
-        : [String(j?.companyId || ""), String(j?.companyName || "")]
-            .map((v) => normalizeText(v))
-            .some((v) => v === companyFilter || v.includes(companyFilter));
-      const byType = !filterBase.voucherType
-        ? true
-        : normalizeText(j?.voucherType || "").includes(normalizeText(filterBase.voucherType || ""));
-      if (!byType) return false;
       const lines = j?.lines || [];
-      const partyFilter = normalizeText(filterBase.partyName || "");
-      const byParty = !partyFilter
-        ? true
-        : lines.some((l) => normalizeText(l.partyName || "").includes(partyFilter)) ||
-          normalizeText(j?.customerName || "").includes(partyFilter);
+      const byAccount = !filterBase.accountId || lines.some((l) => String(l.accountId || "") === String(filterBase.accountId || ""));
       const byItemId = !filterBase.itemId || lines.some((l) => String(l.itemId || "") === String(filterBase.itemId || ""));
       const itemNameFilter = normalizeText(filterBase.productName || "");
       const byItemName = !itemNameFilter || lines.some((l) => normalizeText(l.itemName || "").includes(itemNameFilter));
-      return inRange && byCompany && byParty && byItemId && byItemName;
+      return inRange && byAccount && byItemId && byItemName;
     };
     const journals = [...(generatedJournals || [])]
       .filter(hasFilter)
       .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime());
-    journals.forEach((j) => {
-      const date = j?.date;
-      const narration = String(j?.description || j?.narration || "").trim();
-      const debits = (j?.lines || []).filter((l) => round2(n0(l.debit)) > 0);
-      const credits = (j?.lines || []).filter((l) => round2(n0(l.credit)) > 0);
-      let dateShown = false;
-      const groupRows = [];
-
-      debits.forEach((l) => {
-        groupRows.push({
-          date,
-          showDate: !dateShown,
-          side: "debit",
-          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
-          amount: round2(n0(l.debit)),
-          narration,
-          isNarrationRow: false,
-          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
-          entryId: String(j?._id || ""),
-        });
-        dateShown = true;
-      });
-
-      credits.forEach((l) => {
-        groupRows.push({
-          date,
-          showDate: !dateShown,
-          side: "credit",
-          account: ensureAccountSuffix(String(l.accountName || l.accountCode || "Account")),
-          amount: round2(n0(l.credit)),
-          narration,
-          isNarrationRow: false,
-          lf: shortVoucherSeq(j?.voucherNo || j?._id || ""),
-          entryId: String(j?._id || ""),
-        });
-        dateShown = true;
-      });
-
-      if (narration) {
-        groupRows.push({
-          date,
-          showDate: false,
-          side: "narration",
-          account: "",
-          amount: 0,
-          narration,
-          isNarrationRow: true,
-        });
-      }
-
-      groupRows.forEach((r, idx) => {
-        rows.push({
-          ...r,
-          isFirstInGroup: idx === 0,
-          isLastInGroup: idx === groupRows.length - 1,
-        });
-      });
-    });
-    return rows;
+    return buildReportRowsFromJournals(journals);
   }, [
     generatedJournals,
     activeGeneratedJournalId,
     generatedJournalList,
-    reportFilterCompanyName,
-    reportFilterCustomerName,
+    reportFilterAccountId,
     reportFilterProductId,
     reportRangeStart,
     reportRangeEnd,
@@ -4942,85 +4857,26 @@ export default function AccountingFinance() {
                   </>
                 )}
                 <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
-                  <span className="text-xs text-gray-600">Company</span>
+                  <span className="text-xs text-gray-600">Account</span>
                   <select
-                    value={journalFilterCompanyName}
+                    value={reportFilterAccountId}
                     onChange={(e) => {
                       const v = e.target.value;
-                      handleJournalFilterCompanyDraft(v);
-                      setReportFilterCompanyName(String(v || ""));
+                      setReportFilterAccountId(v);
                       setActiveGeneratedJournalId("");
                       loadGeneratedJournalsWithOverride({
                         startDate: reportRangeStart || undefined,
                         endDate: reportRangeEnd || undefined,
-                        companyName: String(v || "") || undefined,
-                        partyName: journalFilterCustomerName || undefined,
+                        accountId: v || undefined,
                         itemId: reportFilterProductId || undefined,
-                        voucherType: journalFilterVoucherType || undefined,
                       }).catch(() => {});
                     }}
-                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
+                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[150px] sm:flex-none"
                   >
                     <option value="">All</option>
-                    {companyOptions.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
-                  <span className="text-xs text-gray-600">Customer</span>
-                  <select
-                    value={journalFilterCustomerName}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setJournalFilterCustomerName(v);
-                      setReportFilterCustomerName(v);
-                      setActiveGeneratedJournalId("");
-                      loadGeneratedJournalsWithOverride({
-                        startDate: reportRangeStart || undefined,
-                        endDate: reportRangeEnd || undefined,
-                        companyName: journalFilterCompanyName || undefined,
-                        partyName: v || undefined,
-                        itemId: reportFilterProductId || undefined,
-                        voucherType: journalFilterVoucherType || undefined,
-                      }).catch(() => {});
-                    }}
-                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
-                  >
-                    <option value="">All</option>
-                    {customerOptions.map((c) => (
-                      <option key={c._id || c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
-                  <span className="text-xs text-gray-600">Voucher</span>
-                  <select
-                    value={journalFilterVoucherType}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setJournalFilterVoucherType(v);
-                      setReportFilterVoucherType(v);
-                      setActiveGeneratedJournalId("");
-                      loadGeneratedJournalsWithOverride({
-                        startDate: reportRangeStart || undefined,
-                        endDate: reportRangeEnd || undefined,
-                        companyName: journalFilterCompanyName || undefined,
-                        partyName: journalFilterCustomerName || undefined,
-                        itemId: reportFilterProductId || undefined,
-                        voucherType: v || undefined,
-                      }).catch(() => {});
-                    }}
-                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[90px] sm:flex-none"
-                  >
-                    <option value="">All</option>
-                    {VOUCHER_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
+                    {accountOptions.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
                       </option>
                     ))}
                   </select>
@@ -5053,20 +4909,16 @@ export default function AccountingFinance() {
                       const filterPayload = {
                         startDate: reportRangeStart || "",
                         endDate: reportRangeEnd || "",
-                        companyName: reportFilterCompanyName || "",
-                        partyName: reportFilterCustomerName || "",
+                        accountId: reportFilterAccountId || "",
                         itemId: reportFilterProductId || "",
                         itemName: reportFilterProductLabel || "",
-                        voucherType: reportFilterVoucherType || "",
                       };
                       const data = await fetchGeneratedJournals({
                         startDate: filterPayload.startDate || undefined,
                         endDate: filterPayload.endDate || undefined,
-                        companyName: filterPayload.companyName || undefined,
-                        partyName: filterPayload.partyName || undefined,
+                        accountId: filterPayload.accountId || undefined,
                         itemId: filterPayload.itemId || undefined,
                         itemName: filterPayload.itemName || undefined,
-                        voucherType: filterPayload.voucherType || undefined,
                       });
                       const filtered = filterJournalsBy(data || [], filterPayload);
                       if (!filtered.length) {
@@ -5100,15 +4952,15 @@ export default function AccountingFinance() {
               </div>
             </div>
             {journalReportPreviewOpen && (
-            <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[680px] w-full text-sm border border-gray-200 table-fixed">
-                <thead className="bg-gray-50 text-gray-800">
+            <div className="rounded-lg border border-rose-200 overflow-x-auto bg-[#fffdf8]">
+              <table className="min-w-[760px] w-full text-sm border border-rose-300 table-fixed">
+                <thead className="bg-[#fff7ed] text-gray-900">
                   <tr>
-                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
-                    <th className="text-left font-semibold px-2 py-2 w-[260px] border border-gray-200">Details</th>
-                    <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">L.F.</th>
-                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount (Dr.)</th>
-                    <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount (Cr.)</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[92px] border border-rose-300">Date</th>
+                    <th className="text-center font-semibold px-2 py-2 border border-rose-300">Particulars / Details</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[58px] border border-rose-300">Page</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-rose-300">Debit</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-rose-300">Credit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5121,12 +4973,22 @@ export default function AccountingFinance() {
                   )}
                   {reportPreviewEntries.map((entry, idx) => (
                     <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
-                      {entry.isNarrationRow ? (
+                      {entry.isCashSummaryRow ? (
+                        <tr className="bg-[#fff7ed]">
+                          <td className="px-3 py-3 border border-rose-300"></td>
+                          <td className="px-3 py-3 border border-rose-300 font-semibold text-gray-900">Cash in Hand</td>
+                          <td className="px-3 py-3 border border-rose-300"></td>
+                          <td className="px-3 py-3 border border-rose-300 text-right font-semibold">
+                            Rs. {String(entry.amount)}
+                          </td>
+                          <td className="px-3 py-3 border border-rose-300"></td>
+                        </tr>
+                      ) : entry.isNarrationRow ? (
                         <tr>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             {entry.lf ? (
                               <button
@@ -5142,34 +5004,34 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             ({withBeing(entry.narration)})
                           </td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                         ></td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                         ></td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                         ></td>
                         </tr>
                       ) : (
                         <tr>
                           <td
-                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-center border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             {entry.showDate && (
                               <>
@@ -5179,26 +5041,23 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             <div
                               className={`flex items-center justify-between gap-2 ${
                                 entry.side === "credit" ? "pl-4 text-gray-700" : ""
                               }`}
                             >
-                              <span className="truncate">
-                                {entry.side === "credit" ? "To " : ""}
-                                {entry.account}
-                              </span>
-                              {entry.side === "debit" && <span className="text-xs font-semibold">Dr</span>}
+                              <span className="truncate">{entry.account}</span>
+                              <span className="text-xs font-semibold">{entry.side === "debit" ? "Dr" : "Cr"}</span>
                             </div>
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             {entry.lf ? (
                               <button
@@ -5214,16 +5073,16 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-right border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
-                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-right border-x border-rose-300 ${
+                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
                           >
                             {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
@@ -6535,58 +6394,67 @@ export default function AccountingFinance() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-gray-900">New Voucher</div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">
-                  Totals: Debit <span className="font-semibold">{totals.totalDebit}</span> | Credit{" "}
-                  <span className="font-semibold">{totals.totalCredit}</span>{" "}
-                  {!totals.balanced && <span className="ml-2 text-red-600 font-semibold">Unbalanced</span>}
-                </div>
-                {/* Add Entry button moved to bottom actions */}
-              </div>
+              <div className="text-sm font-semibold text-gray-900">Daybook Entries</div>
             </div>
 
             {editingVoucherNo && (
               <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                Voucher No: <span className="font-semibold">{editingVoucherNo}</span>
+                Entry No: <span className="font-semibold">{editingVoucherNo}</span>
               </div>
             )}
 
             <div className="space-y-4">
-              {(entries || []).map((e, entryIdx) => {
-                const t = entryTotalsById.get(e.entryId) || { totalDebit: 0, totalCredit: 0, balanced: false };
+              {(entries || []).slice(0, 1).map((e) => {
                 const v = submitAttempted ? validation.errorsByEntry.get(e.entryId) : null;
                 const fieldErr = v?.fields || {};
-                const lineErrMap = v?.lines || new Map();
-                const lineErr = (rowId) => lineErrMap.get(String(rowId || "")) || {};
+                const side = String(e.side || "DEBIT").toUpperCase();
+                const cashLocked = Boolean(e.cashInHandLocked);
                 return (
-                  <div key={e.entryId} className="rounded-xl border border-gray-200 p-3 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-gray-900">Entry {entryIdx + 1}</div>
-                      <div className="text-xs text-gray-600">
-                        Dr <span className="font-semibold">{t.totalDebit}</span> | Cr{" "}
-                        <span className="font-semibold">{t.totalCredit}</span>{" "}
-                        {!t.balanced && <span className="ml-2 text-red-600 font-semibold">Unbalanced</span>}
+                  <div key={e.entryId} className="space-y-3">
+                    <div className="grid md:grid-cols-2 gap-3 items-start">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Cash in Hand <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            inputMode="decimal"
+                            readOnly={cashLocked}
+                            value={e.cashInHand || ""}
+                            onChange={(ev) =>
+                              patchEntry(e.entryId, {
+                                cashInHand: ev.target.value.replace(/[^\d.]/g, ""),
+                                cashInHandSource: "MANUAL_EDIT",
+                                cashInHandEdited: true,
+                              })
+                            }
+                            className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm ${
+                              cashLocked ? "bg-gray-100 text-gray-700 cursor-not-allowed" : "bg-white"
+                            } ${submitAttempted && fieldErr.cashInHand ? "border-red-300 bg-red-50" : "border-gray-300"}`}
+                            placeholder="0"
+                          />
+                          {cashLocked && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                patchEntry(e.entryId, {
+                                  cashInHandLocked: false,
+                                  cashInHandSource: "MANUAL_EDIT",
+                                  cashInHandEdited: true,
+                                })
+                              }
+                              className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-600 hover:bg-white"
+                              title="Edit cash in hand"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                          {submitAttempted && fieldErr.cashInHand ? fieldErr.cashInHand : ""}
+                        </div>
                       </div>
-                      {!editingVoucherId && entries.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => deleteEntry(e.entryId)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-red-200 text-xs text-red-700 hover:bg-red-50"
-                          title="Delete entry"
-                        >
-                          <Trash2 size={14} /> Delete
-                        </button>
-                      )}
-                    </div>
 
-                    {submitAttempted && fieldErr.balance && (
-                      <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
-                        {fieldErr.balance}
-                      </div>
-                    )}
-
-                    <div className="grid md:grid-cols-6 gap-3 items-start">
                       <div>
                         <label className="block text-xs text-gray-600 mb-1">
                           Date <span className="text-red-500">*</span>
@@ -6603,242 +6471,76 @@ export default function AccountingFinance() {
                           {submitAttempted && fieldErr.date ? fieldErr.date : ""}
                         </div>
                       </div>
+                    </div>
 
+                    <div className="grid md:grid-cols-[minmax(0,1fr)_180px_260px] gap-3 items-start">
                       <div>
-                        <label className="block text-xs text-gray-600 mb-1">Customer</label>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Account Name <span className="text-red-500">*</span>
+                        </label>
                         <select
-                          value={e.customerId || ""}
-                          onChange={(ev) => {
-                            const id = ev.target.value;
-                            const match = (customerOptions || []).find((c) => String(c._id) === String(id));
-                            patchEntry(e.entryId, { customerId: id, customerName: match?.name || "" });
-                          }}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                        >
-                          <option value="">(Optional)</option>
-                          {(customerOptions || []).map((c) => (
-                            <option key={c._id || c.name} value={c._id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-xs text-gray-600 mb-1">Company</label>
-                        <select
-                          value={e.companyId || ""}
-                          onChange={(ev) => setEntryCompany(e.entryId, ev.target.value)}
+                          value={e.accountId || ""}
+                          onChange={(ev) => patchEntry(e.entryId, { accountId: ev.target.value })}
                           className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                            submitAttempted && fieldErr.companyId ? "border-red-300 bg-red-50" : "border-gray-300"
+                            submitAttempted && fieldErr.accountId ? "border-red-300 bg-red-50" : "border-gray-300"
                           }`}
                         >
-                          <option value="">Select company</option>
-                          {companyOptions.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
+                          <option value="">Select account</option>
+                          {daybookAccountOptions.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.label}
                             </option>
                           ))}
                         </select>
                         <div className="mt-1 min-h-[14px] text-xs text-red-600">
-                          {submitAttempted && fieldErr.companyId ? fieldErr.companyId : ""}
+                          {submitAttempted && fieldErr.accountId ? fieldErr.accountId : ""}
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-xs text-gray-600 mb-1">Product</label>
-                        <GroupedProductDropdown
-                          valueId={e.productTypeId || ""}
-                          valueLabel={String(e.productName || "").trim() || "(Optional)"}
-                          groups={productTypesByBrand.groups}
-                          preferredBrandKey={String(e.companyName || "").trim()}
-                          onSelect={({ id }) => {
-                            const match = (productTypes || []).find((p) => String(p._id) === String(id));
-                            const name = match
-                              ? [String(match.brand || "").trim(), String(match.name || "").trim()].filter(Boolean).join(" - ")
-                              : "";
-                            patchEntry(e.entryId, { productTypeId: id, productName: name });
-                          }}
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Amount <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          inputMode="decimal"
+                          value={e.amount || ""}
+                          onChange={(ev) => patchEntry(e.entryId, { amount: ev.target.value.replace(/[^\d.]/g, "") })}
+                          className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                            submitAttempted && fieldErr.amount ? "border-red-300 bg-red-50" : "border-gray-300"
+                          }`}
+                          placeholder="0"
                         />
-                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
+                        <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                          {submitAttempted && fieldErr.amount ? fieldErr.amount : ""}
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
-                        <select
-                          value={e.voucherType || "JOURNAL"}
-                          onChange={(ev) => patchEntry(e.entryId, { voucherType: ev.target.value })}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                        >
-                          {VOUCHER_TYPES.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="mt-1 min-h-[14px] text-xs text-transparent">.</div>
-                      </div>
-                    </div>
 
-                    <div className="rounded-xl border border-gray-200 overflow-x-auto">
-                      <table className="min-w-[700px] w-full text-sm table-fixed">
-                        <thead className="bg-emerald-50 text-emerald-900">
-                          <tr>
-                            <th className="text-left font-semibold px-3 py-2 w-[200px]">
-                              Debit Account <span className="text-red-500">*</span>
-                            </th>
-                            <th className="text-left font-semibold px-3 py-2 w-[110px]">
-                              Debit Amount <span className="text-red-500">*</span>
-                            </th>
-                            <th className="text-left font-semibold px-3 py-2 w-[200px]">
-                              Credit Account <span className="text-red-500">*</span>
-                            </th>
-                            <th className="text-left font-semibold px-3 py-2 w-[110px]">
-                              Credit Amount <span className="text-red-500">*</span>
-                            </th>
-                            <th className="text-left font-semibold px-3 py-2 w-[45px]"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {(e.lines || []).map((l) => {
-                            const debitDisabled = l.entryType === "credit";
-                            const creditDisabled = l.entryType === "debit";
-                            const le = lineErr(l.rowId);
-                            return (
-                              <tr key={l.rowId} className="hover:bg-gray-50">
-                                <td className="px-3 py-2">
-                                  {debitDisabled ? (
-                                    <div className="text-gray-400">-</div>
-                                  ) : (
-                                    <div>
-                                      <select
-                                        value={l.debitAccountId || ""}
-                                        onChange={(ev) => patchLine(e.entryId, l.rowId, { debitAccountId: ev.target.value })}
-                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                          submitAttempted && le.debitAccountId ? "border-red-300 bg-red-50" : "border-gray-300"
-                                        }`}
-                                      >
-                                        <option value="">Select debit account</option>
-                                        {debitAccountOptions.map((a) => (
-                                          <option key={a.id} value={a.id}>
-                                            {a.label}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
-                                        {submitAttempted && le.debitAccountId ? le.debitAccountId : ""}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {debitDisabled ? (
-                                    <div className="text-gray-400">-</div>
-                                  ) : (
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <input
-                                          inputMode="decimal"
-                                          value={l.debitAmount || ""}
-                                          onChange={(ev) =>
-                                            patchLine(e.entryId, l.rowId, { debitAmount: ev.target.value.replace(/[^\d.]/g, "") })
-                                          }
-                                          className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                            submitAttempted && le.debitAmount ? "border-red-300 bg-red-50" : "border-gray-300"
-                                          }`}
-                                          placeholder="0"
-                                        />
-                                      <button
-                                        type="button"
-                                        onClick={() => insertLineAfter(e.entryId, l.rowId, "debit")}
-                                        className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                                        title="Add debit row"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
-                                        {submitAttempted && le.debitAmount ? le.debitAmount : ""}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {creditDisabled ? (
-                                    <div className="text-gray-400">-</div>
-                                  ) : (
-                                    <div>
-                                      <select
-                                        value={l.creditAccountId || ""}
-                                        onChange={(ev) => patchLine(e.entryId, l.rowId, { creditAccountId: ev.target.value })}
-                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                          submitAttempted && le.creditAccountId ? "border-red-300 bg-red-50" : "border-gray-300"
-                                        }`}
-                                      >
-                                        <option value="">Select credit account</option>
-                                        {creditAccountOptions.map((a) => (
-                                          <option key={a.id} value={a.id}>
-                                            {a.label}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
-                                        {submitAttempted && le.creditAccountId ? le.creditAccountId : ""}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {creditDisabled ? (
-                                    <div className="text-gray-400">-</div>
-                                  ) : (
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <input
-                                          inputMode="decimal"
-                                          value={l.creditAmount || ""}
-                                          onChange={(ev) =>
-                                            patchLine(e.entryId, l.rowId, { creditAmount: ev.target.value.replace(/[^\d.]/g, "") })
-                                          }
-                                          className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                            submitAttempted && le.creditAmount ? "border-red-300 bg-red-50" : "border-gray-300"
-                                          }`}
-                                          placeholder="0"
-                                        />
-                                      <button
-                                        type="button"
-                                        onClick={() => insertLineAfter(e.entryId, l.rowId, "credit")}
-                                        className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                                        title="Add credit row"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                      <div className="mt-1 min-h-[14px] text-xs text-red-600">
-                                        {submitAttempted && le.creditAmount ? le.creditAmount : ""}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {l.isBase ? (
-                                    <div className="text-gray-400 text-xs">-</div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteLine(e.entryId, l.rowId)}
-                                      className="p-2 rounded hover:bg-red-50 text-red-600"
-                                      title="Delete row"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Debit / Credit <span className="text-red-500">*</span>
+                        </label>
+                        <div className="grid grid-cols-2 rounded-lg border border-gray-300 overflow-hidden text-sm">
+                          <button
+                            type="button"
+                            onClick={() => patchEntry(e.entryId, { side: "DEBIT" })}
+                            className={`px-3 py-2 ${side === "DEBIT" ? "bg-emerald-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}
+                          >
+                            Debit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => patchEntry(e.entryId, { side: "CREDIT" })}
+                            className={`px-3 py-2 border-l border-gray-300 ${
+                              side === "CREDIT" ? "bg-emerald-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+                            }`}
+                          >
+                            Credit
+                          </button>
+                        </div>
+                        <div className="mt-1 min-h-[14px] text-xs text-red-600">
+                          {submitAttempted && fieldErr.side ? fieldErr.side : ""}
+                        </div>
+                      </div>
                     </div>
 
                     <div>
@@ -6862,504 +6564,18 @@ export default function AccountingFinance() {
               })}
 
               <div className="flex justify-end gap-2">
-                {!editingVoucherId && (
-                  <button
-                    type="button"
-                    onClick={addEntry}
-                    disabled={loading}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    <Plus size={16} /> Add Entry
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => saveVoucher({ andNew: false, autoPrint: false })}
                   disabled={loading}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  <Save size={16} /> {editingVoucherId ? "Update" : "Save All"}
+                  <Save size={16} /> {editingVoucherId ? "Update" : "Save"}
                 </button>
               </div>
             </div>
 
-            {/*
-            <div className="rounded-xl border border-gray-200 overflow-x-auto">
-              <table className="min-w-[860px] w-full text-sm">
-                <thead className="bg-emerald-50 text-emerald-900">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Date</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[220px]">Debit Account</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Debit Amount</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[220px]">Credit Account</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[120px]">Credit Amount</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[60px]"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {groupedLines.map((group) => {
-                    const groupNarration =
-                      group.items.find((x) => String(x.narration || "").trim())?.narration || "";
-                    const groupCustomerId = group.items.find((x) => String(x.customerId || "").trim())?.customerId || "";
-                    const groupProductTypeId = group.items.find((x) => String(x.productTypeId || "").trim())?.productTypeId || "";
-                    const groupHasAmt = group.items.some((l) => n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0);
-                    const missingNarration = groupHasAmt && !String(groupNarration || "").trim();
-                    const firstGroupId = groupedLines[0]?.groupId;
-                    return group.items.map((l, idx) => {
-                      const hasAmt = n0(l.debitAmount) > 0 || n0(l.creditAmount) > 0;
-                      const debitAmt = n0(l.debitAmount);
-                      const creditAmt = n0(l.creditAmount);
-                      const debitDisabled = l.entryType === "credit";
-                      const creditDisabled = l.entryType === "debit";
-                      const showDateError = submitAttempted && idx === 0 && !l.date;
-                      const showDebitAccountError =
-                        submitAttempted &&
-                        ((debitAmt > 0 && !l.debitAccountId) ||
-                          (!hasAnyInput && firstGroupId === group.groupId && idx === 0));
-                      const showCreditAccountError =
-                        submitAttempted && creditAmt > 0 && !l.creditAccountId;
-                      const showDebitAmountError = submitAttempted && l.debitAccountId && debitAmt <= 0;
-                      const showCreditAmountError = submitAttempted && l.creditAccountId && creditAmt <= 0;
-                      const showNarrationError = submitAttempted && missingNarration;
-                      return (
-                        <React.Fragment key={l.rowId}>
-                          <tr className="hover:bg-gray-50">
-                            <td className="px-3 py-2 pb-4 relative">
-                              {idx === 0 ? (
-                                <>
-                                  <input
-                                    type="date"
-                                    value={l.date}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setLines((prev) =>
-                                        prev.map((x) =>
-                                          x.groupId === group.groupId ? { ...x, date: v } : x
-                                        )
-                                      );
-                                    }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                    showDateError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                  }`}
-                                  />
-                                  {showDateError && (
-                                    <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                      Required
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <div className="text-gray-400">-</div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 pb-4 relative">
-                              {debitDisabled ? (
-                                <div className="text-gray-400">-</div>
-                              ) : l.debitMode === "input" ? (
-                                <div className="flex gap-2">
-                                  <input
-                                    value={l.debitInput}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setLines((prev) =>
-                                        prev.map((x) => (x.rowId === l.rowId ? { ...x, debitInput: v } : x))
-                                      );
-                                    }}
-                                    onBlur={async () => {
-                                      if (!l.debitInput.trim()) {
-                                        setLines((prev) =>
-                                        prev.map((x) =>
-                                          x.rowId === l.rowId ? { ...x, debitMode: "list", debitInput: "" } : x
-                                        )
-                                      );
-                                        return;
-                                      }
-                                      const id = await createAccountByName(l.debitInput);
-                                      if (!id) return;
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId
-                                          ? { ...x, debitAccountId: id, debitMode: "list", debitInput: "" }
-                                          : x
-                                      )
-                                    );
-                                    }}
-                                  className={`w-[80%] px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                    showDebitAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                  }`}
-                                    placeholder="Type debit account"
-                                    disabled={debitDisabled}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId ? { ...x, debitMode: "list", debitInput: "" } : x
-                                      )
-                                    )
-                                  }
-                                    className="w-[20%] px-2 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                    title="Back to list"
-                                    disabled={debitDisabled}
-                                  >
-                                    List
-                                  </button>
-                                </div>
-                              ) : (
-                                <select
-                                  value={l.debitAccountId}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    if (v === "__ADD__") {
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId ? { ...x, debitMode: "input", debitAccountId: "" } : x
-                                      )
-                                    );
-                                      return;
-                                    }
-                                    setLines((prev) =>
-                                      prev.map((x) => (x.rowId === l.rowId ? { ...x, debitAccountId: v } : x))
-                                    );
-                                  }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                    showDebitAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                  }`}
-                                  disabled={debitDisabled}
-                                >
-                                  <option value="">Select debit account</option>
-                                  {debitAccountOptions.map((a) => (
-                                    <option key={a.id} value={a.id}>
-                                      {a.label}
-                                    </option>
-                                  ))}
-                                  <option value="__ADD__">+ Add new account</option>
-                                </select>
-                              )}
-                              {showDebitAccountError && (
-                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                  Required
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 pb-4 relative">
-                              {debitDisabled ? (
-                                <div className="text-gray-400">-</div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    inputMode="decimal"
-                                    value={l.debitAmount}
-                                    onChange={(e) => {
-                                      const v = e.target.value.replace(/[^\d.]/g, "");
-                                      setLines((prev) =>
-                                        prev.map((x) => (x.rowId === l.rowId ? { ...x, debitAmount: v } : x))
-                                      );
-                                    }}
-                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                      showDebitAmountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                    }`}
-                                    placeholder="0"
-                                    disabled={debitDisabled}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => insertLineAfter(lines.findIndex((x) => x.rowId === l.rowId), "debit")}
-                                    className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                                    title="Add debit row"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              )}
-                              {showDebitAmountError && (
-                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                  Amount required
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 pb-4 relative">
-                              {creditDisabled ? (
-                                <div className="text-gray-400">-</div>
-                              ) : l.creditMode === "input" ? (
-                                <div className="flex gap-2">
-                                  <input
-                                    value={l.creditInput}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setLines((prev) =>
-                                        prev.map((x) => (x.rowId === l.rowId ? { ...x, creditInput: v } : x))
-                                      );
-                                    }}
-                                    onBlur={async () => {
-                                      if (!l.creditInput.trim()) {
-                                        setLines((prev) =>
-                                        prev.map((x) =>
-                                          x.rowId === l.rowId ? { ...x, creditMode: "list", creditInput: "" } : x
-                                        )
-                                      );
-                                        return;
-                                      }
-                                      const id = await createAccountByName(l.creditInput);
-                                      if (!id) return;
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId
-                                          ? { ...x, creditAccountId: id, creditMode: "list", creditInput: "" }
-                                          : x
-                                      )
-                                    );
-                                    }}
-                                  className={`w-[80%] px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                    showCreditAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                  }`}
-                                    placeholder="Type credit account"
-                                    disabled={creditDisabled}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId ? { ...x, creditMode: "list", creditInput: "" } : x
-                                      )
-                                    )
-                                  }
-                                    className="w-[20%] px-2 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                    title="Back to list"
-                                    disabled={creditDisabled}
-                                  >
-                                    List
-                                  </button>
-                                </div>
-                              ) : (
-                                <select
-                                  value={l.creditAccountId}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    if (v === "__ADD__") {
-                                      setLines((prev) =>
-                                      prev.map((x) =>
-                                        x.rowId === l.rowId ? { ...x, creditMode: "input", creditAccountId: "" } : x
-                                      )
-                                    );
-                                      return;
-                                    }
-                                    setLines((prev) =>
-                                      prev.map((x) => (x.rowId === l.rowId ? { ...x, creditAccountId: v } : x))
-                                    );
-                                  }}
-                                  className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                    showCreditAccountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                  }`}
-                                  disabled={creditDisabled}
-                                >
-                                  <option value="">Select credit account</option>
-                                  {creditAccountOptions.map((a) => (
-                                    <option key={a.id} value={a.id}>
-                                      {a.label}
-                                    </option>
-                                  ))}
-                                  <option value="__ADD__">+ Add new account</option>
-                                </select>
-                              )}
-                              {showCreditAccountError && (
-                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                  Required
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 pb-4 relative">
-                              {creditDisabled ? (
-                                <div className="text-gray-400">-</div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    inputMode="decimal"
-                                    value={l.creditAmount}
-                                    onChange={(e) => {
-                                      const v = e.target.value.replace(/[^\d.]/g, "");
-                                      setLines((prev) =>
-                                        prev.map((x) => (x.rowId === l.rowId ? { ...x, creditAmount: v } : x))
-                                      );
-                                    }}
-                                    className={`w-full px-2 py-1.5 rounded border text-sm disabled:bg-gray-100 ${
-                                      showCreditAmountError ? "border-red-300 bg-red-50" : "border-gray-300"
-                                    }`}
-                                    placeholder="0"
-                                    disabled={creditDisabled}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => insertLineAfter(lines.findIndex((x) => x.rowId === l.rowId), "credit")}
-                                    className="p-2 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                                    title="Add credit row"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              )}
-                              {showCreditAmountError && (
-                                <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                  Amount required
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              <button
-                                type="button"
-                                onClick={() => setLines((prev) => prev.filter((x) => x.rowId !== l.rowId))}
-                                className="p-2 rounded hover:bg-red-50 text-red-600"
-                                title="Delete row"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                          {idx === group.items.length - 1 && (
-                            <>
-                              <tr className="bg-gray-50/40">
-                                <td className="px-3 py-2 pb-4" colSpan={5}>
-                                  <div className="grid md:grid-cols-3 gap-3 items-end">
-                                    <div>
-                                      <label className="block text-[11px] text-gray-600 mb-1">Company</label>
-                                      <select
-                                        value={header.companyId || filterCompanyId || ""}
-                                        onChange={(e) => setCompany(e.target.value)}
-                                        className={`w-full px-2 py-1.5 rounded border text-sm ${
-                                          submitAttempted && !(header.companyId || filterCompanyId)
-                                            ? "border-red-300 bg-red-50"
-                                            : "border-gray-300"
-                                        }`}
-                                      >
-                                        <option value="">Select company</option>
-                                        {companyOptions.map((c) => (
-                                          <option key={c.id} value={c.id}>
-                                            {c.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      {submitAttempted && !(header.companyId || filterCompanyId) && (
-                                        <div className="mt-1 text-xs text-red-600">Company is required.</div>
-                                      )}
-                                    </div>
 
-                                    <div>
-                                      <label className="block text-[11px] text-gray-600 mb-1">Customer (optional)</label>
-                                      <select
-                                        value={groupCustomerId || ""}
-                                        onChange={(e) => {
-                                          const id = e.target.value;
-                                          const match = (customerOptions || []).find((c) => String(c._id) === String(id));
-                                          setLines((prev) =>
-                                            prev.map((x) =>
-                                              x.groupId === group.groupId
-                                                ? { ...x, customerId: id, customerName: match?.name || "" }
-                                                : x
-                                            )
-                                          );
-                                        }}
-                                        className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
-                                      >
-                                        <option value="">(Optional)</option>
-                                        {(customerOptions || []).map((c) => (
-                                          <option key={c._id || c.name} value={c._id}>
-                                            {c.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-[11px] text-gray-600 mb-1">Product (optional)</label>
-                                      <select
-                                        value={groupProductTypeId || ""}
-                                        onChange={(e) => {
-                                          const id = e.target.value;
-                                          const match = (productTypes || []).find((p) => String(p._id) === String(id));
-                                          const name = match
-                                            ? [String(match.brand || "").trim(), String(match.name || "").trim()]
-                                                .filter(Boolean)
-                                                .join(" - ")
-                                            : "";
-                                          setLines((prev) =>
-                                            prev.map((x) =>
-                                              x.groupId === group.groupId
-                                                ? { ...x, productTypeId: id, productName: name }
-                                                : x
-                                            )
-                                          );
-                                        }}
-                                        className="w-full px-2 py-1.5 rounded border border-gray-300 text-sm"
-                                      >
-                                        <option value="">(Optional)</option>
-                                        {(productTypes || []).map((p) => (
-                                          <option key={p._id} value={p._id}>
-                                            {[String(p.brand || "").trim(), String(p.name || "").trim()]
-                                              .filter(Boolean)
-                                              .join(" - ")}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2"></td>
-                              </tr>
-
-                              <tr className="bg-gray-50/40">
-                                <td className="px-3 py-2 pb-4 relative" colSpan={5}>
-                                  <input
-                                    value={groupNarration}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setLines((prev) =>
-                                        prev.map((x) => (x.groupId === group.groupId ? { ...x, narration: v } : x))
-                                      );
-                                    }}
-                                    className={`w-full px-2 py-1.5 rounded border text-sm ${narrationClass(
-                                      missingNarration
-                                    )}`}
-                                    placeholder="Narration"
-                                  />
-                                  {false && showNarrationError && (
-                                    <div className="absolute left-0 top-full mt-1 text-[10px] text-red-600">
-                                      Narration required
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2"></td>
-                              </tr>
-                            </>
-                          )}
-                        </React.Fragment>
-                      );
-                    });
-                  })}
-                </tbody>
-                <tfoot className="bg-gray-50">
-                  <tr>
-                    <td className="px-3 py-2 font-semibold">Totals</td>
-                    <td className="px-3 py-2"></td>
-                    <td className="px-3 py-2 font-semibold">{totals.totalDebit}</td>
-                    <td className="px-3 py-2"></td>
-                    <td className="px-3 py-2 font-semibold">{totals.totalCredit}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => saveVoucher({ andNew: false })}
-                        disabled={loading}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        <Save size={16} /> Save
-                      </button>
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            */}
 
             {submitAttempted && hasValidationErrors && (
               <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs px-3 py-2">
@@ -7370,7 +6586,7 @@ export default function AccountingFinance() {
 
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             {showVoucherFilters && (
-              <div className="grid md:grid-cols-6 gap-3 items-end">
+              <div className="grid md:grid-cols-4 gap-3 items-end">
                 <div className="md:col-span-1">
                   <label className="block text-xs text-gray-600 mb-1">Start</label>
                   <input
@@ -7389,64 +6605,8 @@ export default function AccountingFinance() {
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-gray-600 mb-1">Company</label>
-                  <select
-                    value={filterCompanyId || filterCompanyName}
-                    onChange={(e) => handleFilterCompany(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All companies</option>
-                    {companyOptions.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-gray-600 mb-1">Customer</label>
-                  <select
-                    value={filterCustomerName}
-                    onChange={(e) => setFilterCustomerName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All customers</option>
-                    {customerOptions.map((c) => (
-                      <option key={c._id || c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">Product</label>
-                  <GroupedProductDropdown
-                    valueId={filterProductId || ""}
-                    valueLabel={filterProductLabel || ""}
-                    groups={productTypesByBrand.groups}
-                    preferredBrandKey={filterCompanyName}
-                    placeholder="Select product"
-                    onSelect={({ id }) => setFilterProductId(id)}
-                  />
-                </div>
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">Voucher Type</label>
-                  <select
-                    value={filterVoucherType}
-                    onChange={(e) => setFilterVoucherType(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All</option>
-                    {VOUCHER_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-3">
-                  <label className="block text-xs text-gray-600 mb-1">Account (optional filter)</label>
+                  <label className="block text-xs text-gray-600 mb-1">Account</label>
                   <select
                     value={filterAccountId}
                     onChange={(e) => setFilterAccountId(e.target.value)}
@@ -7473,47 +6633,20 @@ export default function AccountingFinance() {
             )}
 
             <DataTable
-              title="Vouchers"
+              title="Daybook Entries"
               columns={[
-                { key: "voucherNo", label: "Voucher No" },
+                { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
-                { key: "voucherType", label: "Type" },
-                { key: "companyName", label: "Company" },
+                { key: "cashInHand", label: "Cash in Hand" },
+                {
+                  key: "cashInHandSource",
+                  label: "Cash Record",
+                  render: (v, row) =>
+                    row?.cashInHandEdited || v === "MANUAL_EDIT" ? "Manual edit" : v === "CARRIED" ? "Carried" : "Initial",
+                },
+                { key: "daybookSide", label: "Debit / Credit" },
                 { key: "amount", label: "Amount" },
                 { key: "status", label: "Status" },
-                {
-                  key: "actions",
-                  label: "Actions",
-                  sortable: false,
-                  render: (_v, row) => (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => editVoucher(row._id)}
-                        className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                        title="Edit"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePrintVoucher(row._id)}
-                        className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                        title="Print"
-                      >
-                        <Printer size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => askDeleteVoucher(row._id, row.voucherNo)}
-                        className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ),
-                },
               ]}
               data={vouchers}
               rowClassName={(row) => (row.status === "REVERSED" ? "opacity-60" : "")}
@@ -7531,11 +6664,11 @@ export default function AccountingFinance() {
                 </div>
               }
               exportColumns={[
-                { key: "voucherNo", label: "Voucher No" },
+                { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date" },
-                { key: "voucherType", label: "Type" },
-                { key: "companyName", label: "Company" },
-                { key: "description", label: "Description" },
+                { key: "cashInHand", label: "Cash in Hand" },
+                { key: "cashInHandSource", label: "Cash Record" },
+                { key: "daybookSide", label: "Debit / Credit" },
                 { key: "amount", label: "Amount" },
                 { key: "status", label: "Status" },
               ]}
@@ -7555,7 +6688,7 @@ export default function AccountingFinance() {
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-4">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-gray-900">Delete Voucher</div>
+              <div className="text-sm font-semibold text-gray-900">Delete Entry</div>
               <button
                 type="button"
                 onClick={() => setDeleteDialog({ open: false, id: "", voucherNo: "" })}
@@ -7566,8 +6699,8 @@ export default function AccountingFinance() {
               </button>
             </div>
             <div className="mt-3 text-sm text-gray-700">
-              Delete voucher{" "}
-              <span className="font-semibold">{deleteDialog.voucherNo || "this voucher"}</span> permanently?
+              Delete entry{" "}
+              <span className="font-semibold">{deleteDialog.voucherNo || "this entry"}</span> permanently?
             </div>
             <div className="flex gap-2 justify-end pt-4">
               <button

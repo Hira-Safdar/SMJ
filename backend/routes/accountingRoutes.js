@@ -42,6 +42,7 @@ router.put("/generated-journals/:id", acc.updateGeneratedJournal);
 router.delete("/generated-journals/:id", acc.deleteGeneratedJournal);
 
 // Vouchers / Journal CRUD (manual only)
+router.get("/vouchers/latest-cash", acc.getLatestCashInHand);
 router.get("/vouchers", acc.getVouchers);
 router.get("/vouchers/:id", acc.getVoucherById);
 router.post("/vouchers", acc.createVoucher);

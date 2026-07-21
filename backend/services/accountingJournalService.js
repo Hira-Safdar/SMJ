@@ -42,6 +42,10 @@ const postJournalEntry = async ({
   customerName,
   productTypeId,
   productName,
+  cashInHand,
+  cashInHandSource,
+  cashInHandEdited,
+  cashInHandHistory,
   narration,
   lines,
 }) => {
@@ -61,6 +65,10 @@ const postJournalEntry = async ({
   }
 
   const voucherNo = await nextVoucherNo();
+  const normalizedCashInHand = round2(cashInHand);
+  const normalizedCashSource = ["INITIAL", "CARRIED", "MANUAL_EDIT"].includes(String(cashInHandSource || ""))
+    ? String(cashInHandSource)
+    : "INITIAL";
   const entry = await JournalEntry.create({
     voucherNo,
     date: date ? new Date(date) : new Date(),
@@ -71,6 +79,20 @@ const postJournalEntry = async ({
     customerName: String(customerName || ""),
     productTypeId: String(productTypeId || ""),
     productName: String(productName || ""),
+    cashInHand: normalizedCashInHand,
+    cashInHandSource: normalizedCashSource,
+    cashInHandEdited: Boolean(cashInHandEdited || normalizedCashSource === "MANUAL_EDIT"),
+    cashInHandHistory: Array.isArray(cashInHandHistory) && cashInHandHistory.length
+      ? cashInHandHistory
+      : [
+          {
+            amount: normalizedCashInHand,
+            previousAmount: null,
+            source: normalizedCashSource,
+            note: normalizedCashSource === "MANUAL_EDIT" ? "Cash in hand entered manually." : "Cash in hand recorded.",
+            at: new Date(),
+          },
+        ],
     narration: narration || "",
     status: "POSTED",
   });

@@ -25,6 +25,15 @@ const parseAccountCreatedOn = (value) => {
   if (Number.isNaN(date.getTime())) return null;
   return date;
 };
+const normalizeCashInHandSource = (value) =>
+  ["INITIAL", "CARRIED", "MANUAL_EDIT"].includes(String(value || "")) ? String(value) : "INITIAL";
+const buildCashInHandHistoryRow = ({ amount, previousAmount = null, source = "INITIAL", note = "" }) => ({
+  amount: round2(amount),
+  previousAmount: previousAmount == null ? null : round2(previousAmount),
+  source: normalizeCashInHandSource(source),
+  note: String(note || "").trim(),
+  at: new Date(),
+});
 const ACCOUNT_CODE_INDEX_FILTER = { code: { $exists: true, $type: "string" } };
 let accountCodeIndexPromise = null;
 const ensureAccountCodeIndex = async () => {
@@ -55,6 +64,83 @@ const ensureAccountCodeIndex = async () => {
   }
   await accountCodeIndexPromise;
 };
+
+async function ensureCashInHandAccount() {
+  await ensureAccountCodeIndex();
+  const existing = await Account.findOne({
+    isActive: true,
+    $or: [
+      { name: /^Cash in Hand$/i },
+      { name: /^Cash$/i, subType: "CASH" },
+      { subType: "CASH", type: "ASSET" },
+    ],
+  }).lean();
+  if (existing?._id) return existing;
+  return await Account.create({
+    name: "Cash in Hand",
+    type: "ASSET",
+    subType: "CASH",
+    parentAccountId: null,
+    isControl: false,
+    isActive: true,
+    journalSide: "BOTH",
+    tags: ["daybook"],
+  });
+}
+
+async function buildDaybookLines(payload = {}) {
+  const accountId = String(payload.accountId || "").trim();
+  const narration = String(payload.narration || payload.description || "").trim();
+  const amount = round2(payload.amount);
+  const side = String(payload.side || "").trim().toUpperCase();
+  const cashInHandRaw = String(payload.cashInHand ?? "").trim();
+  const cashInHand = round2(payload.cashInHand);
+
+  if (!cashInHandRaw || !Number.isFinite(cashInHand) || cashInHand < 0) {
+    const err = new Error("Cash in hand is required.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!accountId) {
+    const err = new Error("Account name is required.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const err = new Error("Amount is required.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!["DEBIT", "CREDIT"].includes(side)) {
+    const err = new Error("Select debit or credit.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!narration) {
+    const err = new Error("Narration is required.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const cashAccount = await ensureCashInHandAccount();
+  if (String(cashAccount._id) === accountId) {
+    const err = new Error("Select an account other than Cash in Hand.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const remarks = narration;
+  if (side === "DEBIT") {
+    return [
+      { accountId, debit: amount, credit: 0, remarks },
+      { accountId: cashAccount._id, debit: 0, credit: amount, remarks },
+    ];
+  }
+  return [
+    { accountId: cashAccount._id, debit: amount, credit: 0, remarks },
+    { accountId, debit: 0, credit: amount, remarks },
+  ];
+}
 
 async function ensureActiveAccountsForLines(lines, errorPrefix = "Invalid account selection.") {
   const ids = [...new Set((lines || []).map((l) => String(l?.accountId || "")).filter(Boolean))];
@@ -1064,6 +1150,23 @@ function summarizeEntryAmount(lines) {
   return { totalDebit, totalCredit, amount: round2(Math.max(totalDebit, totalCredit)) };
 }
 
+function isCashAccount(account = {}) {
+  return (
+    String(account?.subType || "").toUpperCase() === "CASH" ||
+    /^\s*cash(\s+in\s+hand)?\s*$/i.test(String(account?.name || ""))
+  );
+}
+
+function getCashEffectForLines(lines = [], accountMap = new Map()) {
+  return round2(
+    (lines || []).reduce((sum, line) => {
+      const account = accountMap.get(String(line.accountId));
+      if (!isCashAccount(account)) return sum;
+      return sum + toNum(line.debit) - toNum(line.credit);
+    }, 0)
+  );
+}
+
 async function loadEntryWithLines(entry) {
   if (!entry) return null;
   const lines = await JournalLine.find({ journalEntryId: entry._id }).lean();
@@ -1072,10 +1175,38 @@ async function loadEntryWithLines(entry) {
     ...l,
     accountCode: accountMap.get(String(l.accountId))?.code || "",
     accountName: accountMap.get(String(l.accountId))?.name || "",
+    accountType: accountMap.get(String(l.accountId))?.type || "",
+    accountSubType: accountMap.get(String(l.accountId))?.subType || "",
   }));
   const sums = summarizeEntryAmount(withNames);
   return { ...(entry.toObject?.() ? entry.toObject() : entry), lines: withNames, ...sums };
 }
+
+exports.getLatestCashInHand = async (_req, res) => {
+  try {
+    const entry = await JournalEntry.findOne({ status: "POSTED" }).sort({ date: -1, createdAt: -1 }).lean();
+    if (!entry) {
+      return res.json({ success: true, data: { hasEntry: false, cashInHand: 0, cashAfterEntry: 0 } });
+    }
+    const lines = await JournalLine.find({ journalEntryId: entry._id }).lean();
+    const accountMap = await getAccountMapForLines(lines);
+    const cashEffect = getCashEffectForLines(lines, accountMap);
+    const cashAfterEntry = round2(toNum(entry.cashInHand) + cashEffect);
+    res.json({
+      success: true,
+      data: {
+        hasEntry: true,
+        journalEntryId: entry._id,
+        voucherNo: entry.voucherNo,
+        cashInHand: round2(entry.cashInHand),
+        cashEffect,
+        cashAfterEntry,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load cash in hand." });
+  }
+};
 
 exports.getVouchers = async (req, res) => {
   try {
@@ -1123,10 +1254,22 @@ exports.getVouchers = async (req, res) => {
       ? entries.filter((e) => bucket.has(String(e._id)))
       : entries;
 
-    const data = filteredEntries.map((e) => {
+    const allLinesForCash = await JournalLine.find({ journalEntryId: { $in: filteredEntries.map((e) => e._id) } }).lean();
+    const cashAccountMap = await getAccountMapForLines(allLinesForCash);
+    const cashBucket = new Map();
+    allLinesForCash.forEach((line) => {
+      const key = String(line.journalEntryId);
+      const prev = cashBucket.get(key) || [];
+      prev.push(line);
+      cashBucket.set(key, prev);
+    });
+
+    const data = filteredEntries.map((e, idx) => {
       const t = bucket.get(String(e._id)) || { debit: 0, credit: 0 };
+      const cashEffect = getCashEffectForLines(cashBucket.get(String(e._id)) || [], cashAccountMap);
       return {
         _id: e._id,
+        entryNo: idx + 1,
         voucherNo: e.voucherNo,
         date: e.date,
         voucherType: e.voucherType,
@@ -1134,6 +1277,12 @@ exports.getVouchers = async (req, res) => {
         companyId: e.companyId || "",
         companyName: e.companyName || "",
         referenceNo: e.referenceNo || "",
+        cashInHand: round2(e.cashInHand),
+        cashEffect,
+        cashAfterEntry: round2(toNum(e.cashInHand) + cashEffect),
+        cashInHandSource: e.cashInHandSource || "INITIAL",
+        cashInHandEdited: Boolean(e.cashInHandEdited),
+        cashInHandHistory: Array.isArray(e.cashInHandHistory) ? e.cashInHandHistory : [],
         description: e.description || e.narration || "",
         status: e.status || "POSTED",
         amount: round2(Math.max(t.debit, t.credit)),
@@ -1172,7 +1321,11 @@ exports.createVoucher = async (req, res) => {
       for (let i = 0; i < body.entries.length; i += 1) {
         // eslint-disable-next-line no-await-in-loop
         const eBody = body.entries[i] || {};
-        const lines = Array.isArray(eBody.lines) ? eBody.lines : [];
+        const lines = eBody.daybookEntry
+          ? await buildDaybookLines(eBody)
+          : Array.isArray(eBody.lines)
+            ? eBody.lines
+            : [];
         const hasLineInput = (lines || []).some((l) => l?.accountId && (toNum(l?.debit) > 0 || toNum(l?.credit) > 0));
         if (!hasLineInput) continue;
         // eslint-disable-next-line no-await-in-loop
@@ -1180,7 +1333,7 @@ exports.createVoucher = async (req, res) => {
 
         const companyId = String(eBody.companyId || "").trim();
         let companyName = String(eBody.companyName || "").trim();
-        if (!companyId && !companyName) {
+        if (!eBody.daybookEntry && !companyId && !companyName) {
           return res.status(400).json({ success: false, message: `Company is required (entry #${i + 1}).` });
         }
         if (!companyName && companyId) {
@@ -1195,6 +1348,8 @@ exports.createVoucher = async (req, res) => {
         }
         const partyName = String(eBody.customerName || "").trim();
         const itemName = String(eBody.productName || "").trim();
+        const cashInHandSource = normalizeCashInHandSource(eBody.cashInHandSource);
+        const cashInHandEdited = Boolean(eBody.cashInHandEdited || cashInHandSource === "MANUAL_EDIT");
         const normLines = (lines || []).map((l) => ({
           ...l,
           partyName: String(l.partyName || partyName || "").trim(),
@@ -1212,6 +1367,16 @@ exports.createVoucher = async (req, res) => {
           customerName: String(eBody.customerName || "").trim(),
           productTypeId: String(eBody.productTypeId || "").trim(),
           productName: String(eBody.productName || "").trim(),
+          cashInHand: eBody.cashInHand,
+          cashInHandSource,
+          cashInHandEdited,
+          cashInHandHistory: [
+            buildCashInHandHistoryRow({
+              amount: eBody.cashInHand,
+              source: cashInHandSource,
+              note: cashInHandEdited ? "Cash in hand entered with pencil edit." : "Cash in hand carried from previous entry.",
+            }),
+          ],
           narration,
           lines: normLines,
         });
@@ -1238,11 +1403,11 @@ exports.createVoucher = async (req, res) => {
     }
 
     // Single-entry (legacy) mode
-    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const lines = body.daybookEntry ? await buildDaybookLines(body) : Array.isArray(body.lines) ? body.lines : [];
     await ensureActiveAccountsForLines(lines, "Inactive/invalid account selected.");
     const companyId = String(body.companyId || "").trim();
     let companyName = String(body.companyName || "").trim();
-    if (!companyId && !companyName) {
+    if (!body.daybookEntry && !companyId && !companyName) {
       return res.status(400).json({ success: false, message: "Company is required." });
     }
     if (!companyName && companyId) {
@@ -1253,6 +1418,8 @@ exports.createVoucher = async (req, res) => {
     if (!narration) {
       return res.status(400).json({ success: false, message: "Narration is required." });
     }
+    const cashInHandSource = normalizeCashInHandSource(body.cashInHandSource);
+    const cashInHandEdited = Boolean(body.cashInHandEdited || cashInHandSource === "MANUAL_EDIT");
 
     const entry = await postJournalEntry({
       date: body.date || new Date(),
@@ -1263,6 +1430,16 @@ exports.createVoucher = async (req, res) => {
       customerName: String(body.customerName || "").trim(),
       productTypeId: String(body.productTypeId || "").trim(),
       productName: String(body.productName || "").trim(),
+      cashInHand: body.cashInHand,
+      cashInHandSource,
+      cashInHandEdited,
+      cashInHandHistory: [
+        buildCashInHandHistoryRow({
+          amount: body.cashInHand,
+          source: cashInHandSource,
+          note: cashInHandEdited ? "Cash in hand entered with pencil edit." : "Cash in hand recorded.",
+        }),
+      ],
       narration,
       lines,
     });
@@ -1288,7 +1465,7 @@ exports.updateVoucher = async (req, res) => {
     const body = req.body || {};
     const companyId = String(body.companyId || entry.companyId || "").trim();
     let companyName = String(body.companyName || entry.companyName || "").trim();
-    if (!companyId && !companyName) {
+    if (!body.daybookEntry && !companyId && !companyName) {
       return res.status(400).json({ success: false, message: "Company is required." });
     }
     if (!companyName && companyId) {
@@ -1296,7 +1473,7 @@ exports.updateVoucher = async (req, res) => {
       companyName = match?.name || companyId;
     }
 
-    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const lines = body.daybookEntry ? await buildDaybookLines(body) : Array.isArray(body.lines) ? body.lines : [];
     // Validate balance before writing to DB.
     const norm = (lines || [])
       .map((l) => ({
@@ -1319,6 +1496,11 @@ exports.updateVoucher = async (req, res) => {
     if (!narration) {
       return res.status(400).json({ success: false, message: "Narration is required." });
     }
+    const previousCashInHand = round2(entry.cashInHand);
+    const nextCashInHand = round2(body.cashInHand ?? entry.cashInHand ?? 0);
+    const cashInHandSource = normalizeCashInHandSource(body.cashInHandSource || entry.cashInHandSource);
+    const cashChanged = previousCashInHand !== nextCashInHand;
+    const cashEdited = Boolean(body.cashInHandEdited || entry.cashInHandEdited || cashChanged || cashInHandSource === "MANUAL_EDIT");
 
     entry.date = body.date ? new Date(body.date) : entry.date;
     entry.voucherType = body.voucherType || entry.voucherType;
@@ -1328,6 +1510,20 @@ exports.updateVoucher = async (req, res) => {
     entry.customerName = String(body.customerName ?? entry.customerName ?? "").trim();
     entry.productTypeId = String(body.productTypeId ?? entry.productTypeId ?? "").trim();
     entry.productName = String(body.productName ?? entry.productName ?? "").trim();
+    entry.cashInHand = nextCashInHand;
+    entry.cashInHandSource = cashEdited ? "MANUAL_EDIT" : cashInHandSource;
+    entry.cashInHandEdited = cashEdited;
+    if (!Array.isArray(entry.cashInHandHistory)) entry.cashInHandHistory = [];
+    if (cashChanged || !entry.cashInHandHistory.length) {
+      entry.cashInHandHistory.push(
+        buildCashInHandHistoryRow({
+          amount: nextCashInHand,
+          previousAmount: cashChanged ? previousCashInHand : null,
+          source: cashEdited ? "MANUAL_EDIT" : cashInHandSource,
+          note: cashChanged ? "Cash in hand edited from locked field." : "Cash in hand recorded during update.",
+        })
+      );
+    }
     entry.referenceNo = entry.referenceNo || "";
     entry.narration = narration;
     await entry.save();
@@ -1357,23 +1553,16 @@ exports.updateVoucher = async (req, res) => {
 
 exports.deleteVoucher = async (req, res) => {
   try {
-    const { id } = req.params;
-    const entry = await JournalEntry.findById(id);
-    if (!entry) return res.status(404).json({ success: false, message: "Voucher not found." });
-    if (entry.status === "REVERSED") {
-      return res.status(400).json({ success: false, message: "Reversed vouchers cannot be deleted." });
-    }
-    await JournalLine.deleteMany({ journalEntryId: entry._id });
-    await JournalEntry.deleteOne({ _id: entry._id });
-    res.json({ success: true, message: "Voucher deleted." });
+    res.status(403).json({ success: false, message: "Entries cannot be deleted individually." });
   } catch (err) {
-    res.status(400).json({ success: false, message: err.message || "Unable to delete voucher." });
+    res.status(400).json({ success: false, message: err.message || "Unable to delete entry." });
   }
 };
 
   exports.getJournalEntries = async (req, res) => {
     try {
       const { start, end } = parseRange(req);
+      const accountIds = parseListParam(req.query.accountId || req.query.accountIds);
       const companyId = String(req.query.companyId || "").trim();
       const voucherType = parseListParam(req.query.voucherType || req.query.voucherTypes);
       const companyName = String(req.query.companyName || "").trim();
@@ -1432,6 +1621,7 @@ exports.deleteVoucher = async (req, res) => {
       const lineFilter = {
         ...(partyIds.length ? { partyId: { $in: partyIds } } : {}),
       };
+      if (accountIds.length) lineFilter.accountId = { $in: accountIds };
       const lines = await getLinesForEntries(entries.map((e) => e._id), lineFilter);
     const accountMap = await getAccountMapForLines(lines);
 
@@ -1446,7 +1636,7 @@ exports.deleteVoucher = async (req, res) => {
     const lineMatchesItem = (entryId) =>
       itemNameRegex ? lines.some((l) => String(l.journalEntryId) === String(entryId) && itemNameRegex.test(String(l.itemName || ""))) : false;
 
-      const hasLineFilters = partyIds.length || partyNameRegex || itemIds.length || itemNameRegex;
+      const hasLineFilters = accountIds.length || partyIds.length || partyNameRegex || itemIds.length || itemNameRegex;
       const filteredEntries = hasLineFilters
         ? entries.filter(
             (e) =>
@@ -1463,14 +1653,21 @@ exports.deleteVoucher = async (req, res) => {
       const data = filteredEntries
         .filter((e) => (companyRegex ? companyRegex.test(e.companyName || "") || companyRegex.test(String(e.companyId || "")) : true))
         .filter((e) => (voucherRegex ? voucherRegex.test(e.voucherNo || "") : true))
-        .map((e) => ({
+        .map((e, idx) => ({
           ...e,
+          entryNo: idx + 1,
+          cashInHand: round2(e.cashInHand),
+          cashInHandSource: e.cashInHandSource || "INITIAL",
+          cashInHandEdited: Boolean(e.cashInHandEdited),
+          cashInHandHistory: Array.isArray(e.cashInHandHistory) ? e.cashInHandHistory : [],
         lines: lines
           .filter((l) => String(l.journalEntryId) === String(e._id))
           .map((l) => ({
             ...l,
             accountCode: accountMap.get(String(l.accountId))?.code || "",
             accountName: accountMap.get(String(l.accountId))?.name || "",
+            accountType: accountMap.get(String(l.accountId))?.type || "",
+            accountSubType: accountMap.get(String(l.accountId))?.subType || "",
           })),
         }));
 

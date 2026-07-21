@@ -15,6 +15,21 @@ const journalEntrySchema = new mongoose.Schema(
     customerName: { type: String, default: "", trim: true },
     productTypeId: { type: String, default: "", trim: true },
     productName: { type: String, default: "", trim: true },
+    cashInHand: { type: Number, default: 0 },
+    cashInHandSource: { type: String, enum: ["INITIAL", "CARRIED", "MANUAL_EDIT"], default: "INITIAL" },
+    cashInHandEdited: { type: Boolean, default: false },
+    cashInHandHistory: {
+      type: [
+        {
+          amount: { type: Number, default: 0 },
+          previousAmount: { type: Number, default: null },
+          source: { type: String, enum: ["INITIAL", "CARRIED", "MANUAL_EDIT"], default: "INITIAL" },
+          note: { type: String, default: "", trim: true },
+          at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     narration: { type: String, default: "", trim: true },
     status: { type: String, enum: ["POSTED", "REVERSED"], default: "POSTED" },
   },

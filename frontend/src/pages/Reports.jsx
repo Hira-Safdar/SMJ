@@ -1448,9 +1448,16 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (activeTab === "daybook") {
       return [
         { key: "date", label: "Date", render: (v) => fmtDate(v) },
-        { key: "voucherNo", label: "Voucher No" },
+        { key: "entryNo", label: "Entry No", render: (v, row) => v || row?.voucherNo || "-" },
         { key: "type", label: "Type" },
         { key: "companyName", label: "Company" },
+        { key: "cashInHand", label: "Cash in Hand", render: (v) => fmt(v) },
+        {
+          key: "cashInHandSource",
+          label: "Cash Record",
+          render: (v, row) =>
+            row?.cashInHandEdited || v === "MANUAL_EDIT" ? "Manual edit" : v === "CARRIED" ? "Carried" : "Initial",
+        },
         { key: "description", label: "Description" },
         { key: "debit", label: "Debit (PKR)", render: (v) => fmt(v) },
         { key: "credit", label: "Credit (PKR)", render: (v) => fmt(v) },
