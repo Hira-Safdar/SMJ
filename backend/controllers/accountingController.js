@@ -117,7 +117,7 @@ async function buildDaybookLines(payload = {}) {
     throw err;
   }
   if (!narration) {
-    const err = new Error("Narration is required.");
+    const err = new Error("Description is required.");
     err.statusCode = 400;
     throw err;
   }
@@ -1344,7 +1344,7 @@ exports.createVoucher = async (req, res) => {
 
         const narration = String(eBody.narration || eBody.description || "").trim();
         if (!narration) {
-          return res.status(400).json({ success: false, message: `Narration is required (entry #${i + 1}).` });
+          return res.status(400).json({ success: false, message: `Description is required (entry #${i + 1}).` });
         }
         const partyName = String(eBody.customerName || "").trim();
         const itemName = String(eBody.productName || "").trim();
@@ -1416,7 +1416,7 @@ exports.createVoucher = async (req, res) => {
     }
     const narration = String(body.narration || body.description || "").trim();
     if (!narration) {
-      return res.status(400).json({ success: false, message: "Narration is required." });
+      return res.status(400).json({ success: false, message: "Description is required." });
     }
     const cashInHandSource = normalizeCashInHandSource(body.cashInHandSource);
     const cashInHandEdited = Boolean(body.cashInHandEdited || cashInHandSource === "MANUAL_EDIT");
@@ -1494,7 +1494,7 @@ exports.updateVoucher = async (req, res) => {
 
     const narration = String(body.narration ?? body.description ?? entry.narration ?? entry.description ?? "").trim();
     if (!narration) {
-      return res.status(400).json({ success: false, message: "Narration is required." });
+      return res.status(400).json({ success: false, message: "Description is required." });
     }
     const previousCashInHand = round2(entry.cashInHand);
     const nextCashInHand = round2(body.cashInHand ?? entry.cashInHand ?? 0);

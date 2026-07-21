@@ -332,7 +332,6 @@ export default function AccountingFinance() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("coa");
   const [loading, setLoading] = useState(false);
-  const editDeepLinkRef = useRef("");
 
   const [accounts, setAccounts] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -503,97 +502,12 @@ export default function AccountingFinance() {
     const edit = String(searchParams.get("edit") || "").trim();
     const id = String(searchParams.get("id") || "").trim();
     if (!edit || !id) return;
-    const key = `${edit}:${id}`;
-    if (editDeepLinkRef.current === key) return;
-    editDeepLinkRef.current = key;
-
-    (async () => {
-      try {
-        if (edit === "journal") setActiveTab("journal-report");
-        if (edit === "ledger") setActiveTab("ledger");
-        if (edit === "trial") setActiveTab("trial");
-
-        const reportKey = edit === "journal" ? "journal" : edit === "ledger" ? "ledger" : edit === "trial" ? "trial" : "";
-        if (!reportKey) return;
-        const res = await api.get("/accounting/generated-journals", { params: { reportKey } });
-        const list = res.data?.data || [];
-        const doc = list.find((x) => String(x._id || x.id) === id);
-        if (!doc) {
-          toast.error("Generated report not found.");
-          return;
-        }
-
-        if (edit === "trial") {
-          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
-          if (custom.length) {
-            openTrialEditor({ rows: custom, sourceId: id });
-            return;
-          }
-          const { rows, totals } = await fetchTrialByFilters({ startDate: doc.startDate || "", endDate: doc.endDate || "" });
-          openTrialEditor({ rows: buildTrialLayoutRows({ rows, totals }), sourceId: id });
-          return;
-        }
-
-        if (edit === "ledger") {
-          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
-          if (custom.length) {
-            openLedgerEditor({ rows: custom, sourceId: id });
-            return;
-          }
-          const data = await fetchLedgerByFilters({
-            startDate: doc.startDate || "",
-            endDate: doc.endDate || "",
-            companyId: doc.companyId || "",
-            companyName: doc.companyName || "",
-            accountId: doc.accountId || "",
-            partyName: doc.partyName || "",
-          });
-          openLedgerEditor({ rows: buildLedgerPreviewRows(data), sourceId: id });
-          return;
-        }
-
-        if (edit === "journal") {
-          const custom = Array.isArray(doc.customLayout) ? doc.customLayout : [];
-          if (custom.length) {
-            openJournalEditor({ rows: custom, sourceId: id });
-            return;
-          }
-          const filterPayload = {
-            startDate: doc.startDate || "",
-            endDate: doc.endDate || "",
-            companyName: doc.companyName || "",
-            partyName: doc.partyName || "",
-            itemId: doc.itemId || "",
-            itemName: doc.itemName || "",
-            voucherType: doc.voucherType || "",
-          };
-          const data = await fetchGeneratedJournals({
-            startDate: filterPayload.startDate || undefined,
-            endDate: filterPayload.endDate || undefined,
-            companyName: filterPayload.companyName || undefined,
-            partyName: filterPayload.partyName || undefined,
-            itemId: filterPayload.itemId || undefined,
-            itemName: filterPayload.itemName || undefined,
-            voucherType: filterPayload.voucherType || undefined,
-          });
-          const filtered = filterJournalsBy(data || [], filterPayload);
-          if (!filtered.length) {
-            toast.error("No journals found for the selected filters.");
-            return;
-          }
-          openJournalEditor({ rows: buildGroupedJournalRows(filtered), sourceId: id });
-        }
-      } catch (err) {
-        toast.error(err?.response?.data?.message || "Failed to open editor.");
-      } finally {
-        setSearchParams((prev) => {
-          const p = new URLSearchParams(prev);
-          p.delete("edit");
-          p.delete("id");
-          return p;
-        });
-      }
-    })();
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.delete("edit");
+      p.delete("id");
+      return p;
+    });
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
@@ -1008,7 +922,7 @@ export default function AccountingFinance() {
       (res.data?.data || []).map((row) => {
         const cashEffect = n0(row?.cashEffect);
         const side = cashEffect > 0 ? "Credit" : cashEffect < 0 ? "Debit" : "";
-        return { ...row, daybookSide: side };
+        return { ...row, description: row?.description || row?.narration || "", daybookSide: side };
       })
     );
   };
@@ -1383,7 +1297,7 @@ export default function AccountingFinance() {
       if (!String(e.accountId || "").trim()) fields.accountId = "Account name is required.";
       if (n0(e.amount) <= 0) fields.amount = "Amount is required.";
       if (!["DEBIT", "CREDIT"].includes(String(e.side || "").toUpperCase())) fields.side = "Select debit or credit.";
-      if (!String(e.narration || "").trim()) fields.narration = "Narration is required.";
+      if (!String(e.narration || "").trim()) fields.narration = "Description is required.";
 
       const hasErr = Object.keys(fields).length > 0 || lines.size > 0;
       if (hasErr) ok = false;
@@ -1497,6 +1411,7 @@ export default function AccountingFinance() {
           customerName: "",
           productTypeId: "",
           productName: "",
+          description: String(e.narration || "").trim(),
           narration: e.narration,
           lines: [],
         }));
@@ -1741,12 +1656,14 @@ export default function AccountingFinance() {
         });
       });
     });
-    const lastWithCash = [...sorted].reverse().find((j) => j?.cashAfterEntry != null || j?.cashInHand != null);
-    if (lastWithCash) {
+    const debitTotal = round2(rows.reduce((sum, r) => sum + (r.side === "debit" ? n0(r.amount) : 0), 0));
+    const creditTotal = round2(rows.reduce((sum, r) => sum + (r.side === "credit" ? n0(r.amount) : 0), 0));
+    if (rows.length) {
       rows.push({
-        isCashSummaryRow: true,
-        account: "Cash in Hand",
-        amount: round2(n0(lastWithCash.cashAfterEntry ?? lastWithCash.cashInHand)),
+        isTotalRow: true,
+        account: "Total",
+        debitTotal,
+        creditTotal,
       });
     }
     return rows;
@@ -1835,18 +1752,20 @@ export default function AccountingFinance() {
         creditLines,
       });
     });
-    const lastWithCash = [...(entries || [])]
-      .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime())
-      .reverse()
-      .find((entry) => entry?.cashAfterEntry != null || entry?.cashInHand != null);
-    if (lastWithCash) {
+    const debitTotal = round2(rows.reduce((sum, row) => {
+      return sum + (row.debitLines || []).reduce((lineSum, value) => lineSum + n0(String(value || "").replace(/[^\d.-]/g, "")), 0);
+    }, 0));
+    const creditTotal = round2(rows.reduce((sum, row) => {
+      return sum + (row.creditLines || []).reduce((lineSum, value) => lineSum + n0(String(value || "").replace(/[^\d.-]/g, "")), 0);
+    }, 0));
+    if (rows.length) {
       rows.push({
         date: "",
         lf: "",
-        particulars: [{ text: "Cash in Hand", style: "normal", indent: 0 }],
-        debitLines: [`Rs. ${String(round2(n0(lastWithCash.cashAfterEntry ?? lastWithCash.cashInHand)))}`],
-        creditLines: [""],
-        isCashSummaryRow: true,
+        particulars: [{ text: "Total", style: "normal", indent: 0 }],
+        debitLines: [`Rs. ${String(debitTotal)}`],
+        creditLines: [`Rs. ${String(creditTotal)}`],
+        isTotalRow: true,
       });
     }
     return rows;
@@ -2002,30 +1921,86 @@ export default function AccountingFinance() {
   };
 
   const buildLedgerPreviewRows = (rows = []) => {
-    const debits = (rows || []).filter((r) => round2(n0(r.debit)) > 0);
-    const credits = (rows || []).filter((r) => round2(n0(r.credit)) > 0);
-    const max = Math.max(debits.length, credits.length, 1);
-    return Array.from({ length: max }).map((_, i) => {
-      const d = debits[i];
-      const c = credits[i];
+    let running = 0;
+    return [...(rows || [])]
+      .filter((r) => round2(n0(r.debit)) > 0 || round2(n0(r.credit)) > 0)
+      .sort((a, b) => new Date(a?.date || 0).getTime() - new Date(b?.date || 0).getTime())
+      .map((r) => {
+        const debit = round2(n0(r.debit));
+        const credit = round2(n0(r.credit));
+        const side = debit > 0 ? "debit" : "credit";
+        const amount = side === "debit" ? debit : credit;
+        const ref = ensureAccountSuffix(r?.references || r?.account || r?.description || "");
+        running = round2(running + debit - credit);
       return {
-        drDate: d?.date ? `${formatYear(d.date)}\n${formatMonthDay(d.date)}` : "",
-        drRef: (() => {
-          const text = ensureAccountSuffix(d?.references || d?.account || d?.description || "");
-          return text ? `To ${text}` : "";
-        })(),
-        drJr: shortVoucherSeq(d?.voucherNo || d?.journalEntryId || ""),
-        drAmount: d ? `Rs. ${String(round2(n0(d.debit)))}` : "",
-        drEntryId: d?.journalEntryId || "",
-        crDate: c?.date ? `${formatYear(c.date)}\n${formatMonthDay(c.date)}` : "",
-        crRef: (() => {
-          const text = ensureAccountSuffix(c?.references || c?.account || c?.description || "");
-          return text ? `By ${text}` : "";
-        })(),
-        crJr: shortVoucherSeq(c?.voucherNo || c?.journalEntryId || ""),
-        crAmount: c ? `Rs. ${String(round2(n0(c.credit)))}` : "",
-        crEntryId: c?.journalEntryId || "",
+        date: r?.date ? `${formatYear(r.date)}\n${formatMonthDay(r.date)}` : "",
+        details: ref ? `${side === "debit" ? "To" : "By"} ${ref}` : "",
+        page: shortVoucherSeq(r?.voucherNo || r?.journalEntryId || ""),
+        debitAmount: side === "debit" ? `Rs. ${String(amount.toLocaleString())}` : "",
+        creditAmount: side === "credit" ? `Rs. ${String(amount.toLocaleString())}` : "",
+        balanceSide: running >= 0 ? "Dr" : "Cr",
+        balanceAmount: `Rs. ${String(Math.abs(running).toLocaleString())}`,
+        entryId: r?.journalEntryId || "",
+        side,
       };
+    });
+  };
+
+  const normalizeLedgerBookRows = (rows = []) => {
+    let running = 0;
+    return (rows || []).flatMap((r) => {
+      if (
+        Object.prototype.hasOwnProperty.call(r || {}, "details") ||
+        Object.prototype.hasOwnProperty.call(r || {}, "debitAmount") ||
+        Object.prototype.hasOwnProperty.call(r || {}, "creditAmount")
+      ) {
+        return [
+          {
+            date: String(r.date || ""),
+            details: String(r.details || ""),
+            page: String(r.page || ""),
+            debitAmount: String(r.debitAmount || ""),
+            creditAmount: String(r.creditAmount || ""),
+            balanceSide: String(r.balanceSide || ""),
+            balanceAmount: String(r.balanceAmount || ""),
+            entryId: String(r.entryId || ""),
+            side: String(r.side || ""),
+          },
+        ];
+      }
+
+      const out = [];
+      const debit = parseRs(r?.drAmount);
+      if (debit > 0 || r?.drRef || r?.drDate) {
+        running = round2(running + debit);
+        out.push({
+          date: String(r?.drDate || ""),
+          details: String(r?.drRef || ""),
+          page: String(r?.drJr || ""),
+          debitAmount: debit ? `Rs. ${debit.toLocaleString()}` : "",
+          creditAmount: "",
+          balanceSide: running >= 0 ? "Dr" : "Cr",
+          balanceAmount: running ? `Rs. ${Math.abs(running).toLocaleString()}` : "",
+          entryId: String(r?.drEntryId || ""),
+          side: "debit",
+        });
+      }
+      const credit = parseRs(r?.crAmount);
+      if (credit > 0 || r?.crRef || r?.crDate) {
+        running = round2(running - credit);
+        out.push({
+          date: String(r?.crDate || ""),
+          details: String(r?.crRef || ""),
+          page: String(r?.crJr || ""),
+          debitAmount: "",
+          creditAmount: credit ? `Rs. ${credit.toLocaleString()}` : "",
+          balanceSide: running >= 0 ? "Dr" : "Cr",
+          balanceAmount: running ? `Rs. ${Math.abs(running).toLocaleString()}` : "",
+          entryId: String(r?.crEntryId || ""),
+          side: "credit",
+        });
+      }
+      return out;
     });
   };
 
@@ -3543,7 +3518,7 @@ export default function AccountingFinance() {
     setLedgerGenerateEnd(j.endDate || "");
     const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
     if (custom.length) {
-      setLedgerPreviewRows(custom);
+      setLedgerPreviewRows(normalizeLedgerBookRows(custom));
     } else {
       const data = await fetchLedgerByFilters({
         startDate: j.startDate || "",
@@ -3582,9 +3557,10 @@ export default function AccountingFinance() {
     try {
       setLoading(true);
       const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-      const rows = custom.length
-        ? custom
-        : buildLedgerPreviewRows(
+      const rows = normalizeLedgerBookRows(
+        custom.length
+          ? custom
+          : buildLedgerPreviewRows(
             await fetchLedgerByFilters({
               startDate: j.startDate || "",
               endDate: j.endDate || "",
@@ -3593,7 +3569,8 @@ export default function AccountingFinance() {
               accountId: j.accountId || "",
               partyName: j.partyName || "",
             })
-          );
+          )
+      );
       if (!rows.length) {
         toast.error("No ledger rows found for the selected filters.");
         return;
@@ -3611,26 +3588,30 @@ export default function AccountingFinance() {
         doc.text(entityLine, doc.internal.pageSize.getWidth() / 2, headerY, { align: "center" });
       }
       const startY = headerY + 16;
-      doc.setFontSize(10);
-      doc.text("Dr.", 40, startY - 6);
-      doc.text("Cr.", doc.internal.pageSize.getWidth() - 40, startY - 6, { align: "right" });
       autoTable(doc, {
-        head: [["Date", "References", "J.R.", "Amount Rs.", "Date", "References", "J.R.", "Amount Rs."]],
+        head: [["Date", "Details", "Page", "Debit / Naam", "Credit / Jama", "Dr / Cr", "Balance"]],
         body: rows.map((r) => [
-          r.drDate,
-          r.drRef,
-          r.drJr,
-          r.drAmount,
-          r.crDate,
-          r.crRef,
-          r.crJr,
-          r.crAmount,
+          r.date,
+          r.details,
+          r.page,
+          r.debitAmount,
+          r.creditAmount,
+          r.balanceSide,
+          r.balanceAmount,
         ]),
         startY,
-        styles: { font: "times", fontSize: 9, lineColor: [0, 0, 0], lineWidth: 0.2 },
-        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0] },
+        styles: { font: "times", fontSize: 9, lineColor: [210, 120, 135], lineWidth: 0.2 },
+        headStyles: { fillColor: [255, 241, 242], textColor: [20, 20, 20], fontStyle: "bold" },
         theme: "grid",
-        columnStyles: { 3: { halign: "right" }, 7: { halign: "right" } },
+        columnStyles: {
+          0: { cellWidth: 70, halign: "center" },
+          1: { cellWidth: 250 },
+          2: { cellWidth: 45, halign: "center" },
+          3: { cellWidth: 95, halign: "right" },
+          4: { cellWidth: 95, halign: "right" },
+          5: { cellWidth: 55, halign: "center" },
+          6: { cellWidth: 100, halign: "right" },
+        },
       });
       doc.save(`${String(j.name || "ledger").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
     } catch (err) {
@@ -3645,9 +3626,10 @@ export default function AccountingFinance() {
     try {
       setLoading(true);
       const custom = Array.isArray(j.customLayout) ? j.customLayout : [];
-      const rows = custom.length
-        ? custom
-        : buildLedgerPreviewRows(
+      const rows = normalizeLedgerBookRows(
+        custom.length
+          ? custom
+          : buildLedgerPreviewRows(
             await fetchLedgerByFilters({
               startDate: j.startDate || "",
               endDate: j.endDate || "",
@@ -3656,7 +3638,8 @@ export default function AccountingFinance() {
               accountId: j.accountId || "",
               partyName: j.partyName || "",
             })
-          );
+          )
+      );
       if (!rows.length) {
         toast.error("No ledger rows found for the selected filters.");
         return;
@@ -3667,33 +3650,31 @@ export default function AccountingFinance() {
         [title],
         [String(j.companyName || j.partyName || "")],
         [],
-        ["Dr Date", "Dr References", "Dr J.R.", "Dr Amount", "Cr Date", "Cr References", "Cr J.R.", "Cr Amount"],
+        ["Date", "Details", "Page", "Debit / Naam", "Credit / Jama", "Dr / Cr", "Balance"],
       ];
       const bodyRows = rows.map((r) => [
-        r.drDate,
-        r.drRef,
-        r.drJr,
-        r.drAmount,
-        r.crDate,
-        r.crRef,
-        r.crJr,
-        r.crAmount,
+        r.date,
+        r.details,
+        r.page,
+        r.debitAmount,
+        r.creditAmount,
+        r.balanceSide,
+        r.balanceAmount,
       ]);
       const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
       ws["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
       ];
       ws["!cols"] = [
         { wch: 12 },
-        { wch: 28 },
+        { wch: 44 },
         { wch: 8 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 28 },
+        { wch: 16 },
+        { wch: 16 },
         { wch: 8 },
-        { wch: 12 },
+        { wch: 16 },
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Ledger");
@@ -4895,50 +4876,6 @@ export default function AccountingFinance() {
                   )}
                 <button
                   type="button"
-                  onClick={async () => {
-                    const sourceId = String(activeGeneratedJournalId || "");
-                    const selected = sourceId
-                      ? generatedJournalList.find((x) => String(x._id || x.id) === sourceId)
-                      : null;
-                    const custom = selected && Array.isArray(selected.customLayout) ? selected.customLayout : [];
-                    if (custom.length) {
-                      openJournalEditor({ rows: custom, sourceId });
-                      return;
-                    }
-                    try {
-                      const filterPayload = {
-                        startDate: reportRangeStart || "",
-                        endDate: reportRangeEnd || "",
-                        accountId: reportFilterAccountId || "",
-                        itemId: reportFilterProductId || "",
-                        itemName: reportFilterProductLabel || "",
-                      };
-                      const data = await fetchGeneratedJournals({
-                        startDate: filterPayload.startDate || undefined,
-                        endDate: filterPayload.endDate || undefined,
-                        accountId: filterPayload.accountId || undefined,
-                        itemId: filterPayload.itemId || undefined,
-                        itemName: filterPayload.itemName || undefined,
-                      });
-                      const filtered = filterJournalsBy(data || [], filterPayload);
-                      if (!filtered.length) {
-                        toast.error("No journals found for the selected filters.");
-                        return;
-                      }
-                      const grouped = buildGroupedJournalRows(filtered);
-                      openJournalEditor({ rows: grouped, sourceId });
-                    } catch (err) {
-                      toast.error(err?.response?.data?.message || "Failed to load journal for editing.");
-                    }
-                  }}
-                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
-                  title="Edit layout"
-                  disabled={reportPreviewEntries.length === 0}
-                >
-                  <Pencil size={16} /> Edit
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedJournalName();
                   setJournalGenerateName(suggested);
@@ -4952,15 +4889,15 @@ export default function AccountingFinance() {
               </div>
             </div>
             {journalReportPreviewOpen && (
-            <div className="rounded-lg border border-rose-200 overflow-x-auto bg-[#fffdf8]">
-              <table className="min-w-[760px] w-full text-sm border border-rose-300 table-fixed">
-                <thead className="bg-[#fff7ed] text-gray-900">
+            <div className="rounded-lg border border-gray-200 overflow-x-auto bg-white">
+              <table className="min-w-[760px] w-full text-sm border border-gray-200 table-fixed">
+                <thead className="bg-emerald-50 text-emerald-900">
                   <tr>
-                    <th className="text-center font-semibold px-2 py-2 w-[92px] border border-rose-300">Date</th>
-                    <th className="text-center font-semibold px-2 py-2 border border-rose-300">Particulars / Details</th>
-                    <th className="text-center font-semibold px-2 py-2 w-[58px] border border-rose-300">Page</th>
-                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-rose-300">Debit</th>
-                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-rose-300">Credit</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[92px] border border-gray-200">Date</th>
+                    <th className="text-center font-semibold px-2 py-2 border border-gray-200">Particulars / Details</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[58px] border border-gray-200">Page</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-gray-200">Debit</th>
+                    <th className="text-center font-semibold px-2 py-2 w-[120px] border border-gray-200">Credit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4973,22 +4910,24 @@ export default function AccountingFinance() {
                   )}
                   {reportPreviewEntries.map((entry, idx) => (
                     <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
-                      {entry.isCashSummaryRow ? (
-                        <tr className="bg-[#fff7ed]">
-                          <td className="px-3 py-3 border border-rose-300"></td>
-                          <td className="px-3 py-3 border border-rose-300 font-semibold text-gray-900">Cash in Hand</td>
-                          <td className="px-3 py-3 border border-rose-300"></td>
-                          <td className="px-3 py-3 border border-rose-300 text-right font-semibold">
-                            Rs. {String(entry.amount)}
+                      {entry.isTotalRow ? (
+                        <tr className="bg-emerald-50 text-emerald-950">
+                          <td className="px-3 py-3 border border-gray-200"></td>
+                          <td className="px-3 py-3 border border-gray-200 font-semibold">Total</td>
+                          <td className="px-3 py-3 border border-gray-200"></td>
+                          <td className="px-3 py-3 border border-gray-200 text-right font-semibold">
+                            Rs. {String(entry.debitTotal)}
                           </td>
-                          <td className="px-3 py-3 border border-rose-300"></td>
+                          <td className="px-3 py-3 border border-gray-200 text-right font-semibold">
+                            Rs. {String(entry.creditTotal)}
+                          </td>
                         </tr>
                       ) : entry.isNarrationRow ? (
                         <tr>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             {entry.lf ? (
                               <button
@@ -5004,34 +4943,34 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle italic text-gray-600 border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             ({withBeing(entry.narration)})
                           </td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                         ></td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                         ></td>
                         <td
-                          className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                            entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                          } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                          className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                            entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                          } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                         ></td>
                         </tr>
                       ) : (
                         <tr>
                           <td
-                            className={`px-3 py-2 align-middle text-center border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-center border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             {entry.showDate && (
                               <>
@@ -5041,9 +4980,9 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             <div
                               className={`flex items-center justify-between gap-2 ${
@@ -5055,9 +4994,9 @@ export default function AccountingFinance() {
                             </div>
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             {entry.lf ? (
                               <button
@@ -5073,16 +5012,16 @@ export default function AccountingFinance() {
                             )}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle text-right border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             {entry.side === "debit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
                           <td
-                            className={`px-3 py-2 align-middle text-right border-x border-rose-300 ${
-                              entry.isFirstInGroup ? "border-t border-rose-300" : "border-t-0"
-                            } ${entry.isLastInGroup ? "border-b border-rose-300" : "border-b-0"}`}
+                            className={`px-3 py-2 align-middle text-right border-x border-gray-200 ${
+                              entry.isFirstInGroup ? "border-t border-gray-200" : "border-t-0"
+                            } ${entry.isLastInGroup ? "border-b border-gray-200" : "border-b-0"}`}
                           >
                             {entry.side === "credit" ? `Rs. ${String(entry.amount)}` : "-"}
                           </td>
@@ -5121,14 +5060,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditGeneratedTrial(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5385,15 +5316,6 @@ export default function AccountingFinance() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openLedgerEditor({ rows: ledgerPreviewRows, sourceId: activeGeneratedLedgerId || "" })}
-                  className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
-                  title="Edit layout"
-                  disabled={ledgerPreviewRows.length === 0}
-                >
-                  <Pencil size={16} /> Edit
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedLedgerName();
                     setLedgerGenerateName(suggested);
@@ -5407,58 +5329,65 @@ export default function AccountingFinance() {
               </div>
             </div>
             {ledgerPreviewOpen && (
-              <div className="rounded-xl border border-gray-200 overflow-x-auto">
-                <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-600">
-                  <span>Dr.</span>
-                  <span>Cr.</span>
+              <div className="rounded-lg border border-rose-200 bg-[#fffdf7] overflow-x-auto">
+                <div className="min-w-[1040px] border-b border-rose-200 px-4 py-3 text-center">
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>Page</span>
+                    <span>Ledger</span>
+                    <span>No.</span>
+                  </div>
+                  <div className="text-base font-semibold text-gray-950">
+                    {ledgerFilterAccountId
+                      ? accountOptions.find((a) => String(a.id) === String(ledgerFilterAccountId))?.label || "Ledger Account"
+                      : ledgerFilterCompanyName || ledgerFilterPartyName || "Ledger Account"}
+                  </div>
                 </div>
-                <table className="min-w-[980px] w-full text-sm border border-gray-200 table-fixed">
-                  <thead className="bg-gray-50 text-gray-800">
+                <table className="min-w-[1040px] w-full text-sm border border-rose-200 table-fixed">
+                  <thead className="bg-rose-50/70 text-gray-900">
                     <tr>
-                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
-                    <th className="text-left font-semibold px-2 py-2 border border-gray-200">Particular</th>
-                      <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">J.R.</th>
-                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount Rs.</th>
-                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Date</th>
-                      <th className="text-left font-semibold px-2 py-2 border border-gray-200">Particular</th>
-                      <th className="text-left font-semibold px-2 py-2 w-[50px] border border-gray-200">J.R.</th>
-                      <th className="text-left font-semibold px-2 py-2 w-[90px] border border-gray-200">Amount Rs.</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[92px] border border-rose-200">Date</th>
+                      <th className="text-center font-semibold px-2 py-2 border border-rose-200">Details</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[58px] border border-rose-200">Page</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Debit / Naam</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Credit / Jama</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[74px] border border-rose-200">Dr / Cr</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[140px] border border-rose-200">Balance</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ledgerPreviewRows.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-3 py-4 text-sm text-gray-500 text-center">
+                        <td colSpan={7} className="px-3 py-4 text-sm text-gray-500 text-center">
                           Apply filters to preview ledger.
                         </td>
                       </tr>
                     )}
                     {ledgerPreviewRows.map((r, idx) => {
-                      const highlightDebit =
+                      const highlight =
                         !!ledgerHighlightId &&
-                        String(r.drEntryId || "") === String(ledgerHighlightId) &&
-                        (!ledgerHighlightSide || ledgerHighlightSide === "debit");
-                      const highlightCredit =
-                        !!ledgerHighlightId &&
-                        String(r.crEntryId || "") === String(ledgerHighlightId) &&
-                        (!ledgerHighlightSide || ledgerHighlightSide === "credit");
-                      const debitBorder = highlightDebit ? "border border-emerald-300" : "border border-gray-200";
-                      const creditBorder = highlightCredit ? "border border-sky-300" : "border border-gray-200";
-                      const debitBg = highlightDebit ? "bg-emerald-50" : "";
-                      const creditBg = highlightCredit ? "bg-sky-50" : "";
+                        String(r.entryId || "") === String(ledgerHighlightId) &&
+                        (!ledgerHighlightSide || ledgerHighlightSide === r.side);
+                      const cellTone = highlight ? "border-emerald-300 bg-emerald-50" : "border-rose-200";
                       return (
-                        <tr key={`ledger-row-${idx}`}>
-                          <td className={`px-2 py-2 ${debitBorder} ${debitBg} whitespace-pre-line`}>{r.drDate}</td>
-                          <td className={`px-2 py-2 ${debitBorder} ${debitBg}`}>{r.drRef}</td>
-                          <td className={`px-2 py-2 ${debitBorder} ${debitBg}`}>{r.drJr}</td>
-                          <td className={`px-2 py-2 ${debitBorder} ${debitBg} text-right`}>{r.drAmount}</td>
-                          <td className={`px-2 py-2 ${creditBorder} ${creditBg} whitespace-pre-line`}>{r.crDate}</td>
-                          <td className={`px-2 py-2 ${creditBorder} ${creditBg}`}>{r.crRef}</td>
-                          <td className={`px-2 py-2 ${creditBorder} ${creditBg}`}>{r.crJr}</td>
-                          <td className={`px-2 py-2 ${creditBorder} ${creditBg} text-right`}>{r.crAmount}</td>
+                        <tr key={`ledger-row-${idx}`} className="h-10">
+                          <td className={`px-2 py-2 border ${cellTone} whitespace-pre-line text-center text-xs`}>{r.date}</td>
+                          <td className={`px-3 py-2 border ${cellTone}`}>{r.details}</td>
+                          <td className={`px-2 py-2 border ${cellTone} text-center`}>{r.page}</td>
+                          <td className={`px-2 py-2 border ${cellTone} text-right font-medium`}>{r.debitAmount}</td>
+                          <td className={`px-2 py-2 border ${cellTone} text-right font-medium`}>{r.creditAmount}</td>
+                          <td className={`px-2 py-2 border ${cellTone} text-center`}>{r.balanceSide}</td>
+                          <td className={`px-2 py-2 border ${cellTone} text-right font-semibold`}>{r.balanceAmount}</td>
                         </tr>
                       );
                     })}
+                    {ledgerPreviewRows.length > 0 &&
+                      Array.from({ length: Math.max(0, 12 - ledgerPreviewRows.length) }).map((_, idx) => (
+                        <tr key={`ledger-empty-${idx}`} className="h-10">
+                          {Array.from({ length: 7 }).map((__, cellIdx) => (
+                            <td key={cellIdx} className="border border-rose-100 px-2 py-2">&nbsp;</td>
+                          ))}
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -5490,14 +5419,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2 border border-gray-200">{j.name}</td>
                       <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditGeneratedLedger(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5620,21 +5541,6 @@ export default function AccountingFinance() {
                 <button
                   type="button"
                   onClick={() => {
-                    const base =
-                      trialLayoutRows.length > 0
-                        ? trialLayoutRows
-                        : buildTrialLayoutRows({ rows: trialRows, totals: trialTotals });
-                    openTrialEditor({ rows: base, sourceId: activeGeneratedTrialId || "" });
-                  }}
-                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 sm:w-auto"
-                  title="Edit layout"
-                  disabled={trialRows.length === 0 && trialLayoutRows.length === 0}
-                >
-                  <Pencil size={16} /> Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
                     const suggested = getSuggestedTrialName();
                     setTrialGenerateName(suggested);
                     setTrialNameTouched(false);
@@ -5753,14 +5659,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditGeneratedPl(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5872,14 +5770,6 @@ export default function AccountingFinance() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openPlEditor({ rows: plPreviewRows })}
-                  disabled={!plPreviewRows.length}
-                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 sm:w-auto"
-                >
-                  <Pencil size={16} /> Edit
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedPlName({ start: plGenerateStart });
                     setPlGenerateName(suggested);
@@ -5976,14 +5866,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditGeneratedBalance(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -6090,14 +5972,6 @@ export default function AccountingFinance() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openBalanceEditor({ rows: balancePreviewRows, sourceId: activeGeneratedBalanceId || "" })}
-                  disabled={!balancePreviewRows.length}
-                   className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 sm:w-auto"
-                >
-                  <Pencil size={16} /> Edit
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     const suggested = getSuggestedBalanceName({ start: balanceGenerateStart });
                     setBalanceGenerateName(suggested);
@@ -6193,14 +6067,6 @@ export default function AccountingFinance() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEditGeneratedJournal(j)}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -6545,7 +6411,7 @@ export default function AccountingFinance() {
 
                     <div>
                       <label className="block text-xs text-gray-600 mb-1">
-                        Narration <span className="text-red-500">*</span>
+                        Description <span className="text-red-500">*</span>
                       </label>
                       <input
                         value={e.narration || ""}
@@ -6553,7 +6419,7 @@ export default function AccountingFinance() {
                         className={`w-full px-3 py-2 rounded-lg border text-sm ${
                           submitAttempted && fieldErr.narration ? "border-red-300 bg-red-50" : "border-gray-300"
                         }`}
-                        placeholder="Narration"
+                        placeholder="Description"
                       />
                       <div className="mt-1 min-h-[14px] text-xs text-red-600">
                         {submitAttempted && fieldErr.narration ? fieldErr.narration : ""}
@@ -6637,6 +6503,7 @@ export default function AccountingFinance() {
               columns={[
                 { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
+                { key: "description", label: "Description", render: (v, row) => v || row?.narration || "-" },
                 { key: "cashInHand", label: "Cash in Hand" },
                 {
                   key: "cashInHandSource",
@@ -6666,6 +6533,7 @@ export default function AccountingFinance() {
               exportColumns={[
                 { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date" },
+                { key: "description", label: "Description" },
                 { key: "cashInHand", label: "Cash in Hand" },
                 { key: "cashInHandSource", label: "Cash Record" },
                 { key: "daybookSide", label: "Debit / Credit" },
@@ -6676,6 +6544,7 @@ export default function AccountingFinance() {
                 rows.map((r) => ({
                   ...r,
                   date: r.date ? new Date(r.date).toISOString().slice(0, 10) : "",
+                  description: r.description || r.narration || "",
                 }))
               }
             />
@@ -8077,7 +7946,19 @@ export default function AccountingFinance() {
                   )}
                   {journalPreviewEntries.map((entry, idx) => (
                     <React.Fragment key={`${entry.account || entry.narration}-${idx}`}>
-                      {entry.isNarrationRow ? (
+                      {entry.isTotalRow ? (
+                        <tr className="bg-emerald-50 text-emerald-950">
+                          <td className="px-3 py-3 border border-gray-200"></td>
+                          <td className="px-3 py-3 border border-gray-200 font-semibold">Total</td>
+                          <td className="px-3 py-3 border border-gray-200"></td>
+                          <td className="px-3 py-3 border border-gray-200 text-right font-semibold">
+                            Rs. {String(entry.debitTotal)}
+                          </td>
+                          <td className="px-3 py-3 border border-gray-200 text-right font-semibold">
+                            Rs. {String(entry.creditTotal)}
+                          </td>
+                        </tr>
+                      ) : entry.isNarrationRow ? (
                         <tr>
                           <td
                             className={`px-3 py-2 align-middle border-x border-gray-200 ${
