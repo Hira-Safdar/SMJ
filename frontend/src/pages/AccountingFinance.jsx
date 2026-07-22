@@ -3589,7 +3589,7 @@ export default function AccountingFinance() {
       }
       const startY = headerY + 16;
       autoTable(doc, {
-        head: [["Date", "Details", "Page", "Debit / Naam", "Credit / Jama", "Dr / Cr", "Balance"]],
+        head: [["Date", "Details", "Page", "Debit", "Credit", "Dr / Cr", "Balance"]],
         body: rows.map((r) => [
           r.date,
           r.details,
@@ -3650,7 +3650,7 @@ export default function AccountingFinance() {
         [title],
         [String(j.companyName || j.partyName || "")],
         [],
-        ["Date", "Details", "Page", "Debit / Naam", "Credit / Jama", "Dr / Cr", "Balance"],
+        ["Date", "Details", "Page", "Debit", "Credit", "Dr / Cr", "Balance"],
       ];
       const bodyRows = rows.map((r) => [
         r.date,
@@ -5348,8 +5348,8 @@ export default function AccountingFinance() {
                       <th className="text-center font-semibold px-2 py-2 w-[92px] border border-rose-200">Date</th>
                       <th className="text-center font-semibold px-2 py-2 border border-rose-200">Details</th>
                       <th className="text-center font-semibold px-2 py-2 w-[58px] border border-rose-200">Page</th>
-                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Debit / Naam</th>
-                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Credit / Jama</th>
+                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Debit </th>
+                      <th className="text-center font-semibold px-2 py-2 w-[130px] border border-rose-200">Credit </th>
                       <th className="text-center font-semibold px-2 py-2 w-[74px] border border-rose-200">Dr / Cr</th>
                       <th className="text-center font-semibold px-2 py-2 w-[140px] border border-rose-200">Balance</th>
                     </tr>
