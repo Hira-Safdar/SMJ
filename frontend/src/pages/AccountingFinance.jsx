@@ -313,6 +313,129 @@ function GroupedProductDropdown({
   );
 }
 
+function SearchableAccountDropdown({
+  valueId,
+  valueLabel,
+  options = [],
+  onSelect,
+  disabled = false,
+  placeholder = "Select account",
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!ref.current) return;
+      if (ref.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    setQ(valueId ? String(valueLabel || "") : "");
+  }, [open, valueId, valueLabel]);
+
+  const filtered = useMemo(() => {
+    const s = String(q || "").trim().toLowerCase();
+    if (!s) return options;
+    return (options || []).filter((a) => {
+      const name = String(a?.name || a?.label || "").toLowerCase();
+      return name.includes(s);
+    });
+  }, [q, options]);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onMouseDown={() => {
+          if (disabled) return;
+          setOpen(true);
+          queueMicrotask(() => inputRef.current?.focus());
+        }}
+        className="w-full relative"
+      >
+        <input
+          ref={inputRef}
+          disabled={disabled}
+          value={q}
+          onFocus={(e) => {
+            if (disabled) return;
+            setOpen(true);
+            e.target.select?.();
+          }}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          placeholder={placeholder}
+          className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm focus:outline-none ${
+            disabled ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
+          } placeholder:text-gray-500`}
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-700">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            <path
+              fillRule="evenodd"
+              d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.24 4.5a.75.75 0 0 1-1.08 0l-4.24-4.5a.75.75 0 0 1 .02-1.06Z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </span>
+      </div>
+
+      {open && (
+        <div className="absolute z-40 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+          <div className="max-h-64 overflow-auto">
+            {!!valueId && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect?.({ id: "", label: "" });
+                  setQ("");
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-900 hover:bg-blue-50"
+              >
+                Clear selection
+              </button>
+            )}
+            {(filtered || []).map((a) => {
+              const label = String(a?.label || a?.name || "").trim();
+              const selected = String(valueId) === String(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => {
+                    onSelect?.({ id: String(a.id), label });
+                    setQ(label);
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm ${
+                    selected ? "bg-blue-600 text-white hover:bg-blue-600" : "text-gray-900 hover:bg-blue-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-sm text-gray-500">No accounts found.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const isEntryActive = (e) => {
   const hasText =
     String(e?.cashInHand || "").trim() ||
@@ -475,6 +598,16 @@ export default function AccountingFinance() {
   const [journalEditDialog, setJournalEditDialog] = useState({ open: false, rows: [], sourceId: "" });
   const [printSettings, setPrintSettings] = useState({});
   const [printLogoDataUrl, setPrintLogoDataUrl] = useState("");
+  const [settings, setSettings] = useState({
+    adminPin: "0000",
+    additionalAccountingSettingsEnabled: false,
+  });
+  const [editPinDialog, setEditPinDialog] = useState({
+    open: false,
+    pin: "",
+    pinError: "",
+    onConfirm: null,
+  });
 
   const [accountDialog, setAccountDialog] = useState({
     open: false,
@@ -768,6 +901,38 @@ export default function AccountingFinance() {
       if (!merged.has(key)) merged.set(key, clean);
     });
     setGatepassCompanies(Array.from(merged.values()).sort((a, b) => a.localeCompare(b)));
+    
+    // Load settings for PIN
+    setSettings((prev) => ({
+      ...prev,
+      adminPin: settingsData.adminPin || "0000",
+      additionalAccountingSettingsEnabled: !!settingsData.additionalAccountingSettingsEnabled,
+    }));
+  };
+
+  const requestEditPin = (onConfirm) => {
+    setEditPinDialog({
+      open: true,
+      pin: "",
+      pinError: "",
+      onConfirm,
+    });
+  };
+
+  const verifyEditPin = () => {
+    const entered = editPinDialog.pin;
+    const expected = settings.adminPin || "0000";
+    if (entered === expected) {
+      setEditPinDialog({ open: false, pin: "", pinError: "", onConfirm: null });
+      if (editPinDialog.onConfirm) {
+        editPinDialog.onConfirm();
+      }
+    } else {
+      setEditPinDialog((prev) => ({
+        ...prev,
+        pinError: "Incorrect PIN.",
+      }));
+    }
   };
 
   const inferAccountType = (name) => {
@@ -1930,11 +2095,11 @@ export default function AccountingFinance() {
         const credit = round2(n0(r.credit));
         const side = debit > 0 ? "debit" : "credit";
         const amount = side === "debit" ? debit : credit;
-        const ref = ensureAccountSuffix(r?.references || r?.account || r?.description || "");
+        const description = String(r?.description || "").trim();
         running = round2(running + debit - credit);
       return {
         date: r?.date ? `${formatYear(r.date)}\n${formatMonthDay(r.date)}` : "",
-        details: ref ? `${side === "debit" ? "To" : "By"} ${ref}` : "",
+        details: description || "",
         page: shortVoucherSeq(r?.voucherNo || r?.journalEntryId || ""),
         debitAmount: side === "debit" ? `Rs. ${String(amount.toLocaleString())}` : "",
         creditAmount: side === "credit" ? `Rs. ${String(amount.toLocaleString())}` : "",
@@ -5043,7 +5208,7 @@ export default function AccountingFinance() {
                   <tr>
                     <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
                     <th className="text-left font-semibold px-3 py-2">Journal Name</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -5060,6 +5225,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => requestEditPin(() => openJournalEditor({ rows: [], sourceId: j._id || j.id }))}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5253,45 +5426,6 @@ export default function AccountingFinance() {
                     ))}
                   </select>
                 </div>
-                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
-                  <span className="text-xs text-gray-600">Company</span>
-                  <select
-                    value={ledgerFilterCompanyId || ledgerFilterCompanyName}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      const match = companyOptions.find((c) => String(c.id) === String(v));
-                      setLedgerFilterCompanyId(match ? String(match.id) : "");
-                      setLedgerFilterCompanyName(match ? match.name : v);
-                      applyLedgerFiltersOnly().catch(() => {});
-                    }}
-                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
-                  >
-                    <option value="">All</option>
-                    {(companyOptions || []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="inline-flex w-full items-center justify-between gap-2 px-3 py-2 rounded-full border border-gray-300 bg-white text-xs sm:w-auto sm:justify-start sm:px-2 sm:py-1">
-                  <span className="text-xs text-gray-600">Customer</span>
-                  <select
-                    value={ledgerFilterPartyName}
-                    onChange={(e) => {
-                      setLedgerFilterPartyName(e.target.value);
-                      applyLedgerFiltersOnly().catch(() => {});
-                    }}
-                    className="min-w-0 flex-1 text-xs bg-transparent focus:outline-none sm:w-[110px] sm:flex-none"
-                  >
-                    <option value="">All</option>
-                    {(customerOptions || []).map((c) => (
-                      <option key={c._id || c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
               <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                 <button
@@ -5302,9 +5436,6 @@ export default function AccountingFinance() {
                     setLedgerGenerateStart("");
                     setLedgerGenerateEnd("");
                     setLedgerFilterAccountId("");
-                    setLedgerFilterCompanyId("");
-                    setLedgerFilterCompanyName("");
-                    setLedgerFilterPartyName("");
                     setLedgerGenerateName(getSuggestedLedgerName({ range: "all", date: "", start: "", end: "" }));
                     setLedgerNameTouched(false);
                     applyLedgerFiltersOnly({ range: "all", date: "", start: "", end: "" }).catch(() => {});
@@ -5419,6 +5550,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2 border border-gray-200">{j.name}</td>
                       <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => requestEditPin(() => openLedgerEditor({ rows: [], sourceId: j._id || j.id }))}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5639,7 +5778,7 @@ export default function AccountingFinance() {
                   <tr>
                     <th className="text-left font-semibold px-3 py-2 w-[80px]">Sr. No</th>
                     <th className="text-left font-semibold px-3 py-2">Trial Balance Name</th>
-                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Action</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[160px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
@@ -5659,6 +5798,14 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => requestEditPin(() => openTrialEditor({ rows: [], sourceId: j._id || j.id }))}
+                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -6344,20 +6491,14 @@ export default function AccountingFinance() {
                         <label className="block text-xs text-gray-600 mb-1">
                           Account Name <span className="text-red-500">*</span>
                         </label>
-                        <select
-                          value={e.accountId || ""}
-                          onChange={(ev) => patchEntry(e.entryId, { accountId: ev.target.value })}
-                          className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                            submitAttempted && fieldErr.accountId ? "border-red-300 bg-red-50" : "border-gray-300"
-                          }`}
-                        >
-                          <option value="">Select account</option>
-                          {daybookAccountOptions.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.label}
-                            </option>
-                          ))}
-                        </select>
+                        <SearchableAccountDropdown
+                          valueId={e.accountId || ""}
+                          valueLabel={daybookAccountOptions.find((a) => String(a.id) === String(e.accountId))?.label || ""}
+                          options={daybookAccountOptions}
+                          onSelect={({ id }) => patchEntry(e.entryId, { accountId: id })}
+                          placeholder="Type to search accounts..."
+                          className={`w-full ${submitAttempted && fieldErr.accountId ? "border-red-300 bg-red-50" : "border-gray-300"}`}
+                        />
                         <div className="mt-1 min-h-[14px] text-xs text-red-600">
                           {submitAttempted && fieldErr.accountId ? fieldErr.accountId : ""}
                         </div>
@@ -6503,6 +6644,7 @@ export default function AccountingFinance() {
               columns={[
                 { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
+                { key: "accountName", label: "Account Name", render: (v, row) => row?.accountName || row?.account || "-" },
                 { key: "description", label: "Description", render: (v, row) => v || row?.narration || "-" },
                 { key: "cashInHand", label: "Cash in Hand" },
                 {
@@ -6514,6 +6656,27 @@ export default function AccountingFinance() {
                 { key: "daybookSide", label: "Debit / Credit" },
                 { key: "amount", label: "Amount" },
                 { key: "status", label: "Status" },
+                {
+                  key: "actions",
+                  label: "Actions",
+                  render: (v, row) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (row._id) {
+                          requestEditPin(() => {
+                            // Handle edit - navigate to edit mode
+                            setSearchParams({ edit: "true", id: row._id });
+                          });
+                        }
+                      }}
+                      className="p-1.5 rounded hover:bg-gray-100 text-gray-700"
+                      title="Edit"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  ),
+                },
               ]}
               data={vouchers}
               rowClassName={(row) => (row.status === "REVERSED" ? "opacity-60" : "")}
@@ -6533,6 +6696,7 @@ export default function AccountingFinance() {
               exportColumns={[
                 { key: "entryNo", label: "Entry No" },
                 { key: "date", label: "Date" },
+                { key: "accountName", label: "Account Name" },
                 { key: "description", label: "Description" },
                 { key: "cashInHand", label: "Cash in Hand" },
                 { key: "cashInHandSource", label: "Cash Record" },
@@ -6545,6 +6709,7 @@ export default function AccountingFinance() {
                   ...r,
                   date: r.date ? new Date(r.date).toISOString().slice(0, 10) : "",
                   description: r.description || r.narration || "",
+                  accountName: r.accountName || r.account || "",
                 }))
               }
             />
@@ -8075,6 +8240,53 @@ export default function AccountingFinance() {
                 className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editPinDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-sm p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Enter PIN</div>
+              <button
+                type="button"
+                onClick={() => setEditPinDialog({ open: false, pin: "", pinError: "", onConfirm: null })}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="text-sm text-gray-700">Enter admin PIN to edit this entry.</div>
+            <input
+              type="password"
+              maxLength={4}
+              value={editPinDialog.pin}
+              onChange={(e) => setEditPinDialog((prev) => ({ ...prev, pin: e.target.value, pinError: "" }))}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+              placeholder="Enter 4-digit PIN"
+            />
+            {editPinDialog.pinError && (
+              <div className="text-xs text-red-600">{editPinDialog.pinError}</div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditPinDialog({ open: false, pin: "", pinError: "", onConfirm: null })}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={verifyEditPin}
+                disabled={editPinDialog.pin.length !== 4}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Verify
               </button>
             </div>
           </div>
