@@ -1083,11 +1083,29 @@ export default function AccountingFinance() {
       range: "custom",
     };
     const res = await api.get("/accounting/vouchers", { params });
+    const vouchersData = res.data?.data || [];
     setVouchers(
-      (res.data?.data || []).map((row) => {
+      vouchersData.map((row) => {
         const cashEffect = n0(row?.cashEffect);
         const side = cashEffect > 0 ? "Credit" : cashEffect < 0 ? "Debit" : "";
-        return { ...row, description: row?.description || row?.narration || "", daybookSide: side };
+        
+        // Extract account name from lines - get the non-cash account
+        const lines = row?.lines || [];
+        const nonCashLine = lines.find((l) => 
+          String(l?.accountSubType || "").toUpperCase() !== "CASH" && 
+          !/^\s*cash(\s+in\s+hand)?\s*$/i.test(String(l?.accountName || ""))
+        );
+        const accountName = nonCashLine?.accountName || 
+                           lines[0]?.accountName || 
+                           row?.accountName || 
+                           "";
+        
+        return { 
+          ...row, 
+          description: row?.description || row?.narration || "", 
+          daybookSide: side,
+          accountName: accountName
+        };
       })
     );
   };
@@ -5225,14 +5243,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => requestEditPin(() => openJournalEditor({ rows: [], sourceId: j._id || j.id }))}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5253,12 +5263,12 @@ export default function AccountingFinance() {
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
-                                api
-                                  .delete(`/accounting/generated-journals/${j._id || j.id}`)
-                                  .then(() => loadGeneratedJournalList())
-                                  .catch(() => {})
-                              }
+                            onClick={() => requestEditPin(() =>
+                              api
+                                .delete(`/accounting/generated-journals/${j._id || j.id}`)
+                                .then(() => loadGeneratedJournalList())
+                                .catch(() => {})
+                            )}
                             className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                             title="Delete"
                           >
@@ -5550,14 +5560,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2 border border-gray-200">{j.name}</td>
                       <td className="px-3 py-2 border border-gray-200">
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => requestEditPin(() => openLedgerEditor({ rows: [], sourceId: j._id || j.id }))}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5578,12 +5580,12 @@ export default function AccountingFinance() {
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => requestEditPin(() =>
                               api
                                 .delete(`/accounting/generated-journals/${j._id || j.id}`)
                                 .then(() => loadGeneratedLedgerList())
                                 .catch(() => {})
-                            }
+                            )}
                             className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                             title="Delete"
                           >
@@ -5798,14 +5800,6 @@ export default function AccountingFinance() {
                       <td className="px-3 py-2">{j.name}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => requestEditPin(() => openTrialEditor({ rows: [], sourceId: j._id || j.id }))}
-                            className="p-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
                           <div className="flex">
                             <button
                               type="button"
@@ -5826,12 +5820,12 @@ export default function AccountingFinance() {
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => requestEditPin(() =>
                               api
                                 .delete(`/accounting/generated-journals/${j._id || j.id}`)
                                 .then(() => loadGeneratedTrialList())
                                 .catch(() => {})
-                            }
+                            )}
                             className="p-2 rounded border border-red-200 text-red-700 hover:bg-red-50"
                             title="Delete"
                           >
@@ -6660,21 +6654,32 @@ export default function AccountingFinance() {
                   key: "actions",
                   label: "Actions",
                   render: (v, row) => (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (row._id) {
-                          requestEditPin(() => {
-                            // Handle edit - navigate to edit mode
-                            setSearchParams({ edit: "true", id: row._id });
-                          });
-                        }
-                      }}
-                      className="p-1.5 rounded hover:bg-gray-100 text-gray-700"
-                      title="Edit"
-                    >
-                      <Pencil size={14} />
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (row._id) {
+                            requestEditPin(() => editVoucher(row._id));
+                          }
+                        }}
+                        className="p-1.5 rounded hover:bg-gray-100 text-gray-700"
+                        title="Edit"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (row._id) {
+                            requestEditPin(() => setDeleteDialog({ open: true, id: row._id, voucherNo: row.entryNo || row.voucherNo || "" }));
+                          }
+                        }}
+                        className="p-1.5 rounded hover:bg-red-50 text-red-700"
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   ),
                 },
               ]}
@@ -8287,6 +8292,43 @@ export default function AccountingFinance() {
                 className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
               >
                 Verify
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteDialog.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-sm p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Confirm Delete</div>
+              <button
+                type="button"
+                onClick={() => setDeleteDialog({ open: false, id: "", voucherNo: "" })}
+                className="p-2 rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="text-sm text-gray-700">
+              Are you sure you want to delete entry {deleteDialog.voucherNo}? This action cannot be undone.
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteDialog({ open: false, id: "", voucherNo: "" })}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteVoucher}
+                className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700"
+              >
+                Delete
               </button>
             </div>
           </div>

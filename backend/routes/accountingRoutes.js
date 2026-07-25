@@ -52,4 +52,6 @@ router.get("/journal", acc.getJournalEntries);
 router.post("/journal/post", acc.postManualJournal);
 router.post("/journal/:id/reverse", acc.reverseJournalEntry);
 
+router.post("/cleanup-database", acc.cleanupDatabase);
+
 module.exports = router;

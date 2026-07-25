@@ -10,6 +10,116 @@ const { getDateRangeFromQuery } = require("../utils/dateRange");
 const { ensureDefaultAccounts, postJournalEntry } = require("../services/accountingJournalService");
 const { syncPartiesFromMasters, syncProductsFromProductTypes } = require("../services/accountingSyncService");
 
+// Cleanup function to remove old/blank data
+exports.cleanupDatabase = async (req, res) => {
+  try {
+    let deletedCount = 0;
+    let details = [];
+
+    // Remove blank journal entries (entries with no lines or empty lines)
+    const blankEntries = await JournalEntry.find({
+      $or: [
+        { lines: { $exists: false } },
+        { lines: { $size: 0 } },
+        { lines: { $eq: null } },
+        { lines: { $eq: [] } },
+      ],
+    });
+    if (blankEntries.length > 0) {
+      const entryIds = blankEntries.map(e => e._id);
+      const deletedLines = await JournalLine.deleteMany({ journalEntryId: { $in: entryIds } });
+      const deletedEntries = await JournalEntry.deleteMany({ _id: { $in: entryIds } });
+      deletedCount += deletedEntries.deletedCount;
+      details.push(`Deleted ${deletedEntries.deletedCount} blank journal entries and ${deletedLines.deletedCount} associated lines`);
+    }
+
+    // Remove journal lines with no account or zero amounts
+    const blankLines = await JournalLine.find({
+      $or: [
+        { accountId: { $exists: false } },
+        { accountId: { $eq: "" } },
+        { accountId: null },
+        { debit: 0, credit: 0 },
+      ],
+    });
+    if (blankLines.length > 0) {
+      const lineIds = blankLines.map(l => l._id);
+      const deletedLines = await JournalLine.deleteMany({ _id: { $in: lineIds } });
+      deletedCount += deletedLines.deletedCount;
+      details.push(`Deleted ${deletedLines.deletedCount} blank journal lines`);
+    }
+
+    // Remove blank accounts (accounts with no name)
+    const blankAccounts = await Account.find({
+      $or: [
+        { name: { $exists: false } },
+        { name: { $eq: "" } },
+        { name: null },
+      ],
+    });
+    if (blankAccounts.length > 0) {
+      const accountIds = blankAccounts.map(a => a._id);
+      const deletedAccounts = await Account.deleteMany({ _id: { $in: accountIds } });
+      deletedCount += deletedAccounts.deletedCount;
+      details.push(`Deleted ${deletedAccounts.deletedCount} blank accounts`);
+    }
+
+    // Remove blank entities
+    const blankEntities = await AccountingEntity.find({
+      $or: [
+        { name: { $exists: false } },
+        { name: { $eq: "" } },
+        { name: null },
+      ],
+    });
+    if (blankEntities.length > 0) {
+      const entityIds = blankEntities.map(e => e._id);
+      const deletedEntities = await AccountingEntity.deleteMany({ _id: { $in: entityIds } });
+      deletedCount += deletedEntities.deletedCount;
+      details.push(`Deleted ${deletedEntities.deletedCount} blank entities`);
+    }
+
+    // Remove blank parties
+    const blankParties = await AccountingParty.find({
+      $or: [
+        { name: { $exists: false } },
+        { name: { $eq: "" } },
+        { name: null },
+      ],
+    });
+    if (blankParties.length > 0) {
+      const partyIds = blankParties.map(p => p._id);
+      const deletedParties = await AccountingParty.deleteMany({ _id: { $in: partyIds } });
+      deletedCount += deletedParties.deletedCount;
+      details.push(`Deleted ${deletedParties.deletedCount} blank parties`);
+    }
+
+    // Remove blank products
+    const blankProducts = await AccountingProduct.find({
+      $or: [
+        { name: { $exists: false } },
+        { name: { $eq: "" } },
+        { name: null },
+      ],
+    });
+    if (blankProducts.length > 0) {
+      const productIds = blankProducts.map(p => p._id);
+      const deletedProducts = await AccountingProduct.deleteMany({ _id: { $in: productIds } });
+      deletedCount += deletedProducts.deletedCount;
+      details.push(`Deleted ${deletedProducts.deletedCount} blank products`);
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Database cleanup completed",
+      deletedCount,
+      details 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to cleanup database: " + err.message });
+  }
+};
+
 const parseRange = (req) => getDateRangeFromQuery(req.query);
 const toNum = (v) => Number(v || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
@@ -1266,7 +1376,15 @@ exports.getVouchers = async (req, res) => {
 
     const data = filteredEntries.map((e, idx) => {
       const t = bucket.get(String(e._id)) || { debit: 0, credit: 0 };
-      const cashEffect = getCashEffectForLines(cashBucket.get(String(e._id)) || [], cashAccountMap);
+      const entryLines = cashBucket.get(String(e._id)) || [];
+      const cashEffect = getCashEffectForLines(entryLines, cashAccountMap);
+      const linesWithNames = entryLines.map((l) => ({
+        ...l,
+        accountCode: cashAccountMap.get(String(l.accountId))?.code || "",
+        accountName: cashAccountMap.get(String(l.accountId))?.name || "",
+        accountType: cashAccountMap.get(String(l.accountId))?.type || "",
+        accountSubType: cashAccountMap.get(String(l.accountId))?.subType || "",
+      }));
       return {
         _id: e._id,
         entryNo: idx + 1,
@@ -1286,6 +1404,7 @@ exports.getVouchers = async (req, res) => {
         description: e.description || e.narration || "",
         status: e.status || "POSTED",
         amount: round2(Math.max(t.debit, t.credit)),
+        lines: linesWithNames,
         createdAt: e.createdAt,
         updatedAt: e.updatedAt,
       };
@@ -1553,7 +1672,27 @@ exports.updateVoucher = async (req, res) => {
 
 exports.deleteVoucher = async (req, res) => {
   try {
-    res.status(403).json({ success: false, message: "Entries cannot be deleted individually." });
+    const { id } = req.params;
+    const entry = await JournalEntry.findById(id);
+    if (!entry) return res.status(404).json({ success: false, message: "Voucher not found." });
+    if (entry.status === "REVERSED") {
+      return res.status(400).json({ success: false, message: "Reversed vouchers cannot be deleted." });
+    }
+
+    // Delete associated journal lines
+    await JournalLine.deleteMany({ journalEntryId: entry._id });
+    
+    // Delete the journal entry
+    await JournalEntry.deleteOne({ _id: entry._id });
+
+    // Renumber remaining entries
+    const remainingEntries = await JournalEntry.find({}).sort({ date: 1, createdAt: 1 }).lean();
+    for (let i = 0; i < remainingEntries.length; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await JournalEntry.updateOne({ _id: remainingEntries[i]._id }, { entryNo: i + 1 });
+    }
+
+    res.json({ success: true, message: "Voucher deleted successfully." });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to delete entry." });
   }
