@@ -1,0 +1,17 @@
+// electron/preload.js
+// Secure IPC bridge — exposes safe APIs to renderer without Node.js access
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("electronAPI", {
+  // App info
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  getAppPath: () => ipcRenderer.invoke("get-app-path"),
+  isDesktop: true,
+
+  // Backup controls
+  triggerBackup: () => ipcRenderer.invoke("trigger-backup"),
+  openBackupFolder: () => ipcRenderer.invoke("open-backup-folder"),
+
+  // System
+  getSystemInfo: () => ipcRenderer.invoke("get-system-info"),
+});

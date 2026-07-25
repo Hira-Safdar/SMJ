@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 const { initBackupScheduler } = require("./controllers/systemSettingsController");
 const { initAIKnowledgeSync } = require("./services/aiKnowledgeSync");
 const { initAIManualSync } = require("./services/aiManualSync");
@@ -50,7 +51,11 @@ function getHealthPayload() {
 }
 
 // Test route
-app.get("/", (req, res) => {
+app.get("/", (req, res, next) => {
+  const distIndex = path.join(__dirname, "../frontend/dist/index.html");
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
   res.send("✅ SMJ Rice Mill API running successfully...");
 });
 const dashboardRoutes = require("./routes/dashboardRoutes");
@@ -94,14 +99,31 @@ app.use("/api/accounting", accountingRoutes);
 const reportsRoutes = require("./routes/reportsRoutes");
 app.use("/api/reports", reportsRoutes);
 
-app.use((req, res) => {
-  res.status(404).json({
-    ok: false,
-    error: "Route not found",
-    path: req.originalUrl,
-    method: req.method,
+// ─── Serve Frontend Build (Desktop / Production) ─────────────────────
+const isDesktop = process.env.NODE_ENV === "desktop" || process.env.ELECTRON_RUN_AS_NODE;
+const frontendDist = path.join(__dirname, "../frontend/dist");
+
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+
+  // SPA catch-all: non-API routes get index.html
+  app.use((req, res) => {
+    if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/uploads")) {
+      return res.status(404).json({ ok: false, error: "Route not found", path: req.originalUrl, method: req.method });
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
   });
-});
+} else if (!isDesktop) {
+  // Dev mode — no build yet
+  app.use((req, res) => {
+    res.status(404).json({
+      ok: false,
+      error: "Route not found",
+      path: req.originalUrl,
+      method: req.method,
+    });
+  });
+}
 
 // Connect MongoDB
 mongoose

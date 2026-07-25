@@ -10,6 +10,9 @@ node_modules/
 dist/
 build/
 
+# Electron build output
+electron-dist/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

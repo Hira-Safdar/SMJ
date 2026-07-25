@@ -2,12 +2,17 @@
   "name": "smj",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node backend/server.js",
     "dev": "nodemon --ignore backend/backups/** --ignore backend/uploads/** backend/server.js",
     "rag:reindex": "node backend/scripts/reindexAiKnowledge.js --days 90",
-    "rag:reindex:all": "node backend/scripts/reindexAiKnowledge.js --all"
+    "rag:reindex:all": "node backend/scripts/reindexAiKnowledge.js --all",
+    "frontend:build": "cd frontend && npm run build",
+    "electron:dev": "npm run frontend:build && cross-env NODE_ENV=electron-dev electron .",
+    "electron:start": "npm run frontend:build && cross-env NODE_ENV=desktop electron .",
+    "electron:build": "npm run frontend:build && electron-builder --win",
+    "electron:build:publish": "npm run frontend:build && electron-builder --win --publish always"
   },
   "repository": {
     "type": "git",
@@ -36,6 +41,52 @@
     "react-hot-toast": "^2.6.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "nodemon": "^3.1.10"
+  },
+  "build": {
+    "appId": "com.smj.ricemill",
+    "productName": "SMJ Rice Mill",
+    "directories": {
+      "output": "electron-dist"
+    },
+    "files": [
+      "backend/**/*",
+      "frontend/dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      ".env",
+      "package.json",
+      "!backend/backups",
+      "!backend/uploads/logo-*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "frontend/dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "frontend/public/logo-1769953313128-favicon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "frontend/public/logo-1769953313128-favicon.png",
+      "uninstallerIcon": "frontend/public/logo-1769953313128-favicon.png",
+      "installerHeaderIcon": "frontend/public/logo-1769953313128-favicon.png"
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "core-js@3.48.0": true
   }
 }
