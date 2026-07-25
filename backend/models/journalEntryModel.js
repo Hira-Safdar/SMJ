@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const journalEntrySchema = new mongoose.Schema(
   {
+    entryNo: { type: Number, default: 0 },
     voucherNo: { type: String, required: true, unique: true, trim: true },
     date: { type: Date, required: true },
     voucherType: {

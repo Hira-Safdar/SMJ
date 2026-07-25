@@ -65,11 +65,17 @@ const postJournalEntry = async ({
   }
 
   const voucherNo = await nextVoucherNo();
+
+  // Assign next entryNo (max existing + 1)
+  const lastEntry = await JournalEntry.findOne({}).sort({ entryNo: -1 }).lean();
+  const nextEntryNo = (lastEntry?.entryNo || 0) + 1;
+
   const normalizedCashInHand = round2(cashInHand);
   const normalizedCashSource = ["INITIAL", "CARRIED", "MANUAL_EDIT"].includes(String(cashInHandSource || ""))
     ? String(cashInHandSource)
     : "INITIAL";
   const entry = await JournalEntry.create({
+    entryNo: nextEntryNo,
     voucherNo,
     date: date ? new Date(date) : new Date(),
     voucherType: voucherType || "JOURNAL",

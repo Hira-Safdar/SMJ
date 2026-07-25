@@ -1293,8 +1293,9 @@ async function loadEntryWithLines(entry) {
 }
 
 // Cascade recalculate cash-in-hand for all POSTED entries in chronological order.
-// Called after update/delete so the carry-forward chain stays correct.
-async function cascadeCashInHand() {
+// When { renumber: true } (default), also fixes entryNo in chronological order.
+// When called from delete, pass { renumber: false } to keep existing entryNo intact.
+async function cascadeCashInHand({ renumber = true } = {}) {
   const entries = await JournalEntry.find({ status: "POSTED" }).sort({ date: 1, createdAt: 1 }).lean();
   if (!entries.length) return;
 
@@ -1313,49 +1314,54 @@ async function cascadeCashInHand() {
   });
 
   let runningCash = 0;
-  // Track updated cash-in-hand values as we cascade
-  const resolvedCashInHand = new Map(); // entryId -> cashInHand (updated value)
+  const resolvedCashInHand = new Map();
 
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const entryLines = linesByEntry.get(String(e._id)) || [];
     const cashEffect = getCashEffectForLines(entryLines, accountMap);
+    const correctEntryNo = i + 1;
 
     if (i === 0) {
-      // First entry keeps its own cash-in-hand (manual starting point)
       resolvedCashInHand.set(String(e._id), round2(toNum(e.cashInHand)));
       runningCash = round2(toNum(e.cashInHand) + cashEffect);
+      if (renumber && e.entryNo !== correctEntryNo) {
+        await JournalEntry.updateOne({ _id: e._id }, { $set: { entryNo: correctEntryNo } });
+      }
       continue;
     }
 
-    // Previous entry's resolved cash-after-entry
     const prevId = String(entries[i - 1]._id);
     const prevCashInHand = resolvedCashInHand.get(prevId);
     const prevLines = linesByEntry.get(prevId) || [];
     const prevCashEffect = getCashEffectForLines(prevLines, accountMap);
     const previousCashAfterEntry = round2(prevCashInHand + prevCashEffect);
 
-    // If this entry was manually edited, keep its value as an anchor
     if (String(e.cashInHandSource) === "MANUAL_EDIT") {
       resolvedCashInHand.set(String(e._id), round2(toNum(e.cashInHand)));
       runningCash = round2(toNum(e.cashInHand) + cashEffect);
+      if (renumber && e.entryNo !== correctEntryNo) {
+        await JournalEntry.updateOne({ _id: e._id }, { $set: { entryNo: correctEntryNo } });
+      }
       continue;
     }
 
-    // Recalculate: this entry's cash-in-hand = previous entry's cash-after-entry
     const newCashInHand = previousCashAfterEntry;
     resolvedCashInHand.set(String(e._id), newCashInHand);
 
-    if (round2(toNum(e.cashInHand)) !== newCashInHand) {
-      await JournalEntry.updateOne(
-        { _id: e._id },
-        {
-          $set: {
-            cashInHand: newCashInHand,
-            cashInHandSource: "CARRIED",
-          },
-        }
-      );
+    const cashChanged = round2(toNum(e.cashInHand)) !== newCashInHand;
+    const entryNoChanged = renumber && e.entryNo !== correctEntryNo;
+
+    if (cashChanged || entryNoChanged) {
+      const update = {};
+      if (cashChanged) {
+        update.cashInHand = newCashInHand;
+        update.cashInHandSource = "CARRIED";
+      }
+      if (entryNoChanged) {
+        update.entryNo = correctEntryNo;
+      }
+      await JournalEntry.updateOne({ _id: e._id }, { $set: update });
     }
     runningCash = round2(newCashInHand + cashEffect);
   }
@@ -1456,7 +1462,7 @@ exports.getVouchers = async (req, res) => {
       }));
       return {
         _id: e._id,
-        entryNo: idx + 1,
+        entryNo: e.entryNo || idx + 1,
         voucherNo: e.voucherNo,
         date: e.date,
         voucherType: e.voucherType,
@@ -1764,15 +1770,8 @@ exports.deleteVoucher = async (req, res) => {
     // Delete the journal entry
     await JournalEntry.deleteOne({ _id: entry._id });
 
-    // Renumber remaining entries
-    const remainingEntries = await JournalEntry.find({}).sort({ date: 1, createdAt: 1 }).lean();
-    for (let i = 0; i < remainingEntries.length; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      await JournalEntry.updateOne({ _id: remainingEntries[i]._id }, { entryNo: i + 1 });
-    }
-
-    // Cascade recalculate cash-in-hand after deletion
-    await cascadeCashInHand();
+    // Cascade recalculate cash-in-hand only (keep existing entryNo intact)
+    await cascadeCashInHand({ renumber: false });
 
     res.json({ success: true, message: "Voucher deleted successfully." });
   } catch (err) {
@@ -1876,7 +1875,7 @@ exports.deleteVoucher = async (req, res) => {
         .filter((e) => (voucherRegex ? voucherRegex.test(e.voucherNo || "") : true))
         .map((e, idx) => ({
           ...e,
-          entryNo: idx + 1,
+          entryNo: e.entryNo || idx + 1,
           cashInHand: round2(e.cashInHand),
           cashInHandSource: e.cashInHandSource || "INITIAL",
           cashInHandEdited: Boolean(e.cashInHandEdited),
