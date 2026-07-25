@@ -42,4 +42,7 @@ const aiChatSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+aiChatSchema.index({ userId: 1, sessionId: 1 });
+aiChatSchema.index({ userId: 1, active: 1, updatedAt: -1 });
+
 module.exports = mongoose.model("AIChat", aiChatSchema);

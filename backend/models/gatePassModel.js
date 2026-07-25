@@ -251,4 +251,10 @@ GatePassSchema.pre("save", async function (next) {
   }
 });
 
+GatePassSchema.index({ type: 1, date: -1 });
+GatePassSchema.index({ date: -1 });
+GatePassSchema.index({ status: 1, date: -1 });
+GatePassSchema.index({ supplier: 1 });
+GatePassSchema.index({ customer: 1 });
+
 module.exports = mongoose.model("GatePass", GatePassSchema);

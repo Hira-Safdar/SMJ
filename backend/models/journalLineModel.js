@@ -39,5 +39,6 @@ journalLineSchema.index({ journalEntryId: 1 });
 journalLineSchema.index({ accountId: 1 });
 journalLineSchema.index({ partyId: 1 });
 journalLineSchema.index({ itemId: 1 });
+journalLineSchema.index({ journalEntryId: 1, accountId: 1 });
 
 module.exports = mongoose.model("JournalLine", journalLineSchema);

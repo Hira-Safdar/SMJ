@@ -1406,47 +1406,69 @@ exports.getVouchers = async (req, res) => {
     const itemName = String(req.query.itemName || "").trim();
     const voucherNo = String(req.query.voucherNo || "").trim();
 
+    // Pagination
+    const page = Math.max(1, parseInt(req.query.page || "1", 10));
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit || "500", 10)));
+    const skip = (page - 1) * limit;
+
     const entryFilter = { date: { $gte: start, $lte: end } };
     if (companyId) entryFilter.companyId = companyId;
     if (voucherTypes.length) entryFilter.voucherType = { $in: voucherTypes };
-    // Status filter optional
     if (req.query.status) entryFilter.status = String(req.query.status);
     if (voucherNo) entryFilter.voucherNo = new RegExp(escRe(voucherNo), "i");
 
-    const entries = await JournalEntry.find(entryFilter).sort({ date: -1, createdAt: -1 }).lean();
-    const entryIds = entries.map((e) => e._id);
-
-    const lineFilter = { journalEntryId: { $in: entryIds } };
-    if (accountIds.length) lineFilter.accountId = { $in: accountIds };
-    if (partyIds.length) lineFilter.partyId = { $in: partyIds };
-    if (partyName) lineFilter.partyName = new RegExp(escRe(partyName), "i");
-    if (itemIds.length) lineFilter.itemId = { $in: itemIds };
-    if (itemName) lineFilter.itemName = new RegExp(escRe(itemName), "i");
-
-    const lines = await JournalLine.find(lineFilter).lean();
-    const bucket = new Map(); // entryId -> { debit, credit }
-    lines.forEach((l) => {
-      const k = String(l.journalEntryId);
-      const row = bucket.get(k) || { debit: 0, credit: 0 };
-      row.debit += toNum(l.debit);
-      row.credit += toNum(l.credit);
-      bucket.set(k, row);
-    });
-
-    // If account/party filters are applied, only show entries that have at least one matching line.
     const hasLineFilters = accountIds.length || partyIds.length || !!partyName || itemIds.length || !!itemName;
-    const filteredEntries = hasLineFilters
-      ? entries.filter((e) => bucket.has(String(e._id)))
-      : entries;
 
-    const allLinesForCash = await JournalLine.find({ journalEntryId: { $in: filteredEntries.map((e) => e._id) } }).lean();
+    // Only fetch fields needed for list view (exclude heavy cashInHandHistory)
+    const entrySelect = "entryNo voucherNo date voucherType bookType companyId companyName referenceNo cashInHand cashInHandSource cashInHandEdited cashInHandHistory narration description status createdAt updatedAt";
+
+    let filteredEntries;
+    let total;
+
+    if (hasLineFilters) {
+      // Line filters active: fetch all entries, filter by lines, then paginate in memory
+      const allEntries = await JournalEntry.find(entryFilter).select(entrySelect).sort({ date: -1, createdAt: -1 }).lean();
+
+      const lineFilter = { journalEntryId: { $in: allEntries.map((e) => e._id) } };
+      if (accountIds.length) lineFilter.accountId = { $in: accountIds };
+      if (partyIds.length) lineFilter.partyId = { $in: partyIds };
+      if (partyName) lineFilter.partyName = new RegExp(escRe(partyName), "i");
+      if (itemIds.length) lineFilter.itemId = { $in: itemIds };
+      if (itemName) lineFilter.itemName = new RegExp(escRe(itemName), "i");
+
+      const matchingLines = await JournalLine.find(lineFilter).select("journalEntryId debit credit").lean();
+      const matchingIds = new Set(matchingLines.map((l) => String(l.journalEntryId)));
+
+      filteredEntries = allEntries.filter((e) => matchingIds.has(String(e._id)));
+      total = filteredEntries.length;
+      filteredEntries = filteredEntries.slice(skip, skip + limit);
+    } else {
+      // No line filters: paginate at DB level (most efficient)
+      total = await JournalEntry.countDocuments(entryFilter);
+      filteredEntries = await JournalEntry.find(entryFilter)
+        .select(entrySelect)
+        .sort({ date: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+    }
+
+    // Only fetch lines for the paginated entries (huge perf gain)
+    const pageEntryIds = filteredEntries.map((e) => e._id);
+    const allLinesForCash = await JournalLine.find({ journalEntryId: { $in: pageEntryIds } }).lean();
     const cashAccountMap = await getAccountMapForLines(allLinesForCash);
     const cashBucket = new Map();
+    const bucket = new Map();
     allLinesForCash.forEach((line) => {
       const key = String(line.journalEntryId);
       const prev = cashBucket.get(key) || [];
       prev.push(line);
       cashBucket.set(key, prev);
+
+      const row = bucket.get(key) || { debit: 0, credit: 0 };
+      row.debit += toNum(line.debit);
+      row.credit += toNum(line.credit);
+      bucket.set(key, row);
     });
 
     const data = filteredEntries.map((e, idx) => {
@@ -1485,7 +1507,7 @@ exports.getVouchers = async (req, res) => {
       };
     });
 
-    res.json({ success: true, data });
+    res.json({ success: true, data, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load vouchers." });
   }

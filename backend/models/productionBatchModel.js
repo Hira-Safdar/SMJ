@@ -72,5 +72,7 @@ const ProductionBatchSchema = new mongoose.Schema(
 
 ProductionBatchSchema.index({ date: 1 });
 ProductionBatchSchema.index({ status: 1 });
+ProductionBatchSchema.index({ status: 1, date: -1 });
+ProductionBatchSchema.index({ sourceCompanyId: 1 });
 
 module.exports = mongoose.model("ProductionBatch", ProductionBatchSchema);

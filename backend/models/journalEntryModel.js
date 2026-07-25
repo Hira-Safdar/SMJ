@@ -40,5 +40,7 @@ const journalEntrySchema = new mongoose.Schema(
 journalEntrySchema.index({ date: 1 });
 journalEntrySchema.index({ companyId: 1, date: 1 });
 journalEntrySchema.index({ voucherType: 1, date: 1 });
+journalEntrySchema.index({ entryNo: 1 });
+journalEntrySchema.index({ status: 1, date: 1 });
 
 module.exports = mongoose.model("JournalEntry", journalEntrySchema);
