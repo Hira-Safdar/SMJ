@@ -82,6 +82,16 @@ export default function Stock() {
   const [hideZeroStockRows, setHideZeroStockRows] = useState(false);
   const [showOnlyNonZeroProducts, setShowOnlyNonZeroProducts] = useState(true);
 
+  // Manage Companies modal state
+  const [manageCompaniesOpen, setManageCompaniesOpen] = useState(false);
+  const [selectedBrandsToDelete, setSelectedBrandsToDelete] = useState([]);
+  const [deleteCompanyPinDialog, setDeleteCompanyPinDialog] = useState({
+    open: false,
+    pin: "",
+    pinError: "",
+  });
+  const [deletingCompanies, setDeletingCompanies] = useState(false);
+
   // --------------------------------------------------------------------
   // LOAD DATA
   // --------------------------------------------------------------------
@@ -396,6 +406,36 @@ export default function Stock() {
       }.`
     );
     await loadData();
+  }
+
+  async function handleDeleteCompanies(adminPin) {
+    if (!selectedBrandsToDelete.length) {
+      toast.error("Select at least one company to remove.");
+      return;
+    }
+    setDeletingCompanies(true);
+    try {
+      const res = await api.post("/settings/delete-brand", {
+        brandNames: selectedBrandsToDelete,
+        adminPin: String(adminPin || "").trim(),
+      });
+      if (res.data?.success) {
+        toast.success(res.data.message || "Companies removed from list.");
+        setManageCompaniesOpen(false);
+        setSelectedBrandsToDelete([]);
+        setDeleteCompanyPinDialog({ open: false, pin: "", pinError: "" });
+        await refreshSettings();
+        window.dispatchEvent(new Event("stock:refresh"));
+      } else {
+        toast.error(res.data?.message || "Failed to remove companies.");
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.message || err.message || "Failed to remove companies.";
+      toast.error(msg);
+      setDeleteCompanyPinDialog((p) => ({ ...p, pinError: msg, pin: "" }));
+    } finally {
+      setDeletingCompanies(false);
+    }
   }
 
   // --------------------------------------------------------------------
@@ -882,6 +922,15 @@ export default function Stock() {
                 onClick={handlePrint}
               >
                 <Printer size={15} /> Print
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  setManageCompaniesOpen(true);
+                  setSelectedBrandsToDelete([]);
+                }}
+              >
+                <Settings size={15} /> Manage Companies
               </button>
             </div>
             </div>
@@ -1465,6 +1514,122 @@ export default function Stock() {
               </div>
             </div>
           </div>
+
+          {/* ── Manage Companies Modal ── */}
+          {manageCompaniesOpen && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6 max-h-[80vh] flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Manage Companies</h3>
+                  <button
+                    type="button"
+                    onClick={() => { setManageCompaniesOpen(false); setSelectedBrandsToDelete([]); }}
+                    className="p-1 rounded hover:bg-gray-100 text-gray-500"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Select companies to remove from the dropdown list. Stock ledger records are not deleted.
+                </p>
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4">
+                  {(settings?.brandOptions || []).length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-6">No companies in list.</p>
+                  ) : (
+                    (settings?.brandOptions || []).sort().map((brand) => {
+                      const isSelected = selectedBrandsToDelete.includes(brand);
+                      return (
+                        <label
+                          key={brand}
+                          className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 ${isSelected ? "bg-red-50" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedBrandsToDelete((prev) => [...prev, brand]);
+                              } else {
+                                setSelectedBrandsToDelete((prev) => prev.filter((b) => b !== brand));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                          />
+                          <span className="text-sm text-gray-800">{brand}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-500">
+                    {selectedBrandsToDelete.length} selected
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setManageCompaniesOpen(false); setSelectedBrandsToDelete([]); }}
+                      className="px-3 py-1.5 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedBrandsToDelete.length}
+                      onClick={() => setDeleteCompanyPinDialog({ open: true, pin: "", pinError: "" })}
+                      className="px-3 py-1.5 text-xs rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Delete Selected
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Delete Companies PIN Dialog ── */}
+          {deleteCompanyPinDialog.open && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Confirm with PIN
+                </h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  Enter admin PIN to remove {selectedBrandsToDelete.length} compan{selectedBrandsToDelete.length === 1 ? "y" : "ies"} from the list.
+                </p>
+                <Pin4Input
+                  value={deleteCompanyPinDialog.pin}
+                  onChange={(v) =>
+                    setDeleteCompanyPinDialog((p) => ({
+                      ...p,
+                      pin: v.slice(0, 4),
+                      pinError: "",
+                    }))
+                  }
+                  onComplete={(entered) => {
+                    handleDeleteCompanies(entered);
+                  }}
+                />
+                {deleteCompanyPinDialog.pinError && (
+                  <p className="text-xs text-red-600 mt-2">{deleteCompanyPinDialog.pinError}</p>
+                )}
+                <div className="flex gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteCompanyPinDialog({ open: false, pin: "", pinError: "" })}
+                    className="px-3 py-1.5 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  {deletingCompanies && (
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="animate-spin">•</span> Removing…
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
     </div>
   );
 }

@@ -1,9 +1,5 @@
 const SystemSettings = require("../models/systemSettingsModel");
 const ProductType = require("../models/productTypeModel");
-const GatePass = require("../models/gatePassModel");
-const ProductionBatch = require("../models/productionBatchModel");
-const StockLedger = require("../models/stockLedgerModel");
-const Transaction = require("../models/transactionModel");
 
 const normalizeText = (text) =>
   String(text || "")
@@ -25,28 +21,14 @@ const addName = (map, value) => {
 
 exports.getCompanies = async (_req, res) => {
   try {
-    const [settings, productTypes, gatePasses, batches, ledgers, transactions] = await Promise.all([
+    const [settings, productTypes] = await Promise.all([
       SystemSettings.findOne({}).sort({ createdAt: 1 }).lean(),
       ProductType.find({}).select("brand").lean(),
-      GatePass.find({}).select("supplier items.brand").lean(),
-      ProductionBatch.find({}).select("sourceCompanyName outputs.companyName").lean(),
-      StockLedger.find({}).select("companyName").lean(),
-      Transaction.find({}).select("companyName").lean(),
     ]);
 
     const names = new Map();
     (settings?.brandOptions || []).forEach((value) => addName(names, value));
     (productTypes || []).forEach((row) => addName(names, row?.brand));
-    (gatePasses || []).forEach((row) => {
-      addName(names, row?.supplier);
-      (row?.items || []).forEach((item) => addName(names, item?.brand));
-    });
-    (batches || []).forEach((row) => {
-      addName(names, row?.sourceCompanyName);
-      (row?.outputs || []).forEach((item) => addName(names, item?.companyName));
-    });
-    (ledgers || []).forEach((row) => addName(names, row?.companyName));
-    (transactions || []).forEach((row) => addName(names, row?.companyName));
 
     const companies = Array.from(names.values())
       .sort((a, b) => a.localeCompare(b))

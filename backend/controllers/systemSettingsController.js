@@ -1224,3 +1224,42 @@ exports.renameBrandEverywhere = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+/**
+ * Remove one or more brand/company names from brandOptions (PIN-protected).
+ * Body: { brandNames: string[], adminPin: string }
+ * This only removes from the brandOptions dropdown list.
+ * It does NOT delete gate passes or stock ledger records.
+ */
+exports.deleteBrandOption = async (req, res) => {
+  try {
+    const brandNames = Array.isArray(req.body?.brandNames) ? req.body.brandNames : [];
+    const adminPin = String(req.body?.adminPin || "").trim();
+    if (!brandNames.length) {
+      return res.status(400).json({ success: false, message: "brandNames array is required." });
+    }
+    const settings = await SystemSettings.findOne({});
+    if (!settings) {
+      return res.status(404).json({ success: false, message: "Settings not found." });
+    }
+    const expectedPin = String(settings.adminPin || "0000").trim();
+    if (!adminPin || adminPin !== expectedPin) {
+      return res.status(403).json({ success: false, message: "Invalid admin PIN." });
+    }
+    const removeSet = new Set(brandNames.map((n) => String(n || "").trim().toLowerCase()).filter(Boolean));
+    const currentOptions = Array.isArray(settings.brandOptions) ? settings.brandOptions : [];
+    const nextOptions = currentOptions.filter(
+      (b) => !removeSet.has(String(b || "").trim().toLowerCase())
+    );
+    settings.brandOptions = nextOptions;
+    await settings.save();
+    const removedCount = currentOptions.length - nextOptions.length;
+    return res.json({
+      success: true,
+      removedCount,
+      message: `Removed ${removedCount} compan${removedCount === 1 ? "y" : "ies"} from the list.`,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};

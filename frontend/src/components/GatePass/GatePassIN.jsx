@@ -771,53 +771,8 @@ export default function GatePassIN({ highlightId = "" }) {
     }
   };
 
-  const deleteBrandOption = async (brandName) => {
-    if (!isBrandDeletable(brandName)) {
-      toast.error("This company cannot be removed because stock still exists.");
-      return;
-    }
-    setConfirmDialog({
-      open: true,
-      title: "Delete Company Name",
-      message: `Type "${brandName}" to remove this company from the list.`,
-      expectedText: brandName,
-      onConfirm: async () => {
-        try {
-          const matchingProducts = (productCatalog || []).filter(
-            (row) => getCompanyIdentityKey(row?.brand) === getCompanyIdentityKey(brandName)
-          );
-          for (const product of matchingProducts) {
-            if (product?._id) {
-              await api.delete(`/product-types/${product._id}`);
-            }
-          }
-          const nextOptions = (brandOptions || []).filter(
-            (brand) => getCompanyIdentityKey(brand) !== getCompanyIdentityKey(brandName)
-          );
-          await api.put("/settings", { brandOptions: nextOptions });
-          setBrandOptions(nextOptions);
-          const pRes = await api.get("/product-types");
-          setProductCatalog(pRes.data?.data || []);
-          setItems((prev) =>
-            (prev || []).map((item) =>
-              getCompanyIdentityKey(item?.brand) === getCompanyIdentityKey(brandName)
-                ? { ...item, brand: "", productName: "" }
-                : item
-            )
-          );
-          if (getCompanyIdentityKey(form.supplier) === getCompanyIdentityKey(brandName)) {
-            setForm((prev) => ({ ...prev, supplier: "" }));
-          }
-          setOpenBrandDropdown(null);
-          toast.success("Company removed.");
-          window.dispatchEvent(new Event("product:refresh"));
-          window.dispatchEvent(new Event("stock:refresh"));
-        } catch (err) {
-          toast.error(err?.response?.data?.message || "Failed to remove company.");
-        }
-      },
-    });
-  };
+  // deleteBrandOption removed — company deletion is now managed
+  // from Stock page → Manage Companies (PIN-protected).
 
   const handleItemChange = (idx, field, value) => {
     const updated = [...items];
@@ -925,7 +880,6 @@ export default function GatePassIN({ highlightId = "" }) {
         {openBrandDropdown === idx ? (
           <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
             {filteredBrands.map((brand, optionIdx) => {
-              const deletable = isBrandDeletable(brand);
               return (
                 <div
                   key={`${brand}-${optionIdx}`}
@@ -950,20 +904,6 @@ export default function GatePassIN({ highlightId = "" }) {
                   >
                     {brand}
                   </button>
-                {deletable ? (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      deleteBrandOption(brand);
-                    }}
-                    className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
-                    title="Remove company"
-                    >
-                      <X size={14} />
-                    </button>
-                  ) : null}
                 </div>
               );
             })}
@@ -1137,7 +1077,7 @@ export default function GatePassIN({ highlightId = "" }) {
       title: "Delete Gate Pass",
       message: `Are you sure you want to delete Gate Pass ${
         row.gatePassNo || ""
-      }? This will also remove related stock entries. This action cannot be undone.`,
+      }? Stock entries will remain. This action cannot be undone.`,
       onConfirm: async () => {
         if (confirmDialog.expectedText && confirmInput !== confirmDialog.expectedText) {
           toast.error("Please type the gate pass number to confirm.");

@@ -31,6 +31,43 @@ const normalizeRawPaddyName = (name) => {
 
 const normalizeBrandName = (name) => String(name || "").trim();
 
+const toTitleCase = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
+/** Ensure all supplier/brand names from a gate pass are persisted in SystemSettings.brandOptions */
+const persistBrandOptions = async (body) => {
+  try {
+    const names = new Set();
+    const supplier = normalizeBrandName(body?.supplier);
+    if (supplier) names.add(toTitleCase(supplier));
+    (body?.items || []).forEach((it) => {
+      const brand = normalizeBrandName(it?.brand);
+      if (brand) names.add(toTitleCase(brand));
+    });
+    if (!names.size) return;
+    const settings = await SystemSettings.findOne({});
+    if (!settings) return;
+    const existing = new Map(
+      (settings.brandOptions || []).map((b) => [String(b).trim().toLowerCase(), b])
+    );
+    let changed = false;
+    names.forEach((name) => {
+      const key = name.toLowerCase();
+      if (!existing.has(key)) {
+        existing.set(key, name);
+        changed = true;
+      }
+    });
+    if (changed) {
+      settings.brandOptions = Array.from(existing.values()).sort();
+      await settings.save();
+    }
+  } catch (_e) { /* best-effort; don't block gate pass */ }
+};
+
 /** Build production ledger ops from items array (e.g. req.body.items or gp.items). Use gp for type, id, gatePassNo, createdAt. */
 const buildProductionOpsFromItems = (items, gp, bagWeightKg = 65, productTypeMap = null) => {
   const ops = [];
@@ -130,6 +167,7 @@ exports.createGatePass = async (req, res) => {
     }
 
     const gp = await GatePass.create(body);
+    await persistBrandOptions(body);
     try {
       const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
       const bagWeightKg = settings && settings.defaultBagWeightKg != null ? settings.defaultBagWeightKg : 65;
@@ -236,6 +274,7 @@ exports.updateGatePass = async (req, res) => {
     });
 
     if (gp) {
+      await persistBrandOptions(body);
       try {
         await StockLedger.deleteMany({ gatePassId: gp._id });
         const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
@@ -282,11 +321,9 @@ exports.deleteGatePass = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Gate pass not found." });
-    try {
-      await StockLedger.deleteMany({ gatePassId: gp._id });
-    } catch (e) {
-      console.error("Gate pass stock delete error:", e);
-    }
+    // StockLedger entries are intentionally NOT deleted here.
+    // Stock records persist so company/stock data remains visible.
+    // To remove stock, use the Stock module's delete feature.
     res.json({ success: true });
   } catch (err) {
     res

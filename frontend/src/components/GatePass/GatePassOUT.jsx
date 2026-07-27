@@ -735,47 +735,8 @@ export default function GatePassOUT({ highlightId = "" }) {
     }
   };
 
-  const deleteBrandOption = async (brandName) => {
-    if (!isBrandDeletable(brandName)) {
-      toast.error("This company cannot be removed because stock still exists.");
-      return;
-    }
-    setConfirmDialog({
-      open: true,
-      title: "Delete Company Name",
-      message: `Type "${brandName}" to remove this company from the list.`,
-      expectedText: brandName,
-      onConfirm: async () => {
-        try {
-          const matchingProducts = (productCatalog || []).filter(
-            (row) => getCompanyIdentityKey(row?.brand) === getCompanyIdentityKey(brandName)
-          );
-          for (const product of matchingProducts) {
-            if (product?._id) await api.delete(`/product-types/${product._id}`);
-          }
-          const nextOptions = (brandOptions || []).filter(
-            (brand) => getCompanyIdentityKey(brand) !== getCompanyIdentityKey(brandName)
-          );
-          await api.put("/settings", { brandOptions: nextOptions });
-          setBrandOptions(nextOptions);
-          const pRes = await api.get("/product-types");
-          setProductCatalog(pRes.data?.data || []);
-          setItems((prev) =>
-            (prev || []).map((item) =>
-              getCompanyIdentityKey(item?.brand) === getCompanyIdentityKey(brandName)
-                ? { ...item, brand: "", productName: "" }
-                : item
-            )
-          );
-          setOpenBrandDropdown(null);
-          toast.success("Company removed.");
-          window.dispatchEvent(new Event("product:refresh"));
-        } catch (err) {
-          toast.error(err?.response?.data?.message || "Failed to remove company.");
-        }
-      },
-    });
-  };
+  // deleteBrandOption removed — company deletion is now managed
+  // from Stock page → Manage Companies (PIN-protected).
 
   const renderBrandDropdown = (item, idx) => {
     const errorMessage = errors.itemRows?.[idx]?.brand;

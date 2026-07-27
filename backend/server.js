@@ -8,6 +8,56 @@ const fs = require("fs");
 const { initBackupScheduler } = require("./controllers/systemSettingsController");
 const { initAIKnowledgeSync } = require("./services/aiKnowledgeSync");
 const { initAIManualSync } = require("./services/aiManualSync");
+const SystemSettings = require("./models/systemSettingsModel");
+const GatePass = require("./models/gatePassModel");
+const StockLedger = require("./models/stockLedgerModel");
+const ProductionBatch = require("./models/productionBatchModel");
+const Transaction = require("./models/transactionModel");
+
+/**
+ * One-time migration: seed SystemSettings.brandOptions with all existing
+ * company names from GatePass, StockLedger, ProductionBatch, and Transaction.
+ * Runs silently on startup and only adds names not already present.
+ */
+async function seedBrandOptions() {
+  try {
+    const settings = await SystemSettings.findOne({});
+    if (!settings) return;
+    const existing = new Map(
+      (settings.brandOptions || []).map((b) => [String(b).trim().toLowerCase(), b])
+    );
+    const toTitleCase = (v = "") =>
+      String(v).trim().replace(/\s+/g, " ")
+        .replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    const addName = (raw) => {
+      const name = toTitleCase(raw);
+      const key = name.toLowerCase();
+      if (key && !existing.has(key)) existing.set(key, name);
+    };
+    const [gatePasses, ledgers, batches, transactions] = await Promise.all([
+      GatePass.find({}).select("supplier items.brand").lean(),
+      StockLedger.find({}).select("companyName").lean(),
+      ProductionBatch.find({}).select("sourceCompanyName outputs.companyName").lean(),
+      Transaction.find({}).select("companyName").lean(),
+    ]);
+    gatePasses.forEach((gp) => {
+      addName(gp.supplier);
+      (gp.items || []).forEach((it) => addName(it?.brand));
+    });
+    ledgers.forEach((l) => addName(l.companyName));
+    batches.forEach((b) => {
+      addName(b.sourceCompanyName);
+      (b.outputs || []).forEach((o) => addName(o?.companyName));
+    });
+    transactions.forEach((t) => addName(t.companyName));
+    const nextOptions = Array.from(existing.values()).sort();
+    if (nextOptions.length > (settings.brandOptions || []).length) {
+      settings.brandOptions = nextOptions;
+      await settings.save();
+      console.log(`[Migration] brandOptions seeded: ${nextOptions.length} companies`);
+    }
+  } catch (_e) { /* best-effort */ }
+}
 
 // ─── Resolve app root (handles asar packed vs unpacked) ─────────
 const appRoot = __dirname.includes("app.asar")
@@ -141,6 +191,7 @@ mongoose
   .catch((err) => console.log("❌ MongoDB Error:", err.message));
 
 mongoose.connection.once("open", () => {
+  seedBrandOptions();
   initBackupScheduler();
   initAIManualSync().then((r) => {
     if (r?.started) console.log(`[AI][Manual] Loaded manual entries (${r.count || 0})`);
