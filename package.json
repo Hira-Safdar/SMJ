@@ -1,7 +1,7 @@
 {
   "name": "smj",
   "version": "1.0.0",
-  "description": "",
+  "description": "SMJ Rice Mill ERP Desktop Application",
   "main": "electron/main.js",
   "scripts": {
     "start": "node backend/server.js",
@@ -11,7 +11,7 @@
     "frontend:build": "cd frontend && npm run build",
     "electron:dev": "npm run frontend:build && cross-env NODE_ENV=electron-dev electron .",
     "electron:start": "npm run frontend:build && cross-env NODE_ENV=desktop electron .",
-    "electron:build": "npm run frontend:build && electron-builder --win",
+    "electron:build": "npm run frontend:build && node -e \"require('fs').copyFileSync('frontend/public/logo-256.png','frontend/dist/logo-256.png')\" && electron-builder --win",
     "electron:build:publish": "npm run frontend:build && electron-builder --win --publish always"
   },
   "repository": {
@@ -50,7 +50,7 @@
     "appId": "com.smj.ricemill",
     "productName": "SMJ Rice Mill",
     "directories": {
-      "output": "electron-dist"
+      "output": "C:\\smj-electron-build"
     },
     "files": [
       "backend/**/*",
@@ -63,26 +63,21 @@
       "!backend/uploads/logo-*",
       "!**/*.map"
     ],
-    "extraResources": [
-      {
-        "from": "frontend/dist",
-        "to": "frontend/dist",
-        "filter": [
-          "**/*"
-        ]
-      }
+    "asarUnpack": [
+      "frontend/dist/**/*",
+      ".env"
     ],
     "win": {
       "target": "nsis",
-      "icon": "frontend/public/logo-1769953313128-favicon.png"
+      "icon": "frontend/public/logo-256.png"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "frontend/public/logo-1769953313128-favicon.png",
-      "uninstallerIcon": "frontend/public/logo-1769953313128-favicon.png",
-      "installerHeaderIcon": "frontend/public/logo-1769953313128-favicon.png"
+      "installerIcon": "frontend/public/logo.ico",
+      "uninstallerIcon": "frontend/public/logo.ico",
+      "installerHeaderIcon": "frontend/public/logo.ico"
     }
   },
   "allowScripts": {

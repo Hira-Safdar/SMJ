@@ -9,7 +9,16 @@ const { initBackupScheduler } = require("./controllers/systemSettingsController"
 const { initAIKnowledgeSync } = require("./services/aiKnowledgeSync");
 const { initAIManualSync } = require("./services/aiManualSync");
 
-dotenv.config({ path: path.join(__dirname, "../.env") });
+// ─── Resolve app root (handles asar packed vs unpacked) ─────────
+const appRoot = __dirname.includes("app.asar")
+  ? __dirname.replace("app.asar", "app.asar.unpacked")
+  : __dirname;
+
+// Load .env from unpacked or regular path
+const envPath = fs.existsSync(path.join(appRoot, "../.env"))
+  ? path.join(appRoot, "../.env")
+  : path.join(__dirname, "../.env");
+dotenv.config({ path: envPath });
 
 const app = express();
 const allowedOrigins = new Set(
@@ -52,7 +61,7 @@ function getHealthPayload() {
 
 // Test route
 app.get("/", (req, res, next) => {
-  const distIndex = path.join(__dirname, "../frontend/dist/index.html");
+  const distIndex = path.join(appRoot, "../frontend/dist/index.html");
   if (fs.existsSync(distIndex)) {
     return res.sendFile(distIndex);
   }
@@ -101,7 +110,7 @@ app.use("/api/reports", reportsRoutes);
 
 // ─── Serve Frontend Build (Desktop / Production) ─────────────────────
 const isDesktop = process.env.NODE_ENV === "desktop" || process.env.ELECTRON_RUN_AS_NODE;
-const frontendDist = path.join(__dirname, "../frontend/dist");
+const frontendDist = path.join(appRoot, "../frontend/dist");
 
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));

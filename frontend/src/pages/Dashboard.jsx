@@ -1,8 +1,8 @@
-﻿// src/pages/Dashboard.jsx
+// src/pages/Dashboard.jsx
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import toast from "react-hot-toast";
-import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw, Trash2, X } from "lucide-react";
+import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -43,13 +43,6 @@ export default function Dashboard() {
   const [stockBreakdown, setStockBreakdown] = useState({
     production: [],
   });
-  const [clearDbDialog, setClearDbDialog] = useState({
-    open: false,
-    confirmation: "",
-    busy: false,
-    error: "",
-  });
-
   // fetch live dashboard data
 
   const fetchDashboardData = async () => {
@@ -84,35 +77,13 @@ export default function Dashboard() {
     fetchDashboardData();
   }, []);
 
-  const handleClearDatabase = async () => {
-    const confirmation = String(clearDbDialog.confirmation || "").trim();
-    if (confirmation !== "CLEAR") {
-      setClearDbDialog((prev) => ({ ...prev, error: 'Type "CLEAR" to continue.' }));
-      return;
-    }
-
-    try {
-      setClearDbDialog((prev) => ({ ...prev, busy: true, error: "" }));
-      const res = await api.delete("/settings/developer/clear-database", {
-        data: { confirmation },
-      });
-      const deletedCount = Number(res.data?.data?.deletedCount || 0);
-      toast.success(`Database cleared. ${deletedCount.toLocaleString()} records removed.`);
-      setClearDbDialog({ open: false, confirmation: "", busy: false, error: "" });
-      await fetchDashboardData();
-    } catch (err) {
-      const message = err?.response?.data?.message || err?.message || "Failed to clear database.";
-      setClearDbDialog((prev) => ({ ...prev, busy: false, error: message }));
-      toast.error(message);
-    }
-  };
-
   const cards = [
     {
       title: "Cash in Hand",
       value: `Rs. ${stats.cashInHand.toLocaleString()}`,
       icon: <Coins size={20} />,
       color: "teal",
+      subtitle: "From daybook entries",
     },
     {
       title: "Inward Entries",
@@ -191,15 +162,6 @@ export default function Dashboard() {
 
         {/* calendar badge */}
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          <button
-            type="button"
-            onClick={() => setClearDbDialog({ open: true, confirmation: "", busy: false, error: "" })}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
-            title="Developer reset"
-          >
-            <Trash2 size={16} />
-            Clear Database
-          </button>
           <div className="rounded-lg px-4 py-2 bg-gradient-to-r from-emerald-200 to-teal-100 shadow-sm w-full md:w-auto">
             <DatePicker
               selected={date}
@@ -211,67 +173,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {clearDbDialog.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl border border-red-100">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-lg bg-red-50 p-2 text-red-700">
-                  <AlertTriangle size={18} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-red-800">Clear Full Database</h3>
-                  <p className="mt-1 text-sm text-gray-600">
-                    This will remove all records, tables data, dropdown values, settings, journals, stock, production, and gate pass history.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setClearDbDialog({ open: false, confirmation: "", busy: false, error: "" })}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                disabled={clearDbDialog.busy}
-                title="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Type CLEAR to confirm</label>
-              <input
-                value={clearDbDialog.confirmation}
-                onChange={(e) => setClearDbDialog((prev) => ({ ...prev, confirmation: e.target.value, error: "" }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
-                placeholder="CLEAR"
-                disabled={clearDbDialog.busy}
-              />
-              {clearDbDialog.error && <div className="mt-2 text-xs text-red-600">{clearDbDialog.error}</div>}
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setClearDbDialog({ open: false, confirmation: "", busy: false, error: "" })}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                disabled={clearDbDialog.busy}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleClearDatabase}
-                disabled={clearDbDialog.busy || String(clearDbDialog.confirmation || "").trim() !== "CLEAR"}
-                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                <Trash2 size={16} />
-                {clearDbDialog.busy ? "Clearing..." : "Clear Everything"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -289,7 +190,7 @@ export default function Dashboard() {
                   {c.value}
                 </div>
                 <div className="text-xs text-gray-400 mt-2">
-                  Data from production module
+                  {c.subtitle || "Data from production module"}
                 </div>
               </div>
               <div className="flex items-center gap-2">

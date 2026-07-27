@@ -6,6 +6,9 @@ const Transaction = require("../models/transactionModel");
 const GatePass = require("../models/gatePassModel");
 const SystemSettings = require("../models/systemSettingsModel");
 const StockLedger = require("../models/stockLedgerModel");
+const JournalEntry = require("../models/journalEntryModel");
+const JournalLine = require("../models/journalLineModel");
+const Account = require("../models/accountModel");
 
 const paidAmount = (t) => {
   const status = String(t?.paymentStatus || "").toUpperCase();
@@ -102,17 +105,42 @@ const getDashboardStats = async (req, res) => {
     });
 
     const gatePassOutPayments = await GatePass.find({ type: "OUT" })
-      .select("paymentStatus amountPaid remainingAmount customer gatePassNo")
+      .select("paymentStatus amountPaid remainingAmount customer gatePassNo totalAmount")
       .lean();
 
+    // Cash in Hand from accounting daybook (latest posted journal entry)
     let cashInHand = 0;
+    try {
+      const latestEntry = await JournalEntry.findOne({ status: "POSTED" })
+        .sort({ date: -1, createdAt: -1 })
+        .lean();
+      if (latestEntry) {
+        const entryLines = await JournalLine.find({ journalEntryId: latestEntry._id }).lean();
+        const accountIds = [...new Set(entryLines.map((l) => String(l.accountId)))];
+        const accounts = accountIds.length
+          ? await Account.find({ _id: { $in: accountIds } }).select("name subType").lean()
+          : [];
+        const accountMap = new Map(accounts.map((a) => [String(a._id), a]));
+        const isCash = (acc) =>
+          String(acc?.subType || "").toUpperCase() === "CASH" ||
+          /^\s*cash(\s+in\s+hand)?\s*$/i.test(String(acc?.name || ""));
+        const cashEffect = entryLines.reduce((sum, line) => {
+          const acc = accountMap.get(String(line.accountId));
+          if (!isCash(acc)) return sum;
+          return sum + Number(line.debit || 0) - Number(line.credit || 0);
+        }, 0);
+        cashInHand = Number(latestEntry.cashInHand || 0) + cashEffect;
+      }
+    } catch (_e) {
+      // fallback to 0 if accounting data unavailable
+    }
+
     let pendingPayments = 0;
     let pendingGatePass = 0;
     const pendingGatePassDetails = [];
     gatePassOutPayments.forEach((gp) => {
       const paid = Number(gp.amountPaid || 0);
       const rem = Number(gp.remainingAmount || 0);
-      cashInHand += paid;
       if (rem > 0) {
         pendingPayments += rem;
         pendingGatePass += rem;

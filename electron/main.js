@@ -72,13 +72,21 @@ function waitForServer(port, maxWaitMs = 30000) {
 
 // ─── Create Window ───────────────────────────────────────────────────
 function createWindow() {
+  const appRoot = __dirname.includes("app.asar")
+    ? __dirname.replace("app.asar", "app.asar.unpacked")
+    : __dirname;
+
+  const iconDist = path.join(appRoot, "../frontend/dist/logo-256.png");
+  const iconPublic = path.join(__dirname, "../frontend/public/logo-256.png");
+  const appIcon = fs.existsSync(iconDist) ? iconDist : iconPublic;
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 600,
     title: "SMJ Rice Mill",
-    icon: path.join(__dirname, "../frontend/public/logo-1769953313128-favicon.png"),
+    icon: appIcon,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -126,7 +134,6 @@ ipcMain.handle("open-backup-folder", () => {
 
 // ─── App Lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  // 1. Check MongoDB
   const mongoOk = await ensureMongoDB();
   if (!mongoOk) {
     dialog.showErrorBox(
@@ -140,16 +147,20 @@ app.whenReady().then(async () => {
   }
 
   // 2. Start Express server
-  console.log("[Electron] Starting backend server...");
-  require("../backend/server.js");
+  try {
+    require("../backend/server.js");
+  } catch (err) {
+    dialog.showErrorBox("Server Error", `Failed to load server:\n${err.message}`);
+    app.quit();
+    return;
+  }
 
   // 3. Wait for server to be ready
   try {
     const port = process.env.PORT || 5000;
     await waitForServer(port);
-    console.log("[Electron] Backend server is ready");
   } catch (err) {
-    dialog.showErrorBox("Server Error", "The backend server failed to start. Please check logs.");
+    dialog.showErrorBox("Server Error", "The backend server failed to start.");
     app.quit();
     return;
   }
