@@ -64,10 +64,29 @@ const appRoot = __dirname.includes("app.asar")
   ? __dirname.replace("app.asar", "app.asar.unpacked")
   : __dirname;
 
+// Write logs to both console and file (for packaged Electron debugging)
+// Use writable location for log file (asar paths are read-only)
+const serverLogFile = __dirname.includes("app.asar")
+  ? path.join(require("os").tmpdir(), "smj-server.log")
+  : path.join(__dirname, "../smj-server.log");
+function serverLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.log(line);
+  try { fs.appendFileSync(serverLogFile, line + "\n"); } catch (e) {
+    // If file write fails, console.log is the fallback
+  }
+}
+serverLog(`[Server] Log file: ${serverLogFile}`);
+
+serverLog(`[Server] __dirname: ${__dirname}`);
+serverLog(`[Server] appRoot: ${appRoot}`);
+serverLog(`[Server] is asar: ${__dirname.includes("app.asar")}`);
+
 // Load .env from unpacked or regular path
 const envPath = fs.existsSync(path.join(appRoot, "../.env"))
   ? path.join(appRoot, "../.env")
   : path.join(__dirname, "../.env");
+serverLog(`[Server] envPath: ${envPath} (exists: ${fs.existsSync(envPath)})`);
 dotenv.config({ path: envPath });
 
 const app = express();
@@ -162,14 +181,74 @@ app.use("/api/reports", reportsRoutes);
 const isDesktop = process.env.NODE_ENV === "desktop" || process.env.ELECTRON_RUN_AS_NODE;
 const frontendDist = path.join(appRoot, "../frontend/dist");
 
+serverLog(`[Server] isDesktop: ${isDesktop}`);
+serverLog(`[Server] frontendDist: ${frontendDist}`);
+serverLog(`[Server] frontendDist exists: ${fs.existsSync(frontendDist)}`);
 if (fs.existsSync(frontendDist)) {
-  app.use(express.static(frontendDist));
+  serverLog(`[Server] frontendDist contents: ${fs.readdirSync(frontendDist).join(", ")}`);
+}
+
+if (fs.existsSync(frontendDist)) {
+  // Verify CSS/JS assets are accessible from the resolved path
+  const assetsDir = path.join(frontendDist, "assets");
+  serverLog(`[Server] assetsDir: ${assetsDir} (exists: ${fs.existsSync(assetsDir)})`);
+  if (fs.existsSync(assetsDir)) {
+    serverLog(`[Server] assetsDir contents: ${fs.readdirSync(assetsDir).join(", ")}`);
+  }
+
+  // Debug middleware: log ALL incoming requests
+  app.use((req, res, next) => {
+    serverLog(`[Request] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
+  // Explicit asset handler (bypasses express.static asar issues)
+  app.use("/assets", (req, res) => {
+    const relativePath = req.path.slice(1); // remove leading /
+    const filePath = path.join(frontendDist, "assets", relativePath);
+    serverLog(`[Asset] Serving: ${relativePath} -> ${filePath} (exists: ${fs.existsSync(filePath)})`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Asset not found", path: relativePath });
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes = {
+      ".css": "text/css",
+      ".js": "application/javascript",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".svg": "image/svg+xml",
+      ".woff": "font/woff",
+      ".woff2": "font/woff2",
+      ".ttf": "font/ttf",
+      ".ico": "image/x-icon",
+    };
+    const contentType = mimeTypes[ext] || "application/octet-stream";
+    try {
+      const content = fs.readFileSync(filePath);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", content.length);
+      res.send(content);
+    } catch (err) {
+      serverLog(`[Asset] ERROR reading file: ${err.message}`);
+      res.status(500).json({ error: "Failed to read asset" });
+    }
+  });
+
+  app.use(express.static(frontendDist, {
+    fallthrough: true,
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".css")) res.setHeader("Content-Type", "text/css");
+      if (filePath.endsWith(".js")) res.setHeader("Content-Type", "application/javascript");
+    }
+  }));
 
   // SPA catch-all: non-API routes get index.html
   app.use((req, res) => {
     if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/uploads")) {
       return res.status(404).json({ ok: false, error: "Route not found", path: req.originalUrl, method: req.method });
     }
+    serverLog(`[SPA] Catch-all serving index.html for: ${req.originalUrl}`);
     res.sendFile(path.join(frontendDist, "index.html"));
   });
 } else if (!isDesktop) {
@@ -205,4 +284,16 @@ mongoose.connection.once("open", () => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+const server = app.listen(PORT, () => {
+  serverLog(`Server running on port ${PORT}`);
+});
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    serverLog(`[FATAL] Port ${PORT} is already in use! Another process is occupying it.`);
+    console.error(`[FATAL] Port ${PORT} is already in use!`);
+  } else {
+    serverLog(`[FATAL] Server error: ${err.message}`);
+    console.error(`[FATAL] Server error: ${err.message}`);
+  }
+  process.exit(1);
+});

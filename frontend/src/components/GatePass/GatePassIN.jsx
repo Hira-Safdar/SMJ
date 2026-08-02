@@ -35,24 +35,25 @@ export default function GatePassIN({ highlightId = "" }) {
     date: new Date().toISOString().slice(0, 10),
     truckNo: "",
     supplier: "",
-    driverName: "",
-    driverContact: "",
+    weightOnArrival: "",
     freightCharges: "",
   });
-  const [items, setItems] = useState([
-    {
-      brand: "",
-      brandMode: "list",
-      brandInput: "",
-      productName: "",
-      productMode: "list",
-      productInput: "",
-      bagCount: "",
-      bagWeightKg: "65",
-      emptyBagWeightKg: "",
-      netWeightKg: "",
-    },
-  ]);
+  const emptyItem = () => ({
+    brand: "",
+    brandMode: "list",
+    brandInput: "",
+    productName: "",
+    productMode: "list",
+    productInput: "",
+    weightAtSmjKg: "",
+    emptyBagWeightKg: "",
+    netWeightKg: "",
+    netWeightManDisplay: "",
+    bagWeightEachKg: "65",
+    bagCount: "",
+    remainingWeight: "",
+  });
+  const [items, setItems] = useState([emptyItem()]);
 
   const [errors, setErrors] = useState({});
   const [rows, setRows] = useState([]);
@@ -163,14 +164,25 @@ export default function GatePassIN({ highlightId = "" }) {
         Number(item?.netWeightKg || 0) > 0
     );
 
+  const formatKgToMan = (kg) => {
+    const total = Number(kg || 0);
+    if (total <= 0) return "";
+    const man = Math.floor(total / 40);
+    const remainder = Math.round(total % 40);
+    if (man === 0) return `${remainder} kg`;
+    if (remainder === 0) return `${man} man`;
+    return `${man} man ${remainder} kg`;
+  };
+
   const validateItemRow = (item = {}) => {
     const rowErrors = {};
     if (!String(item?.brand || "").trim()) rowErrors.brand = "Select company name.";
     if (!getItemDisplayName(item)) rowErrors.productName = "Select product name.";
-    if (!String(item?.bagCount || "").trim() || Number(item?.bagCount || 0) <= 0) {
-      rowErrors.bagCount = "Enter number of bags.";
-    }
+    if (Number(item?.weightAtSmjKg || 0) <= 0) rowErrors.weightAtSmjKg = "Weight at SMJ is required.";
     if (Number(item?.netWeightKg || 0) <= 0) rowErrors.netWeightKg = "Net weight is required.";
+    if (!String(item?.bagWeightEachKg || "").trim() || Number(item?.bagWeightEachKg || 0) <= 0) {
+      rowErrors.bagWeightEachKg = "Bag weight is required.";
+    }
     return rowErrors;
   };
 
@@ -196,7 +208,7 @@ export default function GatePassIN({ highlightId = "" }) {
       (it) =>
         String(it?.brand || "").trim() &&
         getItemDisplayName(it) &&
-        Number(it?.bagCount || 0) > 0 &&
+        Number(it?.weightAtSmjKg || 0) > 0 &&
         Number(it?.netWeightKg || 0) > 0
     );
     const e2 = needsBrand()
@@ -204,17 +216,11 @@ export default function GatePassIN({ highlightId = "" }) {
         ? ""
         : "Company Name is required."
       : "";
-    const e3 = form.driverName ? validateDriverName(form.driverName) : "";
-    const e4 = form.driverContact ? validateDriverContact(form.driverContact) : "";
-    const e5 = form.freightCharges ? "" : "";
 
     const newErr = {};
     if (e0) newErr.date = e0;
     if (e1) newErr.truckNo = e1;
     if (e2) newErr.supplier = e2;
-    if (e3) newErr.driverName = e3;
-    if (e4) newErr.driverContact = e4;
-    if (e5) newErr.freightCharges = e5;
     if (itemRows.some((row) => Object.keys(row).length > 0)) newErr.itemRows = itemRows;
     else if (!hasItem) newErr.items = "Add at least one item with net weight.";
     setErrors(newErr);
@@ -680,7 +686,7 @@ export default function GatePassIN({ highlightId = "" }) {
       setBrandModal({ ...createBrandModalState(), open: true });
       return;
     }
-    if (name === "freightCharges") {
+    if (name === "freightCharges" || name === "weightOnArrival") {
       v = value.replace(/[^\d.]/g, "");
     }
     setForm((prev) => ({ ...prev, [name]: v }));
@@ -777,55 +783,46 @@ export default function GatePassIN({ highlightId = "" }) {
   const handleItemChange = (idx, field, value) => {
     const updated = [...items];
     const cleanInt = (v, max = 8) => String(v || "").replace(/\D/g, "").slice(0, max);
-    const cleanDec2 = (v) => {
-      const raw = String(v || "").replace(/[^0-9.]/g, "");
-      if (!raw) return "";
-      if (!raw.includes(".") && raw.length > 1) {
-        const intPart = raw.slice(0, 1);
-        const dec = raw.slice(1, 3);
-        return `${intPart}.${dec}`;
-      }
-      const [a, b = ""] = raw.split(".");
-      const intPart = (a || "0").slice(0, 3);
-      const dec = b.slice(0, 2);
-      if (raw.includes(".") && dec === "") return `${intPart}.`;
-      return dec ? `${intPart}.${dec}` : intPart;
-    };
-    const formatDec2 = (v) => {
-      const raw = String(v || "").replace(/[^0-9.]/g, "");
-      if (!raw) return "";
-      const [a, b = ""] = raw.split(".");
-      const intPart = (a || "0").slice(0, 3);
-      const dec = (b || "").padEnd(2, "0").slice(0, 2);
-      return `${intPart}.${dec}`;
-    };
     const row = { ...(updated[idx] || {}) };
 
-    if (field === "bagCount") {
+    if (field === "bagWeightEachKg") {
       row[field] = cleanInt(value, 6);
-    } else if (field === "bagWeightKg") {
-      row[field] = cleanInt(value, 6);
+    } else if (field === "weightAtSmjKg") {
+      row[field] = cleanInt(value, 8);
     } else if (field === "emptyBagWeightKg") {
-      row[field] = cleanDec2(value);
-    } else if (field === "emptyBagWeightKgBlur") {
-      row.emptyBagWeightKg = formatDec2(value);
+      row[field] = cleanInt(value, 8);
     } else if (field === "productName" || field === "brand") {
       row[field] = value;
     }
 
-    const bags = Number(row.bagCount || 0);
-    const bagW = Number(row.bagWeightKg || 0);
+    // Calculations
+    const weightAtSmj = Number(row.weightAtSmjKg || 0);
     const emptyW = Number(row.emptyBagWeightKg || 0);
-    const net = Math.max(bags * (bagW - emptyW), 0);
-    row.netWeightKg = net ? String(Math.round(net)) : "";
+    const netKg = Math.max(weightAtSmj - emptyW, 0);
+    row.netWeightKg = netKg ? String(netKg) : "";
+    row.netWeightManDisplay = netKg ? formatKgToMan(netKg) : "";
+
+    // Auto-calculate No of Bags + Remaining Weight
+    const bagWeightEach = Number(row.bagWeightEachKg || 0);
+    if (netKg > 0 && bagWeightEach > 0) {
+      const bags = Math.floor(netKg / bagWeightEach);
+      row.bagCount = String(bags);
+      const remaining = netKg - (bags * bagWeightEach);
+      row.remainingWeight = remaining > 0 ? `${remaining} kg extra` : "";
+    } else {
+      row.bagCount = "";
+      row.remainingWeight = "";
+    }
 
     updated[idx] = row;
     setItems(updated);
-    if (field === "brand" || field === "productName" || field === "bagCount") {
+    if (field === "brand" || field === "productName") {
       clearItemFieldError(idx, field);
     }
-    if (field === "bagCount" || field === "bagWeightKg" || field === "emptyBagWeightKg" || field === "emptyBagWeightKgBlur") {
+    if (field === "weightAtSmjKg" || field === "emptyBagWeightKg" || field === "bagWeightEachKg") {
       clearItemFieldError(idx, "netWeightKg");
+      clearItemFieldError(idx, "weightAtSmjKg");
+      clearItemFieldError(idx, "bagWeightEachKg");
     }
   };
 
@@ -963,9 +960,10 @@ export default function GatePassIN({ highlightId = "" }) {
             quantity: Number(it.netWeightKg || 0),
             unit: normalizeUnit("kg"),
             bagCount: Number(it.bagCount || 0),
-            bagWeightKg: Number(it.bagWeightKg || 0),
+            bagWeightEachKg: Number(it.bagWeightEachKg || 0),
             emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
             netWeightKg: Number(it.netWeightKg || 0),
+            weightAtSmjKg: Number(it.weightAtSmjKg || 0),
           };
         })
     );
@@ -980,6 +978,9 @@ export default function GatePassIN({ highlightId = "" }) {
       items: manualItems,
       freightCharges: form.freightCharges
         ? Number(form.freightCharges)
+        : undefined,
+      weightOnArrival: form.weightOnArrival
+        ? Number(form.weightOnArrival)
         : undefined,
     };
 
@@ -996,24 +997,10 @@ export default function GatePassIN({ highlightId = "" }) {
         date: new Date().toISOString().slice(0, 10),
         truckNo: "",
         supplier: "",
-        driverName: "",
-        driverContact: "",
+        weightOnArrival: "",
         freightCharges: "",
       });
-      setItems([
-                    {
-                      brand: "",
-                      brandMode: "list",
-                      brandInput: "",
-                      productName: "",
-                      productMode: "list",
-                      productInput: "",
-                      bagCount: "",
-                      bagWeightKg: "65",
-                      emptyBagWeightKg: "",
-                      netWeightKg: "",
-                    },
-      ]);
+      setItems([emptyItem()]);
       setEditingId(null);
       setErrors({});
       fetchRows();
@@ -1032,12 +1019,14 @@ export default function GatePassIN({ highlightId = "" }) {
       date: row.date ? String(row.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
       truckNo: row.truckNo || "",
       supplier: row.supplier || "",
-      driverName: row.driverName || "",
-      driverContact: row.driverContact || "",
+      weightOnArrival: row.weightOnArrival ? String(row.weightOnArrival) : "",
       freightCharges: row.freightCharges ? String(row.freightCharges) : "",
     });
     const rowItems = (row.items || []).map((it) => {
       const qty = Number(it?.quantity || it?.netWeightKg || 0);
+      const wSmj = Number(it?.weightAtSmjKg || 0);
+      const emptyW = Number(it?.emptyBagWeightKg || 0);
+      const netKg = wSmj > 0 ? Math.max(wSmj - emptyW, 0) : qty;
       return {
         brand: String(it.brand || "").trim() || String(row.supplier || "").trim(),
         brandMode: "list",
@@ -1045,25 +1034,27 @@ export default function GatePassIN({ highlightId = "" }) {
         productName: String(it.itemType || it.customItemName || "").trim(),
         productMode: "list",
         productInput: "",
-        bagCount: it.bagCount != null ? String(it.bagCount) : "",
-        bagWeightKg: it.bagWeightKg != null ? String(it.bagWeightKg) : "65",
+        weightAtSmjKg: wSmj ? String(wSmj) : "",
         emptyBagWeightKg: it.emptyBagWeightKg != null ? String(it.emptyBagWeightKg) : "",
-        netWeightKg: qty ? String(Math.round(qty)) : "",
+        netWeightKg: netKg ? String(Math.round(netKg)) : "",
+        netWeightManDisplay: netKg ? formatKgToMan(Math.round(netKg)) : "",
+        bagWeightEachKg: it.bagWeightEachKg != null ? String(it.bagWeightEachKg) : (it.bagWeightKg != null ? String(it.bagWeightKg) : "65"),
+        bagCount: it.bagCount != null ? String(it.bagCount) : "",
+        remainingWeight: (() => {
+          const bagW = Number(it.bagWeightEachKg || it.bagWeightKg || 0);
+          const bags = Number(it.bagCount || 0);
+          if (netKg > 0 && bagW > 0) {
+            const rem = netKg - (bags * bagW);
+            return rem > 0 ? `${rem} kg extra` : "";
+          }
+          return "";
+        })(),
       };
     });
     setItems(
       rowItems.length > 0
         ? rowItems
-        : [
-            {
-              brand: "",
-              productName: "",
-              bagCount: "",
-              bagWeightKg: "65",
-              emptyBagWeightKg: "",
-              netWeightKg: "",
-            },
-          ]
+        : [emptyItem()]
     );
 
     setEditingId(row._id);
@@ -1473,39 +1464,35 @@ export default function GatePassIN({ highlightId = "" }) {
             {renderFieldError(errors.truckNo)}
           </div>
 
-          {/* Driver Name */}
-          <div id="field-driverName">
+          {/* Sender Name */}
+          <div id="field-supplier">
             <label className="block text-sm font-medium mb-1">
-              Driver Name
+              Sender Name <span className="text-red-500">*</span>
             </label>
             <input
-              name="driverName"
-              value={form.driverName}
+              name="supplier"
+              value={form.supplier}
               onChange={handleChange}
-              placeholder="Driver name"
+              placeholder="Sender / Company name"
               className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                errors.driverName ? "border-red-500" : "border-gray-300"
+                errors.supplier ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {renderFieldError(errors.driverName)}
+            {renderFieldError(errors.supplier)}
           </div>
 
-          {/* Driver Contact */}
-          <div id="field-driverContact">
+          {/* Weight on Arrival */}
+          <div id="field-weightOnArrival">
             <label className="block text-sm font-medium mb-1">
-              Driver Contact
+              Weight on Arrival (kg)
             </label>
             <input
-              name="driverContact"
-              value={form.driverContact}
+              name="weightOnArrival"
+              value={form.weightOnArrival}
               onChange={handleChange}
-              placeholder="03XX-XXXXXXX"
-              maxLength={12}
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                errors.driverContact ? "border-red-500" : "border-gray-300"
-              }`}
+              placeholder="0"
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
             />
-            {renderFieldError(errors.driverContact)}
           </div>
 
           {/* Freight Charges */}
@@ -1518,11 +1505,8 @@ export default function GatePassIN({ highlightId = "" }) {
               value={form.freightCharges}
               onChange={handleChange}
               placeholder="0"
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                errors.freightCharges ? "border-red-500" : "border-gray-300"
-              }`}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
             />
-            {renderFieldError(errors.freightCharges)}
           </div>
         </div>
 
@@ -1540,21 +1524,7 @@ export default function GatePassIN({ highlightId = "" }) {
               <button
                 type="button"
                 onClick={() =>
-                  setItems((prev) => [
-                    ...(prev || []),
-                    {
-                      brand: "",
-                      brandMode: "list",
-                      brandInput: "",
-                      productName: "",
-                      productMode: "list",
-                      productInput: "",
-                      bagCount: "",
-                      bagWeightKg: "65",
-                      emptyBagWeightKg: "",
-                      netWeightKg: "",
-                    },
-                  ])
+                  setItems((prev) => [...(prev || []), emptyItem()])
                 }
                 className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
               >
@@ -1563,6 +1533,7 @@ export default function GatePassIN({ highlightId = "" }) {
               </button>
             </div>
 
+            {/* Row 1: Company, Product, Weight at SMJ */}
             <div className="grid md:grid-cols-3 gap-3 items-start">
               <div id="field-supplier">
                 <div className="flex items-center justify-between mb-1">
@@ -1656,54 +1627,83 @@ export default function GatePassIN({ highlightId = "" }) {
                 {renderFieldError(errors.itemRows?.[0]?.productName)}
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
+                <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
                 <input
-                  value={items[0]?.bagCount ?? ""}
-                  onChange={(e) => handleItemChange(0, "bagCount", e.target.value)}
+                  value={items[0]?.weightAtSmjKg ?? ""}
+                  onChange={(e) => handleItemChange(0, "weightAtSmjKg", e.target.value)}
                   placeholder="0"
                   className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                    errors.itemRows?.[0]?.bagCount
-                      ? "border-red-500 bg-red-50"
-                      : "border-gray-300"
+                    errors.itemRows?.[0]?.weightAtSmjKg ? "border-red-500 bg-red-50" : "border-gray-300"
                   }`}
                 />
-                {renderFieldError(errors.itemRows?.[0]?.bagCount)}
+                {renderFieldError(errors.itemRows?.[0]?.weightAtSmjKg)}
               </div>
             </div>
+
+            {/* Row 2: Empty Bags Weight, Net Weight (kg), Net Weight (man) */}
             <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Bag Weight (kg)</label>
+                <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                 <input
-                  value={items[0]?.bagWeightKg ?? ""}
-                  onChange={(e) => handleItemChange(0, "bagWeightKg", e.target.value)}
-                  placeholder="65"
+                  value={items[0]?.emptyBagWeightKg ?? ""}
+                  onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}
+                  placeholder="0"
                   className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Empty Bag Weight (kg)</label>
-                    <input
-                      value={items[0]?.emptyBagWeightKg ?? ""}
-                      onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}
-                      onBlur={(e) =>
-                        handleItemChange(0, "emptyBagWeightKgBlur", e.target.value)
-                      }
-                      placeholder="0.00"
-                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                    />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
                 <input
                   value={items[0]?.netWeightKg ?? ""}
                   readOnly
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
-                    errors.itemRows?.[0]?.netWeightKg
-                      ? "border-red-500"
-                      : "border-gray-300"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold ${
+                    errors.itemRows?.[0]?.netWeightKg ? "border-red-500" : "border-gray-300"
                   }`}
                 />
                 {renderFieldError(errors.itemRows?.[0]?.netWeightKg)}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
+                <input
+                  value={items[0]?.netWeightManDisplay ?? ""}
+                  readOnly
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-emerald-50 text-emerald-700 font-semibold border-gray-300"
+                  placeholder="Auto"
+                />
+              </div>
+            </div>
+
+            {/* Row 3: Bag Weight Each, No. of Bags (auto), Remaining */}
+            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
+                <input
+                  value={items[0]?.bagWeightEachKg ?? ""}
+                  onChange={(e) => handleItemChange(0, "bagWeightEachKg", e.target.value)}
+                  placeholder="65"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                    errors.itemRows?.[0]?.bagWeightEachKg ? "border-red-500 bg-red-50" : "border-gray-300"
+                  }`}
+                />
+                {renderFieldError(errors.itemRows?.[0]?.bagWeightEachKg)}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">No. of Bags (auto)</label>
+                <input
+                  value={items[0]?.bagCount ?? ""}
+                  readOnly
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300"
+                  placeholder="Auto"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Remaining Weight</label>
+                <input
+                  value={items[0]?.remainingWeight ?? ""}
+                  readOnly
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-orange-50 text-orange-600 font-semibold border-orange-200"
+                  placeholder="—"
+                />
               </div>
             </div>
 
@@ -1712,158 +1712,136 @@ export default function GatePassIN({ highlightId = "" }) {
                 {(items || []).slice(1).map((it, idx) => {
                   const realIdx = idx + 1;
                   return (
-                    <div key={`item-${realIdx}`} className="space-y-3">
-                      <div className="grid md:grid-cols-3 gap-3 items-end">
-                        <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Company Name
-                        </label>
-                        {renderBrandDropdown(it, realIdx)}
-                        {renderFieldError(errors.itemRows?.[realIdx]?.brand)}
+                    <div key={`item-${realIdx}`} className="space-y-3 border-t pt-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-500">Item #{realIdx + 1}</span>
+                        <button
+                          type="button"
+                          onClick={() => setItems((prev) => prev.filter((_x, i) => i !== realIdx))}
+                          className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Product Name</label>
-                        {it?.productMode !== "input" ? (
-                          <select
-                            value={it?.productName ?? ""}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (v === OTHER_OPTION) {
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    productMode: "input",
-                                    productInput: "",
-                                  };
-                                  return updated;
-                                });
-                                return;
-                              }
-                              handleItemChange(realIdx, "productName", v);
-                              clearItemFieldError(realIdx, "productName");
-                            }}
-                            disabled={!String(it?.brand || "").trim()}
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                              errors.itemRows?.[realIdx]?.productName
-                                ? "border-red-500 bg-red-50"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <option value="">
-                              {it?.brand ? "Select product" : "Select company first"}
-                            </option>
-                            {getProductOptionsForBrand(it?.brand).map((name, idx2) => (
-                              <option key={`${name}-${idx2}`} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                            <option value={OTHER_OPTION}>Add New</option>
-                          </select>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={it?.productInput ?? ""}
-                              onChange={(e) =>
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    productInput: sanitizeBrandText(e.target.value, 80),
-                                  };
-                                  return updated;
-                                })
-                              }
-                              placeholder="Enter product name"
-                              className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-                                errors.itemRows?.[realIdx]?.productName
-                                  ? "border-red-500 bg-red-50"
-                                  : "border-gray-300"
-                              }`}
-                            />
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const brand = String(it?.brand || "").trim();
-                                const input = it?.productInput || "";
-                                const result = await ensureProductOption(brand, input);
-                                setItems((prev) => {
-                                  const updated = [...prev];
-                                  updated[realIdx] = {
-                                    ...updated[realIdx],
-                                    productName: result.name,
-                                    productInput: "",
-                                    productMode: "list",
-                                  };
-                                  return updated;
-                                });
+                      <div className="grid md:grid-cols-3 gap-3 items-start">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Company Name</label>
+                          {renderBrandDropdown(it, realIdx)}
+                          {renderFieldError(errors.itemRows?.[realIdx]?.brand)}
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Product Name</label>
+                          {it?.productMode !== "input" ? (
+                            <select
+                              value={it?.productName ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === OTHER_OPTION) {
+                                  setItems((prev) => {
+                                    const updated = [...prev];
+                                    updated[realIdx] = { ...updated[realIdx], productMode: "input", productInput: "" };
+                                    return updated;
+                                  });
+                                  return;
+                                }
+                                handleItemChange(realIdx, "productName", v);
                                 clearItemFieldError(realIdx, "productName");
                               }}
-                              className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                              disabled={!String(it?.brand || "").trim()}
+                              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                                errors.itemRows?.[realIdx]?.productName ? "border-red-500 bg-red-50" : "border-gray-300"
+                              }`}
                             >
-                              List
-                            </button>
-                          </div>
-                        )}
-                        {renderFieldError(errors.itemRows?.[realIdx]?.productName)}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">No. of Bags</label>
-                        <input
-                          value={it?.bagCount ?? ""}
-                          onChange={(e) => handleItemChange(realIdx, "bagCount", e.target.value)}
-                          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                            errors.itemRows?.[realIdx]?.bagCount
-                              ? "border-red-500 bg-red-50"
-                              : "border-gray-300"
-                          }`}
-                        />
-                        {renderFieldError(errors.itemRows?.[realIdx]?.bagCount)}
-                      </div>
-                      </div>
-                      <div className="grid md:grid-cols-3 gap-3 items-end">
-                        <div>
-                        <label className="block text-xs text-gray-500 mb-1">Bag Weight (kg)</label>
-                        <input
-                          value={it?.bagWeightKg ?? ""}
-                          onChange={(e) => handleItemChange(realIdx, "bagWeightKg", e.target.value)}
-                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                        />
+                              <option value="">{it?.brand ? "Select product" : "Select company first"}</option>
+                              {getProductOptionsForBrand(it?.brand).map((name, idx2) => (
+                                <option key={`${name}-${idx2}`} value={name}>{name}</option>
+                              ))}
+                              <option value={OTHER_OPTION}>Add New</option>
+                            </select>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={it?.productInput ?? ""}
+                                onChange={(e) =>
+                                  setItems((prev) => {
+                                    const updated = [...prev];
+                                    updated[realIdx] = { ...updated[realIdx], productInput: sanitizeBrandText(e.target.value, 80) };
+                                    return updated;
+                                  })
+                                }
+                                placeholder="Enter product name"
+                                className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                                  errors.itemRows?.[realIdx]?.productName ? "border-red-500 bg-red-50" : "border-gray-300"
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const brand = String(it?.brand || "").trim();
+                                  const input = it?.productInput || "";
+                                  const result = await ensureProductOption(brand, input);
+                                  setItems((prev) => {
+                                    const updated = [...prev];
+                                    updated[realIdx] = { ...updated[realIdx], productName: result.name, productInput: "", productMode: "list" };
+                                    return updated;
+                                  });
+                                  clearItemFieldError(realIdx, "productName");
+                                }}
+                                className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                              >
+                                List
+                              </button>
+                            </div>
+                          )}
+                          {renderFieldError(errors.itemRows?.[realIdx]?.productName)}
                         </div>
                         <div>
-                        <label className="block text-xs text-gray-500 mb-1">Empty Bag (kg)</label>
-                        <input
-                          value={it?.emptyBagWeightKg ?? ""}
-                          onChange={(e) => handleItemChange(realIdx, "emptyBagWeightKg", e.target.value)}
-                          onBlur={(e) =>
-                            handleItemChange(realIdx, "emptyBagWeightKgBlur", e.target.value)
-                          }
-                          placeholder="0.00"
-                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                        />
-                        </div>
-                        <div className="flex gap-2 items-end">
-                          <div className="flex-1">
-                          <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
+                          <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
                           <input
-                            value={it?.netWeightKg ?? ""}
-                            readOnly
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
-                              errors.itemRows?.[realIdx]?.netWeightKg
-                                ? "border-red-500"
-                                : "border-gray-300"
+                            value={it?.weightAtSmjKg ?? ""}
+                            onChange={(e) => handleItemChange(realIdx, "weightAtSmjKg", e.target.value)}
+                            placeholder="0"
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                              errors.itemRows?.[realIdx]?.weightAtSmjKg ? "border-red-500 bg-red-50" : "border-gray-300"
                             }`}
                           />
+                          {renderFieldError(errors.itemRows?.[realIdx]?.weightAtSmjKg)}
+                        </div>
+                      </div>
+                      <div className="grid md:grid-cols-4 gap-3 items-start">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Empty Bags (kg)</label>
+                          <input
+                            value={it?.emptyBagWeightKg ?? ""}
+                            onChange={(e) => handleItemChange(realIdx, "emptyBagWeightKg", e.target.value)}
+                            placeholder="0"
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
+                          <input value={it?.netWeightKg ?? ""} readOnly className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300" />
                           {renderFieldError(errors.itemRows?.[realIdx]?.netWeightKg)}
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg)</label>
+                          <input
+                            value={it?.bagWeightEachKg ?? ""}
+                            onChange={(e) => handleItemChange(realIdx, "bagWeightEachKg", e.target.value)}
+                            placeholder="65"
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                              errors.itemRows?.[realIdx]?.bagWeightEachKg ? "border-red-500 bg-red-50" : "border-gray-300"
+                            }`}
+                          />
+                          {renderFieldError(errors.itemRows?.[realIdx]?.bagWeightEachKg)}
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Bags / Weight</label>
+                          <div className="flex gap-2">
+                            <input value={it?.bagCount ?? ""} readOnly className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300" placeholder="Auto" />
+                            <span className="self-center text-xs text-emerald-600 whitespace-nowrap">{it?.netWeightManDisplay || ""}</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setItems((prev) => prev.filter((_x, i) => i !== realIdx))}
-                            className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
-                            title="Remove line"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          {it?.remainingWeight && <span className="text-xs text-orange-500 mt-1">{it.remainingWeight}</span>}
                         </div>
                       </div>
                     </div>
@@ -1892,20 +1870,10 @@ export default function GatePassIN({ highlightId = "" }) {
                   date: new Date().toISOString().slice(0, 10),
                   truckNo: "",
                   supplier: "",
-                  driverName: "",
-                  driverContact: "",
+                  weightOnArrival: "",
                   freightCharges: "",
                 });
-                setItems([
-                  {
-                    brand: "",
-                    productName: "",
-                    bagCount: "",
-                    bagWeightKg: "65",
-                    emptyBagWeightKg: "",
-                    netWeightKg: "",
-                  },
-                ]);
+                setItems([emptyItem()]);
                 setErrors({});
               }}
               className="px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-xs"

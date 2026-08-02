@@ -52,7 +52,17 @@ const ItemSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    bagWeightEachKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     emptyBagWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    weightAtSmjKg: {
       type: Number,
       min: 0,
       default: 0,
@@ -168,6 +178,12 @@ const GatePassSchema = new mongoose.Schema(
     },
 
     vehicleWeight: {
+      type: Number,
+      min: 0,
+    },
+
+    // Weight on arrival (weighbridge / initial weight at entry)
+    weightOnArrival: {
       type: Number,
       min: 0,
     },
