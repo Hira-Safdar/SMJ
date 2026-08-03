@@ -48,7 +48,7 @@ const MENU = [
     path: "/accounting-finance",
     children: [
       { name: "Chart of Accounts", path: "/accounting-finance?tab=coa" },
-      { name: "Journal Entry", path: "/accounting-finance?tab=journal-entry" },
+      { name: "Daybook Entries", path: "/accounting-finance?tab=journal-entry" },
       { name: "Journal", path: "/accounting-finance?tab=journal-report" },
       { name: "Ledger", path: "/accounting-finance?tab=ledger" },
       { name: "Trial Balance", path: "/accounting-finance?tab=trial" },
@@ -61,11 +61,10 @@ const MENU = [
     icon: <ChartNoAxesCombined size={18} />,
     path: "/reports",
     children: [
-      { name: "Accounting & Finance Reports", path: "/reports?tab=acc-reports" },
+      { name: "Gatepass Reports", path: "/reports?tab=gatepass" },
       { name: "Stock Reports", path: "/reports?tab=stock-reports" },
       { name: "Production Summary", path: "/reports?tab=production-summary" },
-      { name: "Gatepass Reports", path: "/reports?tab=gatepass" },
-      { name: "Customer List", path: "/reports?tab=customers" },
+      { name: "Accounting & Finance Reports", path: "/reports?tab=acc-reports" },
     ],
   },
   {
@@ -86,14 +85,21 @@ export default function Sidebar({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [openMenu, setOpenMenu] = useState(null);
+  const [openMenus, setOpenMenus] = useState(() =>
+    MENU.filter((m) => Array.isArray(m.children) && m.children.length > 1).map((m) => m.name),
+  );
+
+  const toggleMenu = (name) =>
+    setOpenMenus((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
 
   useEffect(() => {
     const current = location.pathname + location.search;
     const parent = MENU.find(
       (m) => Array.isArray(m.children) && m.children.length > 1 && m.children.some((c) => c.path === current),
     );
-    if (parent) setOpenMenu(parent.name);
+    if (parent) {
+      setOpenMenus((prev) => (prev.includes(parent.name) ? prev : [...prev, parent.name]));
+    }
   }, [location.pathname, location.search]);
 
   return (
@@ -150,7 +156,7 @@ export default function Sidebar({
                 const childCount = Array.isArray(m.children) ? m.children.length : 0;
                 const hasDropdown = childCount > 1;
                 const hasSingleChild = childCount === 1;
-                const isExpanded = openMenu === m.name;
+                const isExpanded = openMenus.includes(m.name);
                 const childActive = Array.isArray(m.children) && m.children.some((c) => c.path === currentRoute);
                 const active = location.pathname === m.path || currentRoute === m.path || childActive;
                 return (
@@ -160,9 +166,7 @@ export default function Sidebar({
                         type="button"
                         title={!isOpen ? m.name : ""}
                         onClick={() => {
-                          setOpenMenu((prev) =>
-                            prev === m.name ? null : m.name,
-                          );
+                          toggleMenu(m.name);
                           if (m.children && m.children[0]) {
                             navigate(m.children[0].path);
                           }

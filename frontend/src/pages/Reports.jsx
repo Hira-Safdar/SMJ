@@ -25,18 +25,17 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const REPORT_TABS = [
-  { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
+  { key: "gatepass", label: "Gatepass Reports", icon: <Truck size={16} /> },
   { key: "stock-reports", label: "Stock Reports", icon: <Package size={16} /> },
   { key: "production-summary", label: "Production Summary", icon: <Factory size={16} /> },
-  { key: "gatepass", label: "Gatepass Reports", icon: <Truck size={16} /> },
-  { key: "customers", label: "Customer List", icon: <UserRound size={16} /> },
+  { key: "acc-reports", label: "Accounting and Finance Reports", icon: <BookOpen size={16} /> },
 ];
 
 const REPORT_TAB_MAP = new Map(REPORT_TABS.map((t) => [t.key, t]));
 const REPORT_GROUPS = [
   {
-    label: "Accounting",
-    tabs: ["acc-reports"],
+    label: "Gate Pass",
+    tabs: ["gatepass"],
   },
   {
     label: "Stock",
@@ -47,12 +46,8 @@ const REPORT_GROUPS = [
     tabs: ["production-summary"],
   },
   {
-    label: "Gate Pass",
-    tabs: ["gatepass"],
-  },
-  {
-    label: "Masters",
-    tabs: ["customers"],
+    label: "Accounting",
+    tabs: ["acc-reports"],
   },
 ];
 
@@ -174,6 +169,11 @@ const gatePassInReportColumns = [
     render: (_v, row) => gpItemListText(row, (it) => gpItemBrand(it)),
   },
   {
+    key: "truckNo",
+    label: "Truck",
+    render: (v) => (v && v !== "IN-0000" ? v : "-"),
+  },
+  {
     key: "productNames",
     label: "Product Name",
     render: (_v, row) => gpItemListText(row, (it) => gpItemName(it)),
@@ -212,6 +212,11 @@ const gatePassInReportColumns = [
     key: "bagCount",
     label: "No. of Bags",
     render: (_v, row) => gpItemListText(row, (it) => gpComputeBags(it)),
+  },
+  {
+    key: "freightCharges",
+    label: "Freight",
+    render: (v) => (v != null && Number(v) > 0 ? gpFmtNum(v) : "-"),
   },
 ];
 

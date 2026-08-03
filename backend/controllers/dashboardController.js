@@ -348,15 +348,24 @@ const getDashboardStats = async (req, res) => {
 
     // Raw paddy stock from full paddy ledger (gate pass + production batch allocation/returns)
     const paddyLedgerRows = await StockLedger.find({ productTypeId: null })
-      .select("type netWeightKg productTypeName")
+      .select("type netWeightKg productTypeName companyName")
       .lean();
-    const paddyKg = paddyLedgerRows.reduce((sum, l) => {
+    const rawByCompanyMap = new Map();
+    let paddyKg = 0;
+    paddyLedgerRows.forEach((l) => {
       const n = String(l.productTypeName || "").toLowerCase().trim();
-      if (!(n === "paddy" || n === "unprocessed paddy")) return sum;
+      if (!(n === "paddy" || n === "unprocessed paddy")) return;
       const net = Number(l.netWeightKg || 0);
-      if (!net) return sum;
-      return sum + (l.type === "OUT" ? -net : net);
-    }, 0);
+      if (!net) return;
+      const delta = l.type === "OUT" ? -net : net;
+      paddyKg += delta;
+      const key = l.companyName || "Unknown";
+      rawByCompanyMap.set(key, (rawByCompanyMap.get(key) || 0) + delta);
+    });
+    const rawBreakdown = Array.from(rawByCompanyMap.entries())
+      .map(([name, value]) => ({ name, value: Math.max(0, value) }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value);
     const productionBreakdown = Array.from(productionByProductMap.entries())
       .map(([name, value]) => ({ name, value: Math.max(0, value) }))
       .filter((row) => row.value > 0)
@@ -390,6 +399,7 @@ const getDashboardStats = async (req, res) => {
         },
         stockSummaryBreakdown: {
           production: productionBreakdown,
+          raw: rawBreakdown,
         },
       },
     });

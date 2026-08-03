@@ -28,6 +28,7 @@ const createEmptyOutputForm = () => ({
   productInput: "",
   productTypeId: "",
   weightKg: "",
+  bagWeightEachKg: "",
   numBags: "",
   emptyBagWeightKg: "",
   netWeightKg: "",
@@ -45,6 +46,13 @@ function fmtDate(v) {
 
 const intClean = (v) =>
   String(v).replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "");
+
+const decClean = (v) => {
+  const s = String(v).replace(/[^\d.]/g, "");
+  const parts = s.split(".");
+  if (parts.length > 2) return parts[0] + "." + parts.slice(1).join("");
+  return s;
+};
 
 const fmtKg = (n) => Math.round(Number(n || 0)).toLocaleString();
 
@@ -86,6 +94,7 @@ export default function Production() {
   const [editingOutputId, setEditingOutputId] = useState(null);
   const [editOutputForm, setEditOutputForm] = useState({
     weightKg: "",
+    bagWeightEachKg: "",
     numBags: "",
     emptyBagWeightKg: "",
     productTypeId: "",
@@ -163,6 +172,13 @@ export default function Production() {
         .map((r) => ({
           companyName: r.companyName || "",
           balanceKg: Number(r.balanceKg || 0),
+          gatepassInKg: (r.sources || [])
+            .filter(
+              (s) =>
+                String(s.direction || "").toUpperCase() === "IN" &&
+                /gate\s?pass/i.test(String(s.sourceType || ""))
+            )
+            .reduce((sum, s) => sum + (Number(s.qtyKg) || 0), 0),
         }));
       setPaddyByCompany(paddyRows);
       setPaddyStockKg(paddyRows.reduce((s, r) => s + Number(r.balanceKg || 0), 0));
@@ -241,6 +257,34 @@ export default function Production() {
 
   const selectedGroup =
     groups.find((g) => g._id === selectedGroupId) || null;
+
+  const selectedGroupAvailableKg = Number(
+    paddyByCompany.find(
+      (r) =>
+        r.companyName &&
+        selectedGroup &&
+        String(r.companyName).toLowerCase() ===
+          String(selectedGroup.sourceCompanyName).toLowerCase()
+    )?.balanceKg || 0
+  );
+
+  const selectedGroupGatepassInKg = Number(
+    paddyByCompany.find(
+      (r) =>
+        r.companyName &&
+        selectedGroup &&
+        String(r.companyName).toLowerCase() ===
+          String(selectedGroup.sourceCompanyName).toLowerCase()
+    )?.gatepassInKg || 0
+  );
+
+  const paddyRowFor = (companyName) =>
+    paddyByCompany.find(
+      (r) =>
+        r.companyName &&
+        companyName &&
+        String(r.companyName).toLowerCase() === String(companyName).toLowerCase()
+    );
 
   const tabGroups = useMemo(
     () =>
@@ -390,12 +434,17 @@ export default function Production() {
   // ---------------------------------------------------------------
   // OUTPUT ACTIONS
   // ---------------------------------------------------------------
-  const outputNetKg = useMemo(() => {
+  // Auto-calc like gatepass: bags = floor(weight / bagWeight), net = weight - bags*emptyBag
+  const outputBagsAndNet = useMemo(() => {
     const weight = Number(outputForm.weightKg) || 0;
-    const bags = Number(outputForm.numBags) || 0;
+    const bagW = Number(outputForm.bagWeightEachKg) || 0;
     const empty = Number(outputForm.emptyBagWeightKg) || 0;
-    return weight - bags * empty;
-  }, [outputForm.weightKg, outputForm.numBags, outputForm.emptyBagWeightKg]);
+    const bags = weight > 0 && bagW > 0 ? Math.floor(weight / bagW) : 0;
+    const extraKg =
+      weight > 0 && bagW > 0 ? +(weight - bags * bagW).toFixed(3) : 0;
+    const net = +(Math.max(weight - bags * empty, 0)).toFixed(3);
+    return { bags, extraKg, net };
+  }, [outputForm.weightKg, outputForm.bagWeightEachKg, outputForm.emptyBagWeightKg]);
 
   const addProductByName = useCallback(
     async (rawName) => {
@@ -457,13 +506,16 @@ export default function Production() {
     }
     if (!productTypeId) err.outputProduct = "Select product.";
     if (!outputForm.weightKg) err.outputWeight = "Enter weight (kg).";
-    if (!outputForm.numBags) err.outputBags = "Enter number of bags.";
+    if (!outputForm.bagWeightEachKg || Number(outputForm.bagWeightEachKg) <= 0)
+      err.outputBagWeight = "Enter weight of bag (kg).";
     if (outputForm.emptyBagWeightKg === "") err.outputEmptyBag = "Enter empty bag weight.";
     else {
-      const net = outputNetKg;
+      const { bags, net } = outputBagsAndNet;
       if (net <= 0) err.outputNet = "Net weight must be greater than 0.";
       else if (net > (Number(selectedGroup.remainingPaddyKg) || 0)) {
         err.outputNet = `Maximum product weight remaining: ${fmtKg(selectedGroup.remainingPaddyKg)} kg.`;
+      } else if (bags < 1) {
+        err.outputNet = "Weight is less than bag weight, so no full bags can be counted.";
       }
     }
     if (Object.keys(err).length) {
@@ -478,7 +530,7 @@ export default function Production() {
         productTypeName:
           (products || []).find((p) => p._id === productTypeId)?.name || "",
         weightKg: Number(outputForm.weightKg),
-        numBags: Number(outputForm.numBags),
+        bagWeightEachKg: Number(outputForm.bagWeightEachKg),
         emptyBagWeightKg: Number(outputForm.emptyBagWeightKg),
       });
       if (!res.data?.success) toast.error(res.data?.message || "Failed to add product.");
@@ -500,6 +552,7 @@ export default function Production() {
     setEditOutputForm({
       productTypeId: o.productTypeId || "",
       weightKg: String(Number(o.weightKg) || 0),
+      bagWeightEachKg: String(Number(o.bagWeightEachKg) || 0),
       numBags: String(Number(o.numBags) || 0),
       emptyBagWeightKg: String(Number(o.emptyBagWeightKg) || 0),
     });
@@ -508,9 +561,10 @@ export default function Production() {
   async function handleSaveOutput(outputId) {
     if (!selectedGroup || !selectedGroup._id) return;
     const weight = Number(editOutputForm.weightKg) || 0;
-    const bags = Number(editOutputForm.numBags) || 0;
+    const bagW = Number(editOutputForm.bagWeightEachKg) || 0;
     const empty = Number(editOutputForm.emptyBagWeightKg) || 0;
-    const net = weight - bags * empty;
+    const bags = weight > 0 && bagW > 0 ? Math.floor(weight / bagW) : 0;
+    const net = +(Math.max(weight - bags * empty, 0)).toFixed(3);
     if (net <= 0) {
       setFieldErrors((e) => ({ ...e, editOutputNet: "Net weight must be greater than 0." }));
       return;
@@ -524,7 +578,7 @@ export default function Production() {
           productTypeId: editOutputForm.productTypeId || undefined,
           productTypeName: product?.name || undefined,
           weightKg: weight,
-          numBags: bags,
+          bagWeightEachKg: bagW,
           emptyBagWeightKg: empty,
         }
       );
@@ -694,36 +748,38 @@ export default function Production() {
                 className={`border rounded px-2 py-1.5 w-full ${fieldErrors.date ? "border-red-500 bg-red-50" : ""}`}
               />
             </div>
-            <div className="col-span-4">
-              <label className="block text-[10px] text-gray-500 mb-0.5">Select Paddy Resource</label>
+            <div className="col-span-3">
+              <label className="block text-[10px] text-gray-500 mb-0.5">Paddy Source</label>
               <select
                 value={batchForm.sourceCompanyName}
                 onChange={(e) => setBatchForm((f) => ({ ...f, sourceCompanyName: e.target.value }))}
                 className={`border rounded px-2 py-1.5 w-full ${fieldErrors.sourceCompanyName ? "border-red-500 bg-red-50" : ""}`}
               >
-                <option value="">Select paddy source company</option>
+                <option value="">Company</option>
                 {paddyCompanyOptions.map((name, idx) => (
                   <option key={`${name}-${idx}`} value={name}>{name}</option>
                 ))}
               </select>
-              {batchForm.sourceCompanyName && (
-                <p className="text-[10px] text-gray-500 mt-0.5">
-                  Available: {fmtKg(selectedSourcePaddyKg)} kg
-                </p>
-              )}
             </div>
             <div className="col-span-3">
               <label className="block text-[10px] text-gray-500 mb-0.5">Paddy Weight (kg)</label>
-              <input
-                type="number"
-                value={batchForm.paddyWeightKg}
-                onChange={(e) => setBatchForm((f) => ({ ...f, paddyWeightKg: intClean(e.target.value) }))}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreateBatch(); } }}
-                placeholder="e.g. 1000"
-                className={`border rounded px-2 py-1.5 w-full ${fieldErrors.paddyWeightKg ? "border-red-500 bg-red-50" : ""}`}
-              />
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  value={batchForm.paddyWeightKg}
+                  onChange={(e) => setBatchForm((f) => ({ ...f, paddyWeightKg: intClean(e.target.value) }))}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreateBatch(); } }}
+                  placeholder="e.g. 1000"
+                  className={`flex-1 min-w-0 border rounded px-2 py-1.5 ${fieldErrors.paddyWeightKg ? "border-red-500 bg-red-50" : ""}`}
+                />
+                <span className="w-[52px] shrink-0 text-right text-[10px] font-medium text-amber-700 whitespace-nowrap overflow-hidden">
+                  {batchForm.sourceCompanyName && selectedSourcePaddyKg > 0
+                    ? `${fmtKg(selectedSourcePaddyKg)} kg`
+                    : ""}
+                </span>
+              </div>
             </div>
-            <div className="col-span-2">
+            <div className="col-span-3">
               <button
                 type="button"
                 onClick={handleCreateBatch}
@@ -750,6 +806,7 @@ export default function Production() {
                 {tabGroups.map((g) => {
                   const isOpen = expandedGroups.has(g._id);
                   const isSelected = selectedGroupId === g._id;
+                  const pRow = paddyRowFor(g.sourceCompanyName);
                   return (
                     <div key={g._id || g.sourceCompanyName}>
                       <div
@@ -773,7 +830,7 @@ export default function Production() {
                             {g.groupNo && <span className="text-[10px] text-gray-400">{g.groupNo}</span>}
                           </div>
                           <div className="text-[11px] text-gray-500">
-                            {(g.batches || []).length} batches · Paddy {fmtKg(g.totalPaddyWeightKg)} kg · Output {fmtKg(g.totalOutputWeightKg)} kg · Remaining {fmtKg(g.remainingPaddyKg)} kg
+                            {(g.batches || []).length} batches · Total {fmtKg(pRow?.gatepassInKg || 0)} kg · Output {fmtKg(g.totalOutputWeightKg)} kg · Remaining {fmtKg(pRow?.balanceKg || 0)} kg
                           </div>
                         </div>
                       </div>
@@ -791,6 +848,21 @@ export default function Production() {
                               <span className="ml-auto flex items-center gap-1">
                                 {b.status === "IN_PROCESS" && (
                                   <>
+                                    <button
+                                      type="button"
+                                      title="Edit"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedGroupId(g._id);
+                                        setExpandedGroups((prev) => new Set(prev).add(g._id));
+                                        startEditBatch(b);
+                                        setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 120);
+                                      }}
+                                      disabled={working}
+                                      className="p-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                    >
+                                      <Edit2 size={13} />
+                                    </button>
                                     <button
                                       type="button"
                                       title="Complete"
@@ -862,16 +934,16 @@ export default function Production() {
               {/* Totals strip */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-emerald-50 rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-gray-500">Total Weight (all batches)</div>
-                  <div className="text-lg font-bold text-emerald-800">{fmtKg(selectedGroup.totalPaddyWeightKg)} kg</div>
+                  <div className="text-[10px] text-gray-500">Total (gatepass in)</div>
+                  <div className="text-lg font-bold text-emerald-800">{fmtKg(selectedGroupGatepassInKg)} kg</div>
                 </div>
                 <div className="bg-teal-50 rounded-lg p-2 text-center">
                   <div className="text-[10px] text-gray-500">Products Made</div>
                   <div className="text-lg font-bold text-teal-800">{fmtKg(selectedGroup.totalOutputWeightKg)} kg</div>
                 </div>
                 <div className="bg-amber-50 rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-gray-500">Remaining</div>
-                  <div className="text-lg font-bold text-amber-800">{fmtKg(selectedGroup.remainingPaddyKg)} kg</div>
+                  <div className="text-[10px] text-gray-500">Remaining (stock)</div>
+                  <div className="text-lg font-bold text-amber-800">{fmtKg(selectedGroupAvailableKg)} kg</div>
                 </div>
               </div>
 
@@ -900,11 +972,13 @@ export default function Production() {
                             <div className="flex items-center justify-end gap-1">
                               {b.status === "IN_PROCESS" && (
                                 <>
-                                  <button type="button" title="Edit" onClick={() => startEditBatch(b)} className="p-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">
-                                    <Edit2 size={12} />
+                                  <button type="button" onClick={() => startEditBatch(b)} className="px-1.5 py-0.5 rounded border border-amber-200 text-amber-700 hover:bg-amber-50 flex items-center gap-0.5">
+                                    <Edit2 size={11} />
+                                    <span>Edit</span>
                                   </button>
-                                  <button type="button" title="Complete" onClick={() => setConfirmState({ type: "COMPLETE_BATCH", batch: b, group: selectedGroup })} disabled={working} className="p-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50">
-                                    <CheckCircle2 size={12} />
+                                  <button type="button" onClick={() => setConfirmState({ type: "COMPLETE_BATCH", batch: b, group: selectedGroup })} disabled={working} className="px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50 flex items-center gap-0.5">
+                                    <CheckCircle2 size={11} />
+                                    <span>Complete</span>
                                   </button>
                                 </>
                               )}
@@ -986,12 +1060,12 @@ export default function Production() {
                 {outputFormOpen && selectedGroup.status === "READY" && (
                   <div className="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3 mb-2">
                     <div className="grid grid-cols-12 gap-2 text-xs items-end">
-                      <div className="col-span-12 sm:col-span-4">
+                      <div className="col-span-12 sm:col-span-6">
                         <label className="block text-[10px] text-gray-500 mb-0.5">Company (source)</label>
                         <input type="text" readOnly value={selectedGroup.sourceCompanyName} className="border rounded px-2 py-1.5 w-full bg-gray-100 cursor-not-allowed" />
                       </div>
                       {outputForm.productMode === "list" ? (
-                        <div className="col-span-12 sm:col-span-4">
+                        <div className="col-span-12 sm:col-span-6">
                           <label className="block text-[10px] text-gray-500 mb-0.5">Product Name</label>
                           <select
                             value={outputForm.productTypeId}
@@ -1015,7 +1089,7 @@ export default function Production() {
                           </select>
                         </div>
                       ) : (
-                        <div className="col-span-12 sm:col-span-4 flex items-end gap-1">
+                        <div className="col-span-12 sm:col-span-6 flex items-end gap-1">
                           <div className="flex-1">
                             <label className="block text-[10px] text-gray-500 mb-0.5">New Product Name</label>
                             <input
@@ -1031,7 +1105,7 @@ export default function Production() {
                           </button>
                         </div>
                       )}
-                      <div className="col-span-4 sm:col-span-2">
+                      <div className="col-span-6 sm:col-span-3">
                         <label className="block text-[10px] text-gray-500 mb-0.5">Weight (kg)</label>
                         <input
                           type="number"
@@ -1042,33 +1116,45 @@ export default function Production() {
                           className={`border rounded px-2 py-1.5 w-full ${fieldErrors.outputWeight ? "border-red-500 bg-red-50" : ""}`}
                         />
                       </div>
-                      <div className="col-span-4 sm:col-span-2">
-                        <label className="block text-[10px] text-gray-500 mb-0.5">No of Bags</label>
+                      <div className="col-span-6 sm:col-span-3">
+                        <label className="block text-[10px] text-gray-500 mb-0.5">Weight of Bag (kg)</label>
                         <input
                           type="number"
-                          value={outputForm.numBags}
-                          onChange={(e) => setOutputForm((f) => ({ ...f, numBags: intClean(e.target.value) }))}
+                          value={outputForm.bagWeightEachKg}
+                          onChange={(e) => setOutputForm((f) => ({ ...f, bagWeightEachKg: decClean(e.target.value) }))}
                           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddOutput(); } }}
-                          placeholder="e.g. 14"
-                          className={`border rounded px-2 py-1.5 w-full ${fieldErrors.outputBags ? "border-red-500 bg-red-50" : ""}`}
+                          placeholder="e.g. 50"
+                          className={`border rounded px-2 py-1.5 w-full ${fieldErrors.outputBagWeight ? "border-red-500 bg-red-50" : ""}`}
                         />
                       </div>
-                      <div className="col-span-4 sm:col-span-2">
+                      <div className="col-span-6 sm:col-span-3">
                         <label className="block text-[10px] text-gray-500 mb-0.5">Empty Bag Wt (kg)</label>
                         <input
                           type="number"
+                          step="any"
                           value={outputForm.emptyBagWeightKg}
-                          onChange={(e) => setOutputForm((f) => ({ ...f, emptyBagWeightKg: intClean(e.target.value) }))}
+                          onChange={(e) => setOutputForm((f) => ({ ...f, emptyBagWeightKg: decClean(e.target.value) }))}
                           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddOutput(); } }}
                           placeholder="e.g. 0.5"
                           className={`border rounded px-2 py-1.5 w-full ${fieldErrors.outputEmptyBag ? "border-red-500 bg-red-50" : ""}`}
                         />
                       </div>
-                      <div className="col-span-12 sm:col-span-4 flex items-end justify-between gap-2 flex-wrap">
+                      <div className="col-span-6 sm:col-span-3">
+                        <label className="block text-[10px] text-gray-500 mb-0.5">No of Bags (auto)</label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={outputBagsAndNet.bags > 0
+                            ? `${outputBagsAndNet.bags} bag${outputBagsAndNet.bags > 1 ? "s" : ""}${outputBagsAndNet.extraKg > 0 ? ` + ${fmtKg(outputBagsAndNet.extraKg)} kg` : ""}`
+                            : "-"}
+                          className="border rounded px-2 py-1.5 w-full bg-gray-100 cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="col-span-12 flex items-end justify-between gap-2 flex-wrap">
                         <div className="text-xs">
                           <span className="text-gray-500">Net Weight: </span>
-                          <span className={`font-bold ${outputNetKg > 0 ? "text-emerald-700" : "text-gray-700"}`}>
-                            {outputNetKg > 0 ? fmtKg(outputNetKg) : "-"} kg
+                          <span className={`font-bold ${outputBagsAndNet.net > 0 ? "text-emerald-700" : "text-gray-700"}`}>
+                            {outputBagsAndNet.net > 0 ? fmtKg(outputBagsAndNet.net) : "-"} kg
                           </span>
                         </div>
                         <button
@@ -1081,9 +1167,9 @@ export default function Production() {
                           Add Output
                         </button>
                       </div>
-                      {(fieldErrors.outputNet || fieldErrors.outputProduct || fieldErrors.outputWeight || fieldErrors.outputBags || fieldErrors.outputEmptyBag) && (
+                      {(fieldErrors.outputNet || fieldErrors.outputProduct || fieldErrors.outputWeight || fieldErrors.outputBagWeight || fieldErrors.outputEmptyBag) && (
                         <p className="col-span-12 text-[10px] text-red-600">
-                          {[fieldErrors.outputProduct, fieldErrors.outputWeight, fieldErrors.outputBags, fieldErrors.outputEmptyBag, fieldErrors.outputNet].filter(Boolean).join(" · ")}
+                          {[fieldErrors.outputProduct, fieldErrors.outputWeight, fieldErrors.outputBagWeight, fieldErrors.outputEmptyBag, fieldErrors.outputNet].filter(Boolean).join(" · ")}
                         </p>
                       )}
                     </div>
@@ -1097,6 +1183,7 @@ export default function Production() {
                       <tr>
                         <th className="p-2 text-left">Product</th>
                         <th className="p-2 text-right">Weight (kg)</th>
+                        <th className="p-2 text-right">Bag Wt (kg)</th>
                         <th className="p-2 text-right">Bags</th>
                         <th className="p-2 text-right">Empty Bag (kg)</th>
                         <th className="p-2 text-right">Net (kg)</th>
@@ -1124,17 +1211,25 @@ export default function Production() {
                                 <input type="number" value={editOutputForm.weightKg} onChange={(e) => setEditOutputForm((f) => ({ ...f, weightKg: intClean(e.target.value) }))} className="border rounded px-1 py-0.5 text-[11px] w-20 text-right" />
                               </td>
                               <td className="p-2">
-                                <input type="number" value={editOutputForm.numBags} onChange={(e) => setEditOutputForm((f) => ({ ...f, numBags: intClean(e.target.value) }))} className="border rounded px-1 py-0.5 text-[11px] w-16 text-right" />
+                                <input type="number" value={editOutputForm.bagWeightEachKg} onChange={(e) => setEditOutputForm((f) => ({ ...f, bagWeightEachKg: decClean(e.target.value) }))} className="border rounded px-1 py-0.5 text-[11px] w-16 text-right" />
+                              </td>
+                              <td className="p-2 text-right">
+                                {(() => {
+                                  const w = Number(editOutputForm.weightKg) || 0;
+                                  const bw = Number(editOutputForm.bagWeightEachKg) || 0;
+                                  return w > 0 && bw > 0 ? String(Math.floor(w / bw)) : "0";
+                                })()}
                               </td>
                               <td className="p-2">
-                                <input type="number" value={editOutputForm.emptyBagWeightKg} onChange={(e) => setEditOutputForm((f) => ({ ...f, emptyBagWeightKg: intClean(e.target.value) }))} className="border rounded px-1 py-0.5 text-[11px] w-16 text-right" />
+                                <input type="number" step="any" value={editOutputForm.emptyBagWeightKg} onChange={(e) => setEditOutputForm((f) => ({ ...f, emptyBagWeightKg: decClean(e.target.value) }))} className="border rounded px-1 py-0.5 text-[11px] w-16 text-right" />
                               </td>
                               <td className="p-2 text-right font-semibold">
                                 {(() => {
                                   const w = Number(editOutputForm.weightKg) || 0;
-                                  const bg = Number(editOutputForm.numBags) || 0;
+                                  const bw = Number(editOutputForm.bagWeightEachKg) || 0;
                                   const eb = Number(editOutputForm.emptyBagWeightKg) || 0;
-                                  return fmtKg(w - bg * eb);
+                                  const bg = w > 0 && bw > 0 ? Math.floor(w / bw) : 0;
+                                  return fmtKg(Math.max(w - bg * eb, 0));
                                 })()}
                               </td>
                               <td className="p-2">
@@ -1148,6 +1243,7 @@ export default function Production() {
                             <>
                               <td className="p-2">{o.productTypeName}</td>
                               <td className="p-2 text-right">{fmtKg(o.weightKg)}</td>
+                              <td className="p-2 text-right">{Number(o.bagWeightEachKg) || 0}</td>
                               <td className="p-2 text-right">{o.numBags}</td>
                               <td className="p-2 text-right">{Number(o.emptyBagWeightKg) || 0}</td>
                               <td className="p-2 text-right font-semibold text-emerald-700">{fmtKg(o.netWeightKg)}</td>
@@ -1164,7 +1260,7 @@ export default function Production() {
                         </tr>
                       ))}
                       {(!selectedGroup.outputs || selectedGroup.outputs.length === 0) && (
-                        <tr><td colSpan={6} className="p-3 text-center text-gray-400">No products yet.</td></tr>
+                        <tr><td colSpan={7} className="p-3 text-center text-gray-400">No products yet.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1247,7 +1343,12 @@ export default function Production() {
 
       {/* Slip modal */}
       {showSlip && printGroup && (
-        <GroupSlipModal group={printGroup} millInfo={millInfo} onClose={() => { setShowSlip(false); setPrintGroup(null); }} />
+        <GroupSlipModal
+          group={printGroup}
+          millInfo={millInfo}
+          stockInfo={paddyRowFor(printGroup.sourceCompanyName)}
+          onClose={() => { setShowSlip(false); setPrintGroup(null); }}
+        />
       )}
 
       {/* Paddy distribution modal */}
@@ -1315,7 +1416,13 @@ function ConfirmModal({ title, message, confirmLabel, danger, onCancel, onConfir
 }
 
 /* ========== Group Slip modal ========== */
-function GroupSlipModal({ group, millInfo, onClose }) {
+function GroupSlipModal({ group, millInfo, stockInfo, onClose }) {
+  const statusLabel = {
+    OPEN: { text: "IN PROCESS", cls: "bg-amber-100 text-amber-800" },
+    READY: { text: "READY", cls: "bg-sky-100 text-sky-800" },
+    DONE: { text: "COMPLETED", cls: "bg-emerald-100 text-emerald-800" },
+  }[group.status] || { text: group.status || "", cls: "bg-gray-100 text-gray-700" };
+
   function handlePrint() {
     const printContents = document.getElementById("group-slip-card")?.innerHTML;
     if (!printContents) return;
@@ -1376,18 +1483,21 @@ function GroupSlipModal({ group, millInfo, onClose }) {
                 <div className="font-semibold">{group.groupNo}</div>
               </div>
             </div>
+            <div className="flex justify-center mb-2">
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusLabel.cls}`}>{statusLabel.text}</span>
+            </div>
             <div className="grid grid-cols-3 gap-1 text-[11px] mb-2">
               <div>
-                <div className="text-gray-500">Total Paddy</div>
-                <div className="font-semibold">{fmtKg(group.totalPaddyWeightKg)} kg</div>
+                <div className="text-gray-500">Total (In)</div>
+                <div className="font-semibold">{fmtKg(stockInfo?.gatepassInKg || 0)} kg</div>
               </div>
               <div>
                 <div className="text-gray-500">Output</div>
                 <div className="font-semibold">{fmtKg(group.totalOutputWeightKg)} kg</div>
               </div>
               <div>
-                <div className="text-gray-500">Remaining</div>
-                <div className="font-semibold">{fmtKg(group.remainingPaddyKg)} kg</div>
+                <div className="text-gray-500">Remaining (Stock)</div>
+                <div className="font-semibold">{fmtKg(stockInfo?.balanceKg || 0)} kg</div>
               </div>
             </div>
             <div className="text-[11px] font-semibold text-gray-700 mt-1">Products</div>

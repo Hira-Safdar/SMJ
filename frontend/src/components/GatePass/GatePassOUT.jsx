@@ -1739,7 +1739,19 @@ export default function GatePassOUT({ highlightId = "" }) {
           <div className="p-3 bg-gray-50 rounded-lg space-y-3">
             {(items || []).map((it, idx) => (
               <div key={`out-item-${idx}`} className="space-y-3">
-                <div className="grid md:grid-cols-5 gap-3 items-start">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">Product {idx + 1}</span>
+                  {idx > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => removeRow(idx)}
+                      className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid md:grid-cols-3 gap-3 items-start">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Company Name (Product Owner)</label>
                     {renderBrandDropdown(it, idx)}
@@ -1799,12 +1811,12 @@ export default function GatePassOUT({ highlightId = "" }) {
                     {renderFieldError(errors.itemRows?.[idx]?.productName)}
                   </div>
                   <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs text-gray-500">No. of Bags</label>
-                  </div>
-                  <input
-                    value={it.bagCount || ""}
-                    onChange={(e) => updateItemValue(idx, "bagCount", e.target.value)}
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs text-gray-500">No. of Bags</label>
+                    </div>
+                    <input
+                      value={it.bagCount || ""}
+                      onChange={(e) => updateItemValue(idx, "bagCount", e.target.value)}
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
                         errors.itemRows?.[idx]?.bagCount || isItemExceedingStock(it)
                           ? "border-red-500 bg-red-50"
@@ -1813,6 +1825,8 @@ export default function GatePassOUT({ highlightId = "" }) {
                     />
                     {renderFieldError(errors.itemRows?.[idx]?.bagCount)}
                   </div>
+                </div>
+                <div className="grid md:grid-cols-3 gap-3 items-start">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bag (kg)</label>
                     <input
@@ -1853,6 +1867,8 @@ export default function GatePassOUT({ highlightId = "" }) {
                         : errors.itemRows?.[idx]?.netWeightKg
                     )}
                   </div>
+                </div>
+                <div className="grid md:grid-cols-3 gap-3 items-start">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
                     <input
@@ -1887,17 +1903,6 @@ export default function GatePassOUT({ highlightId = "" }) {
                       className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300 bg-gray-100"
                     />
                   </div>
-                </div>
-                <div className="flex justify-end">
-                  {idx > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => removeRow(idx)}
-                      className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
-                    >
-                      Remove
-                    </button>
-                  )}
                 </div>
               </div>
             ))}

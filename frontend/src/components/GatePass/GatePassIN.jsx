@@ -1843,203 +1843,204 @@ export default function GatePassIN({ highlightId = "" }) {
           </h3>
           <div className="mb-2">{renderFieldError(errors.items)}</div>
           <div className="p-3 bg-gray-50 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-gray-600">
-                Add one or more product lines (company-based products, including paddy).
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setItems((prev) => [...(prev || []), emptyItem()])
-                }
-                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-              >
-                <Plus size={14} />
-                Add
-              </button>
-            </div>
-
-            {/* Row 1: Company, Product, Weight on Arrival */}
-            <div className="grid md:grid-cols-3 gap-3 items-start">
-              <div id="field-supplier">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs text-gray-500">
-                    Company Name (Product Owner)
-                  </label>
-                </div>
-                {renderBrandDropdown(items[0], 0)}
-                {renderFieldError(errors.itemRows?.[0]?.brand)}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Product Name</label>
-                {items[0]?.productMode !== "input" ? (
-                  <select
-                    value={items[0]?.productName ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === OTHER_OPTION) {
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = { ...updated[0], productMode: "input", productInput: "" };
-                          return updated;
-                        });
-                        return;
-                      }
-                      handleItemChange(0, "productName", v);
-                      clearItemFieldError(0, "productName");
-                    }}
-                    disabled={!String(items[0]?.brand || "").trim()}
-                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                      errors.itemRows?.[0]?.productName
-                        ? "border-red-500 bg-red-50"
-                        : "border-gray-300"
-                    }`}
-                  >
-                    <option value="">
-                      {items[0]?.brand ? "Select product" : "Select company first"}
-                    </option>
-                    {getProductOptionsForBrand(items[0]?.brand).map((name, idx) => (
-                      <option key={`${name}-${idx}`} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                    <option value={OTHER_OPTION}>Add New</option>
-                  </select>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={items[0]?.productInput ?? ""}
-                      onChange={(e) =>
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = {
-                            ...updated[0],
-                            productInput: sanitizeBrandText(e.target.value, 80),
-                          };
-                          return updated;
-                        })
-                      }
-                      placeholder="Enter product name"
-                      className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-                        errors.itemRows?.[0]?.productName
-                          ? "border-red-500 bg-red-50"
-                          : "border-gray-300"
-                      }`}
-                    />
+            {(items || []).map((it, idx) => (
+              <div key={`in-item-${idx}`} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">Product {idx + 1}</span>
+                  {idx > 0 && (
                     <button
                       type="button"
-                      onClick={async () => {
-                        const brand = String(items[0]?.brand || "").trim();
-                        const input = items[0]?.productInput || "";
-                        const result = await ensureProductOption(brand, input);
-                        setItems((prev) => {
-                          const updated = [...prev];
-                          updated[0] = {
-                            ...updated[0],
-                            productName: result.name,
-                            productInput: "",
-                            productMode: "list",
-                          };
-                          return updated;
-                        });
-                        clearItemFieldError(0, "productName");
-                      }}
-                      className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                      onClick={() => setItems((prev) => prev.filter((_x, i) => i !== idx))}
+                      className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
                     >
-                      List
+                      <Trash2 size={14} />
                     </button>
+                  )}
+                </div>
+
+                {/* Row 1: Company, Product, Weight on Arrival */}
+                <div className="grid md:grid-cols-3 gap-3 items-start">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs text-gray-500">
+                        Company Name (Product Owner)
+                      </label>
+                    </div>
+                    {renderBrandDropdown(it, idx)}
+                    {renderFieldError(errors.itemRows?.[idx]?.brand)}
                   </div>
-                )}
-                {renderFieldError(errors.itemRows?.[0]?.productName)}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Weight on Arrival (kg)</label>
-                <input
-                  inputMode="numeric"
-                  value={items[0]?.weightOnArrival ?? ""}
-                  onChange={(e) => handleItemChange(0, "weightOnArrival", e.target.value)}
-                  placeholder="0"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                />
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Product Name</label>
+                    {it?.productMode !== "input" ? (
+                      <select
+                        value={it?.productName ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === OTHER_OPTION) {
+                            setItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = { ...updated[idx], productMode: "input", productInput: "" };
+                              return updated;
+                            });
+                            return;
+                          }
+                          handleItemChange(idx, "productName", v);
+                          clearItemFieldError(idx, "productName");
+                        }}
+                        disabled={!String(it?.brand || "").trim()}
+                        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                          errors.itemRows?.[idx]?.productName
+                            ? "border-red-500 bg-red-50"
+                            : "border-gray-300"
+                        }`}
+                      >
+                        <option value="">
+                          {it?.brand ? "Select product" : "Select company first"}
+                        </option>
+                        {getProductOptionsForBrand(it?.brand).map((name, nIdx) => (
+                          <option key={`${name}-${nIdx}`} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                        <option value={OTHER_OPTION}>Add New</option>
+                      </select>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={it?.productInput ?? ""}
+                          onChange={(e) =>
+                            setItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = {
+                                ...updated[idx],
+                                productInput: sanitizeBrandText(e.target.value, 80),
+                              };
+                              return updated;
+                            })
+                          }
+                          placeholder="Enter product name"
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+                            errors.itemRows?.[idx]?.productName
+                              ? "border-red-500 bg-red-50"
+                              : "border-gray-300"
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const brand = String(it?.brand || "").trim();
+                            const input = it?.productInput || "";
+                            const result = await ensureProductOption(brand, input);
+                            setItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = {
+                                ...updated[idx],
+                                productName: result.name,
+                                productInput: "",
+                                productMode: "list",
+                              };
+                              return updated;
+                            });
+                            clearItemFieldError(idx, "productName");
+                          }}
+                          className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                        >
+                          List
+                        </button>
+                      </div>
+                    )}
+                    {renderFieldError(errors.itemRows?.[idx]?.productName)}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Weight on Arrival (kg)</label>
+                    <input
+                      inputMode="numeric"
+                      value={it?.weightOnArrival ?? ""}
+                      onChange={(e) => handleItemChange(idx, "weightOnArrival", e.target.value)}
+                      placeholder="0"
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    />
+                  </div>
+                </div>
 
-            {/* Row 2: Weight at SMJ, Empty Bags Weight, Net Weight (kg) */}
-            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
-                <input
-                  value={items[0]?.weightAtSmjKg ?? ""}
-                  onChange={(e) => handleItemChange(0, "weightAtSmjKg", e.target.value)}
-                  placeholder="0"
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                    errors.itemRows?.[0]?.weightAtSmjKg ? "border-red-500 bg-red-50" : "border-gray-300"
-                  }`}
-                />
-                {renderFieldError(errors.itemRows?.[0]?.weightAtSmjKg)}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={items[0]?.emptyBagWeightKg ?? ""}
-                  onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}
-                  placeholder="0"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
-                <input
-                  value={items[0]?.netWeightKg ?? ""}
-                  readOnly
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold ${
-                    errors.itemRows?.[0]?.netWeightKg ? "border-red-500" : "border-gray-300"
-                  }`}
-                />
-                {renderFieldError(errors.itemRows?.[0]?.netWeightKg)}
-              </div>
-            </div>
+                {/* Row 2: Weight at SMJ, Empty Bags Weight, Net Weight (kg) */}
+                <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
+                    <input
+                      value={it?.weightAtSmjKg ?? ""}
+                      onChange={(e) => handleItemChange(idx, "weightAtSmjKg", e.target.value)}
+                      placeholder="0"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                        errors.itemRows?.[idx]?.weightAtSmjKg ? "border-red-500 bg-red-50" : "border-gray-300"
+                      }`}
+                    />
+                    {renderFieldError(errors.itemRows?.[idx]?.weightAtSmjKg)}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={it?.emptyBagWeightKg ?? ""}
+                      onChange={(e) => handleItemChange(idx, "emptyBagWeightKg", e.target.value)}
+                      placeholder="0"
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
+                    <input
+                      value={it?.netWeightKg ?? ""}
+                      readOnly
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold ${
+                        errors.itemRows?.[idx]?.netWeightKg ? "border-red-500" : "border-gray-300"
+                      }`}
+                    />
+                    {renderFieldError(errors.itemRows?.[idx]?.netWeightKg)}
+                  </div>
+                </div>
 
-            {/* Row 3: Net Weight (man/kg), Bag Weight Each, No. of Bags (auto) */}
-            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
-                <input
-                  value={items[0]?.netWeightManDisplay ?? ""}
-                  readOnly
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-emerald-50 text-emerald-700 font-semibold border-gray-300"
-                  placeholder="Auto"
-                />
+                {/* Row 3: Net Weight (man/kg), Bag Weight Each, No. of Bags (auto) */}
+                <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
+                    <input
+                      value={it?.netWeightManDisplay ?? ""}
+                      readOnly
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-emerald-50 text-emerald-700 font-semibold border-gray-300"
+                      placeholder="Auto"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={it?.bagWeightEachKg ?? ""}
+                      onChange={(e) => handleItemChange(idx, "bagWeightEachKg", e.target.value)}
+                      placeholder="65"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                        errors.itemRows?.[idx]?.bagWeightEachKg ? "border-red-500 bg-red-50" : "border-gray-300"
+                      }`}
+                    />
+                    {renderFieldError(errors.itemRows?.[idx]?.bagWeightEachKg)}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">No. of Bags (auto)</label>
+                    <input
+                      value={it?.bagCount ?? ""}
+                      readOnly
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300"
+                      placeholder="Auto"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
-                <input
-                  type="number"
-                  step="any"
-                  value={items[0]?.bagWeightEachKg ?? ""}
-                  onChange={(e) => handleItemChange(0, "bagWeightEachKg", e.target.value)}
-                  placeholder="65"
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                    errors.itemRows?.[0]?.bagWeightEachKg ? "border-red-500 bg-red-50" : "border-gray-300"
-                  }`}
-                />
-                {renderFieldError(errors.itemRows?.[0]?.bagWeightEachKg)}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">No. of Bags (auto)</label>
-                <input
-                  value={items[0]?.bagCount ?? ""}
-                  readOnly
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300"
-                  placeholder="Auto"
-                />
-              </div>
-            </div>
+            ))}
 
-            {/* Row 4: Freight Charges */}
-            <div className="grid md:grid-cols-1 gap-3 items-start mt-3">
+            {/* Freight Charges */}
+            <div className="grid md:grid-cols-1 gap-3 items-start">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Freight Charges</label>
                 <input
@@ -2052,192 +2053,16 @@ export default function GatePassIN({ highlightId = "" }) {
               </div>
             </div>
 
-            {(items || []).length > 1 && (
-              <div className="space-y-2">
-                {(items || []).slice(1).map((it, idx) => {
-                  const realIdx = idx + 1;
-                  return (
-                    <div key={`item-${realIdx}`} className="space-y-3 border-t pt-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-gray-500">Item #{realIdx + 1}</span>
-                        <button
-                          type="button"
-                          onClick={() => setItems((prev) => prev.filter((_x, i) => i !== realIdx))}
-                          className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                      <div className="grid md:grid-cols-3 gap-3 items-start">
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Company Name (Product Owner)</label>
-                          {renderBrandDropdown(it, realIdx)}
-                          {renderFieldError(errors.itemRows?.[realIdx]?.brand)}
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Product Name</label>
-                          {it?.productMode !== "input" ? (
-                            <select
-                              value={it?.productName ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === OTHER_OPTION) {
-                                  setItems((prev) => {
-                                    const updated = [...prev];
-                                    updated[realIdx] = { ...updated[realIdx], productMode: "input", productInput: "" };
-                                    return updated;
-                                  });
-                                  return;
-                                }
-                                handleItemChange(realIdx, "productName", v);
-                                clearItemFieldError(realIdx, "productName");
-                              }}
-                              disabled={!String(it?.brand || "").trim()}
-                              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                                errors.itemRows?.[realIdx]?.productName ? "border-red-500 bg-red-50" : "border-gray-300"
-                              }`}
-                            >
-                              <option value="">{it?.brand ? "Select product" : "Select company first"}</option>
-                              {getProductOptionsForBrand(it?.brand).map((name, idx2) => (
-                                <option key={`${name}-${idx2}`} value={name}>{name}</option>
-                              ))}
-                              <option value={OTHER_OPTION}>Add New</option>
-                            </select>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <input
-                                value={it?.productInput ?? ""}
-                                onChange={(e) =>
-                                  setItems((prev) => {
-                                    const updated = [...prev];
-                                    updated[realIdx] = { ...updated[realIdx], productInput: sanitizeBrandText(e.target.value, 80) };
-                                    return updated;
-                                  })
-                                }
-                                placeholder="Enter product name"
-                                className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-                                  errors.itemRows?.[realIdx]?.productName ? "border-red-500 bg-red-50" : "border-gray-300"
-                                }`}
-                              />
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const brand = String(it?.brand || "").trim();
-                                  const input = it?.productInput || "";
-                                  const result = await ensureProductOption(brand, input);
-                                  setItems((prev) => {
-                                    const updated = [...prev];
-                                    updated[realIdx] = { ...updated[realIdx], productName: result.name, productInput: "", productMode: "list" };
-                                    return updated;
-                                  });
-                                  clearItemFieldError(realIdx, "productName");
-                                }}
-                                className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
-                              >
-                                List
-                              </button>
-                            </div>
-                          )}
-                          {renderFieldError(errors.itemRows?.[realIdx]?.productName)}
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Weight on Arrival (kg)</label>
-                          <input
-                            inputMode="numeric"
-                            value={it?.weightOnArrival ?? ""}
-                            onChange={(e) => handleItemChange(realIdx, "weightOnArrival", e.target.value)}
-                            placeholder="0"
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
-                          <input
-                            value={it?.weightAtSmjKg ?? ""}
-                            onChange={(e) => handleItemChange(realIdx, "weightAtSmjKg", e.target.value)}
-                            placeholder="0"
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                              errors.itemRows?.[realIdx]?.weightAtSmjKg ? "border-red-500 bg-red-50" : "border-gray-300"
-                            }`}
-                          />
-                          {renderFieldError(errors.itemRows?.[realIdx]?.weightAtSmjKg)}
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={it?.emptyBagWeightKg ?? ""}
-                            onChange={(e) => handleItemChange(realIdx, "emptyBagWeightKg", e.target.value)}
-                            placeholder="0"
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
-                          <input
-                            value={it?.netWeightKg ?? ""}
-                            readOnly
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold ${
-                              errors.itemRows?.[realIdx]?.netWeightKg ? "border-red-500" : "border-gray-300"
-                            }`}
-                          />
-                          {renderFieldError(errors.itemRows?.[realIdx]?.netWeightKg)}
-                        </div>
-                      </div>
-                      <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
-                          <input
-                            value={it?.netWeightManDisplay ?? ""}
-                            readOnly
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-emerald-50 text-emerald-700 font-semibold border-gray-300"
-                            placeholder="Auto"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={it?.bagWeightEachKg ?? ""}
-                            onChange={(e) => handleItemChange(realIdx, "bagWeightEachKg", e.target.value)}
-                            placeholder="65"
-                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                              errors.itemRows?.[realIdx]?.bagWeightEachKg ? "border-red-500 bg-red-50" : "border-gray-300"
-                            }`}
-                          />
-                          {renderFieldError(errors.itemRows?.[realIdx]?.bagWeightEachKg)}
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">No. of Bags (auto)</label>
-                          <input
-                            value={it?.bagCount ?? ""}
-                            readOnly
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300"
-                            placeholder="Auto"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid md:grid-cols-1 gap-3 items-start mt-3">
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">Freight Charges</label>
-                          <input
-                            name="freightCharges"
-                            value={form.freightCharges}
-                            onChange={handleChange}
-                            placeholder="0"
-                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setItems((prev) => [...(prev || []), emptyItem()])}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+              >
+                <Plus size={14} />
+                Add
+              </button>
+            </div>
           </div>
 
           {/* Submit Buttons */}

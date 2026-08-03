@@ -16,6 +16,10 @@ const ProductionOutputSchema = new mongoose.Schema(
     // Gross weight typed by the user (kg)
     weightKg: { type: Number, required: true, min: 0 },
 
+    // Weight per filled bag typed by the user (kg). Bags are derived from it.
+    bagWeightEachKg: { type: Number, required: true, min: 0 },
+
+    // Auto-computed: numBags = floor(weightKg / bagWeightEachKg)
     numBags: { type: Number, required: true, min: 0 },
     emptyBagWeightKg: { type: Number, required: true, min: 0 },
 

@@ -185,6 +185,7 @@ exports.getGatePassReport = async (req, res) => {
         senderName: String(gp.senderName || gp.supplier || "").trim() || "-",
         partyName: gp.type === "OUT" ? gp.customer || "-" : gp.supplier || "-",
         truckNo: gp.truckNo || "-",
+        freightCharges: Number(gp.freightCharges || 0),
         companyNames: companyNames.join(", ") || "-",
         productNames: productNames.join(", ") || "-",
         totalBags: Number(totalBags || 0),

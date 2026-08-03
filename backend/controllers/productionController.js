@@ -65,12 +65,18 @@ async function recomputeGroup(group, batches) {
   }
 }
 
-/** Find (or create) the source-level group for a paddy company. */
+/**
+ * Find (or create) the source-level group for a paddy company.
+ * Reuses an active (OPEN/READY) group for the same source so a new batch
+ * joins the existing cluster instead of creating a duplicate one.
+ * Legacy batches without a groupId are adopted into the same group.
+ */
 async function ensureGroup(sourceCompanyId, sourceCompanyName) {
   const name = normBrand(sourceCompanyName);
   let group = await ProductionGroup.findOne({
     sourceCompanyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
-  });
+    batchDone: false,
+  }).sort({ createdAt: -1 });
   if (!group) {
     const existing = await ProductionGroup.countDocuments();
     group = new ProductionGroup({
@@ -92,10 +98,19 @@ async function ensureGroup(sourceCompanyId, sourceCompanyName) {
       }
     }
     await group.save();
-  } else if (group.sourceCompanyId && sourceCompanyId) {
+  } else if (sourceCompanyId) {
     group.sourceCompanyId = sourceCompanyId;
     await group.save();
   }
+  // Adopt orphan batches (legacy data without a group) of the same source
+  // so the source never shows two separate clusters.
+  await ProductionBatch.updateMany(
+    {
+      groupId: null,
+      sourceCompanyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
+    },
+    { $set: { groupId: group._id } }
+  );
   return group;
 }
 
@@ -619,8 +634,10 @@ exports.getGroupById = async (req, res) => {
 
 /**
  * POST /api/production/groups/:id/outputs
- * Body: { productTypeId, productTypeName, weightKg, numBags, emptyBagWeightKg, outputDate? }
- * Requires group READY (all batches completed). netWeight = weightKg - numBags*emptyBagWeightKg.
+ * Body: { productTypeId, productTypeName, weightKg, bagWeightEachKg, emptyBagWeightKg, outputDate? }
+ * Requires group READY (all batches completed).
+ *   numBags = floor(weightKg / bagWeightEachKg)   (like gatepass)
+ *   netWeight = weightKg - numBags * emptyBagWeightKg
  */
 exports.addOutput = async (req, res) => {
   try {
@@ -628,7 +645,7 @@ exports.addOutput = async (req, res) => {
     if (!mongoose.isValidObjectId(id))
       return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { productTypeId, productTypeName, weightKg, numBags, emptyBagWeightKg, outputDate } = req.body;
+    const { productTypeId, productTypeName, weightKg, bagWeightEachKg, emptyBagWeightKg, outputDate } = req.body;
 
     if (!productTypeId || !productTypeName) {
       return res.status(400).json({
@@ -654,21 +671,30 @@ exports.addOutput = async (req, res) => {
       });
     }
 
-    const bags = Number(numBags) || 0;
-    const emptyBag = Number(emptyBagWeightKg) || 0;
     const gross = Number(weightKg) || 0;
-    const netWeight = +(gross - bags * emptyBag).toFixed(3);
+    const bagW = Number(bagWeightEachKg) || 0;
+    const emptyBag = Number(emptyBagWeightKg) || 0;
 
-    if (netWeight < 0) {
+    if (gross <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Net weight cannot be negative. Check weight and empty bag weight.",
+        message: "Weight must be greater than 0.",
       });
     }
+    if (bagW <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Weight of bag must be greater than 0.",
+      });
+    }
+
+    const bags = Math.floor(gross / bagW);
+    const netWeight = +Math.max(gross - bags * emptyBag, 0).toFixed(3);
+
     if (netWeight <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Net weight must be greater than 0.",
+        message: "Net weight must be greater than 0. Check weight, bag weight and empty bag weight.",
       });
     }
 
@@ -691,6 +717,7 @@ exports.addOutput = async (req, res) => {
       productTypeId,
       productTypeName,
       weightKg: gross,
+      bagWeightEachKg: bagW,
       numBags: bags,
       emptyBagWeightKg: emptyBag,
       netWeightKg: netWeight,
@@ -737,7 +764,7 @@ exports.addOutput = async (req, res) => {
 
 /**
  * PATCH /api/production/groups/:id/outputs/:outputId
- * Body: { weightKg?, numBags?, emptyBagWeightKg?, productTypeId?, productTypeName? }
+ * Body: { weightKg?, bagWeightEachKg?, emptyBagWeightKg?, productTypeId?, productTypeName? }
  */
 exports.updateOutput = async (req, res) => {
   try {
@@ -763,23 +790,31 @@ exports.updateOutput = async (req, res) => {
     const oldProductTypeName = output.productTypeName;
 
     if (req.body.weightKg != null) output.weightKg = Number(req.body.weightKg) || 0;
-    if (req.body.numBags != null) output.numBags = Number(req.body.numBags) || 0;
+    if (req.body.bagWeightEachKg != null)
+      output.bagWeightEachKg = Number(req.body.bagWeightEachKg) || 0;
     if (req.body.emptyBagWeightKg != null)
       output.emptyBagWeightKg = Number(req.body.emptyBagWeightKg) || 0;
     if (req.body.productTypeId !== undefined) output.productTypeId = req.body.productTypeId;
     if (req.body.productTypeName !== undefined) output.productTypeName = req.body.productTypeName || "";
     if (req.body.outputDate) output.outputDate = new Date(req.body.outputDate);
 
-    const net = +(output.weightKg - output.numBags * output.emptyBagWeightKg).toFixed(3);
-    if (net < 0) {
-      return res.status(400).json({ success: false, message: "Net weight cannot be negative." });
+    if (output.bagWeightEachKg <= 0) {
+      return res.status(400).json({ success: false, message: "Weight of bag must be greater than 0." });
     }
-    output.netWeightKg = net;
+    output.numBags = Math.floor(output.weightKg / output.bagWeightEachKg);
+    output.netWeightKg = +Math.max(
+      output.weightKg - output.numBags * output.emptyBagWeightKg,
+      0
+    ).toFixed(3);
+
+    if (output.netWeightKg <= 0) {
+      return res.status(400).json({ success: false, message: "Net weight must be greater than 0." });
+    }
 
     const otherTotal = (group.outputs || [])
       .filter((o) => String(o._id) !== String(output._id))
       .reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0);
-    if (net + otherTotal > (Number(group.totalPaddyWeightKg) || 0)) {
+    if (output.netWeightKg + otherTotal > (Number(group.totalPaddyWeightKg) || 0)) {
       const remaining = Math.max(0, (Number(group.totalPaddyWeightKg) || 0) - otherTotal);
       return res.status(400).json({
         success: false,
@@ -859,7 +894,7 @@ exports.deleteOutput = async (req, res) => {
     }
 
     const removed = { ...output.toObject() };
-    output.remove();
+    group.outputs.pull(output._id);
 
     group.totalOutputWeightKg = +(
       (group.outputs || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0)

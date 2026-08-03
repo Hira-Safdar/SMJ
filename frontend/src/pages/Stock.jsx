@@ -54,7 +54,6 @@ export default function Stock() {
 
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [productFilter, setProductFilter] = useState("ALL");
-  const [hideZeroRows, setHideZeroRows] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -156,13 +155,7 @@ export default function Stock() {
     }));
   }, [filteredRows]);
 
-  const visibleTableData = useMemo(
-    () =>
-      hideZeroRows
-        ? productTableData.filter((r) => Number(r.totalKg || 0) > 0)
-        : productTableData,
-    [productTableData, hideZeroRows],
-  );
+  const visibleTableData = productTableData;
 
   // ------------------------------------------------------------------
   // SUMMARY STATS
@@ -313,15 +306,6 @@ export default function Stock() {
               ))}
             </select>
           )}
-          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={hideZeroRows}
-              onChange={(e) => setHideZeroRows(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-emerald-600"
-            />
-            Hide zero stock
-          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600">
