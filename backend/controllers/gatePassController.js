@@ -135,6 +135,29 @@ const buildProductionOpsFromItems = (items, gp, bagWeightKg = 65, productTypeMap
       gatePassNo,
       remarks: `Gate pass ${gp.type} (Production) - ${paddyCompanyName}`,
     });
+
+    // Raw paddy (productTypeId null) dispatched OUT to another company transfers
+    // ownership: the receiving company's raw stock increases.
+    if (
+      gp.type === "OUT" &&
+      !productTypeId &&
+      paddyCompanyName &&
+      normalizeBrandName(gp.customer)
+    ) {
+      ops.push({
+        date,
+        type: "IN",
+        companyId: null,
+        companyName: normalizeBrandName(gp.customer),
+        productTypeId: null,
+        productTypeName: name,
+        numBags: 0,
+        netWeightKg: kg,
+        gatePassId,
+        gatePassNo,
+        remarks: `Paddy transferred via Gate pass OUT from ${paddyCompanyName}`,
+      });
+    }
   });
   return ops;
 };

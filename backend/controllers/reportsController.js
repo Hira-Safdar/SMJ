@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const StockLedger = require("../models/stockLedgerModel");
 const ProductionBatch = require("../models/productionBatchModel");
+const ProductionGroup = require("../models/productionGroupModel");
 const GatePass = require("../models/gatePassModel");
 const ProductType = require("../models/productTypeModel");
 const AccountingFilterTemplate = require("../models/accountingFilterTemplateModel");
@@ -319,27 +320,50 @@ exports.getProductionSummaryReport = async (req, res) => {
     if (companyIds.length) filter.sourceCompanyId = { $in: companyIds };
 
     const batches = await ProductionBatch.find(filter).sort({ date: -1 }).lean();
+    const groupIds = Array.from(
+      new Set(batches.map((b) => b.groupId).filter(Boolean))
+    );
+    const groups = groupIds.length
+      ? await ProductionGroup.find({ _id: { $in: groupIds } }).lean()
+      : [];
+    const groupMap = new Map(groups.map((g) => [String(g._id), g]));
 
-    const data = batches.map((b) => {
-      const out = b.outputs || [];
-      const pick = (needle) =>
-        out
-          .filter((o) => normName(o.productTypeName).includes(needle))
-          .reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0);
+    // groupId -> batches in range (per group)
+    const byGroup = new Map();
+    batches.forEach((b) => {
+      const key = b.groupId ? String(b.groupId) : b.sourceCompanyName || "other";
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key).push(b);
+    });
 
+    const pick = (out, needle) =>
+      (out || [])
+        .filter((o) => normName(o.productTypeName).includes(needle))
+        .reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0);
+
+    const data = Array.from(byGroup.entries()).map(([key, bs]) => {
+      const group = groupMap.get(key) || null;
+      const out = (group?.outputs || []).filter((o) => {
+        const d = o.outputDate ? new Date(o.outputDate) : null;
+        return d && d >= start && d <= end;
+      });
       return {
-        _id: b._id,
-        date: b.date,
-        batchNo: b.batchNo,
-        companyId: b.sourceCompanyId ? String(b.sourceCompanyId) : "",
-        companyName: b.sourceCompanyName || "",
-        paddyInputKg: Number((Number(b.paddyWeightKg || 0) || 0).toFixed(3)),
-        riceOutputKg: Number(pick("rice").toFixed(3)),
-        brokenOutputKg: Number(pick("broken").toFixed(3)),
-        huskOutputKg: Number(pick("husk").toFixed(3)),
-        branOutputKg: Number(pick("bran").toFixed(3)),
-        totalOutputKg: Number((Number(b.totalOutputWeightKg || 0) || 0).toFixed(3)),
-        status: b.status || "-",
+        _id: key,
+        date: bs[0].date,
+        batchNo: group?.groupNo || bs[0].batchNo,
+        companyId: bs[0].sourceCompanyId ? String(bs[0].sourceCompanyId) : "",
+        companyName: bs[0].sourceCompanyName || "",
+        paddyInputKg: Number(
+          bs.reduce((s, b) => s + (Number(b.paddyWeightKg) || 0), 0).toFixed(3)
+        ),
+        riceOutputKg: Number(pick(out, "rice").toFixed(3)),
+        brokenOutputKg: Number(pick(out, "broken").toFixed(3)),
+        huskOutputKg: Number(pick(out, "husk").toFixed(3)),
+        branOutputKg: Number(pick(out, "bran").toFixed(3)),
+        totalOutputKg: Number(
+          (out || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0).toFixed(3)
+        ),
+        status: group?.status || bs[0].status || "-",
       };
     });
 
@@ -358,11 +382,20 @@ exports.getByProductReport = async (req, res) => {
     if (companyIds.length) filter.sourceCompanyId = { $in: companyIds };
 
     const batches = await ProductionBatch.find(filter).lean();
+    const groupIds = Array.from(
+      new Set(batches.map((b) => b.groupId).filter(Boolean))
+    );
+    const groups = groupIds.length
+      ? await ProductionGroup.find({ _id: { $in: groupIds } }).lean()
+      : [];
+
     const bucket = new Map(); // key = productTypeName
 
-    batches.forEach((b) => {
-      (b.outputs || []).forEach((o) => {
-        const key = `${o.productTypeName || "-"}`;
+    groups.forEach((g) => {
+      (g.outputs || []).forEach((o) => {
+        const d = o.outputDate ? new Date(o.outputDate) : null;
+        if (d && (d < start || d > end)) return;
+        const key = o.productTypeName || "-";
         const prev = bucket.get(key) || {
           productTypeName: o.productTypeName || "-",
           outputKg: 0,

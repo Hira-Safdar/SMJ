@@ -33,14 +33,14 @@ const MENU = [
     ],
   },
   {
-    name: "Production Management",
-    icon: <FactoryIcon size={18} />,
-    path: "/production",
-  },
-  {
     name: "Stock Management",
     icon: <Box size={18} />,
     path: "/stock",
+  },
+  {
+    name: "Production Management",
+    icon: <FactoryIcon size={18} />,
+    path: "/production",
   },
   {
     name: "Accounting & Finance",

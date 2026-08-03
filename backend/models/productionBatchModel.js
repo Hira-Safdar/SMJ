@@ -1,34 +1,9 @@
 // backend/models/productionBatchModel.js
 const mongoose = require("mongoose");
 
-const ProductionOutputSchema = new mongoose.Schema(
-  {
-    productTypeId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ProductType",
-      required: true,
-    },
-    productTypeName: { type: String, required: true },
-
-    companyId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Company",
-      default: null,
-    },
-    companyName: { type: String, default: "" },
-
-    numBags: { type: Number, required: true, min: 0 },
-
-    // total net weight for this line = numBags * perBagWeightKg
-    netWeightKg: { type: Number, required: true, min: 0 },
-
-    shift: { type: String, enum: ["DAY", "NIGHT"], required: true },
-    outputDate: { type: Date, default: Date.now },
-
-  },
-  { _id: true }
-);
-
+// A batch is a single daily production run for one paddy source.
+// Finished products are NOT attached to batches — they belong to the
+// source-level ProductionGroup and are derived from the group's total weight.
 const ProductionBatchSchema = new mongoose.Schema(
   {
     batchNo: { type: String, required: true, unique: true }, // PB-YYYYMMDD-HHMMSS
@@ -39,10 +14,8 @@ const ProductionBatchSchema = new mongoose.Schema(
       enum: ["IN_PROCESS", "COMPLETED"],
       default: "IN_PROCESS",
     },
-    batchDone: { type: Boolean, default: false },
-    batchDoneAt: { type: Date, default: null },
 
-    // Raw paddy (kg) for this batch
+    // Raw paddy (kg) for this daily run
     paddyWeightKg: { type: Number, required: true, min: 0 },
     sourceCompanyId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -56,14 +29,12 @@ const ProductionBatchSchema = new mongoose.Schema(
       default: "SMJ",
     },
 
-    // Aggregates for reporting
-    totalRawWeightKg: { type: Number, default: 0 },
-    totalOutputWeightKg: { type: Number, default: 0 },
-
-    dayShiftOutputWeightKg: { type: Number, default: 0 },
-    nightShiftOutputWeightKg: { type: Number, default: 0 },
-
-    outputs: [ProductionOutputSchema],
+    // Source-level group this batch belongs to
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductionGroup",
+      default: null,
+    },
 
     remarks: { type: String, default: "" },
   },
@@ -74,5 +45,6 @@ ProductionBatchSchema.index({ date: 1 });
 ProductionBatchSchema.index({ status: 1 });
 ProductionBatchSchema.index({ status: 1, date: -1 });
 ProductionBatchSchema.index({ sourceCompanyId: 1 });
+ProductionBatchSchema.index({ groupId: 1 });
 
 module.exports = mongoose.model("ProductionBatch", ProductionBatchSchema);

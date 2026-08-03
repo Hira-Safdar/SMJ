@@ -1,66 +1,36 @@
 // backend/controllers/productionController.js
 const mongoose = require("mongoose");
 const ProductionBatch = require("../models/productionBatchModel");
+const ProductionGroup = require("../models/productionGroupModel");
 const StockLedger = require("../models/stockLedgerModel");
 const SystemSettings = require("../models/systemSettingsModel");
-const SystemAction = require("../models/systemActionModel");
 
-// PB-YYYYMMDD-HHMMSS
-function generateBatchNo() {
+// PB-YYYYMMDD-HHMMSS / PG-YYYYMMDD-HHMMSS
+function generateNo(prefix) {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  const YYYY = d.getFullYear();
-  const MM = pad(d.getMonth() + 1);
-  const DD = pad(d.getDate());
-  const HH = pad(d.getHours());
-  const mm = pad(d.getMinutes());
-  const ss = pad(d.getSeconds());
-  return `PB-${YYYY}${MM}${DD}-${HH}${mm}${ss}`;
+  return `${prefix}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(
+    d.getDate()
+  )}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-function recomputeAggregates(batch) {
-  const totalRaw = Number(batch.paddyWeightKg) || 0;
-
-  const allOutputs = batch.outputs || [];
-  const totalOutput = allOutputs.reduce(
-    (sum, o) => sum + (Number(o.netWeightKg) || 0),
-    0
-  );
-  const dayOut = allOutputs
-    .filter((o) => o.shift === "DAY")
-    .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
-  const nightOut = allOutputs
-    .filter((o) => o.shift === "NIGHT")
-    .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
-
-  batch.totalRawWeightKg = +totalRaw.toFixed(3);
-  batch.totalOutputWeightKg = +totalOutput.toFixed(3);
-  batch.dayShiftOutputWeightKg = +dayOut.toFixed(3);
-  batch.nightShiftOutputWeightKg = +nightOut.toFixed(3);
+function escapeRegex(s) {
+  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function ensureBatchSourceCompany(batch) {
-  if (!batch) return;
-  const existing = String(batch.sourceCompanyName || "").trim();
-  if (existing) return;
-  const fromOutput = String(batch.outputs?.[0]?.companyName || "").trim();
-  batch.sourceCompanyName = fromOutput || "SMJ Own";
+function normBrand(s) {
+  return String(s || "").trim();
 }
 
 /**
  * Get current paddy balance (kg) from stock ledger (Paddy only).
  */
-function escapeRegex(s) {
-  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 async function getPaddyBalanceKg(companyName = "") {
   const name = String(companyName || "").trim();
   if (!name) return 0;
   const rows = await StockLedger.find({
     productTypeId: null,
     productTypeName: { $in: ["Paddy", "Unprocessed Paddy"] },
-    // Case-insensitive match to avoid split stock like "Anwar Trades" vs "anwar trades"
     companyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
   }).lean();
   let balance = 0;
@@ -71,10 +41,68 @@ async function getPaddyBalanceKg(companyName = "") {
   return balance;
 }
 
+/** Recompute a group's totals from its batches + outputs. */
+async function recomputeGroup(group, batches) {
+  const totalPaddy = (batches || []).reduce(
+    (s, b) => s + (Number(b.paddyWeightKg) || 0),
+    0
+  );
+  const totalOutput = (group.outputs || []).reduce(
+    (s, o) => s + (Number(o.netWeightKg) || 0),
+    0
+  );
+  group.totalPaddyWeightKg = +totalPaddy.toFixed(3);
+  group.totalOutputWeightKg = +totalOutput.toFixed(3);
+  group.remainingPaddyKg = Math.max(0, +(totalPaddy - totalOutput).toFixed(3));
+
+  if (!group.batchDone) {
+    const anyInProcess = (batches || []).some((b) => b.status !== "COMPLETED");
+    if (!anyInProcess && (batches || []).length > 0) {
+      if (group.status === "OPEN") group.status = "READY";
+    } else {
+      group.status = "OPEN";
+    }
+  }
+}
+
+/** Find (or create) the source-level group for a paddy company. */
+async function ensureGroup(sourceCompanyId, sourceCompanyName) {
+  const name = normBrand(sourceCompanyName);
+  let group = await ProductionGroup.findOne({
+    sourceCompanyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
+  });
+  if (!group) {
+    const existing = await ProductionGroup.countDocuments();
+    group = new ProductionGroup({
+      groupNo: generateNo("PG"),
+      sourceCompanyId: sourceCompanyId || null,
+      sourceCompanyName: name,
+      status: "OPEN",
+      outputs: [],
+    });
+    if (existing > 0) {
+      // keep groupNo unique even across same-second creation
+      let attempts = 0;
+      while (
+        attempts < 5 &&
+        (await ProductionGroup.exists({ groupNo: group.groupNo }))
+      ) {
+        group.groupNo = generateNo("PG");
+        attempts++;
+      }
+    }
+    await group.save();
+  } else if (group.sourceCompanyId && sourceCompanyId) {
+    group.sourceCompanyId = sourceCompanyId;
+    await group.save();
+  }
+  return group;
+}
+
 /**
  * POST /api/production/batches
- * Body: { date, paddyWeightKg, remarks? }
- * Creates batch and reserves paddy (OUT). Requires sufficient paddy in stock.
+ * Body: { date, paddyWeightKg, sourceCompanyName?, remarks? }
+ * Creates a daily batch run and reserves paddy (OUT).
  */
 exports.createBatch = async (req, res) => {
   try {
@@ -98,7 +126,7 @@ exports.createBatch = async (req, res) => {
         .json({ success: false, message: "Paddy weight must be greater than 0" });
     }
 
-    const sourceName = String(sourceCompanyName || "").trim();
+    const sourceName = normBrand(sourceCompanyName);
     if (!sourceName) {
       return res.status(400).json({
         success: false,
@@ -110,16 +138,16 @@ exports.createBatch = async (req, res) => {
     if (paddyBalance < requestedKg) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient paddy stock for ${sourceName}. Available: ${paddyBalance.toFixed(3)} kg. Add paddy via Gate Pass Inward.`,
+        message: `Insufficient paddy stock for ${sourceName}. Available: ${paddyBalance.toFixed(
+          3
+        )} kg. Add paddy via Gate Pass Inward.`,
       });
     }
 
-    let batchNo = generateBatchNo();
+    let batchNo = generateNo("PB");
     let attempts = 0;
-    while (attempts < 5) {
-      const exists = await ProductionBatch.findOne({ batchNo });
-      if (!exists) break;
-      batchNo = generateBatchNo();
+    while (attempts < 5 && (await ProductionBatch.exists({ batchNo }))) {
+      batchNo = generateNo("PB");
       attempts++;
     }
 
@@ -133,6 +161,8 @@ exports.createBatch = async (req, res) => {
         ? "SMJ"
         : "CUSTOM";
 
+    const group = await ensureGroup(sourceCompanyId, sourceName);
+
     const batch = new ProductionBatch({
       batchNo,
       date,
@@ -141,14 +171,11 @@ exports.createBatch = async (req, res) => {
       sourceCompanyId: sourceCompanyId || null,
       sourceCompanyName: sourceName,
       ownerType,
-      outputs: [],
+      groupId: group._id,
       remarks: remarks || "",
     });
-
-    recomputeAggregates(batch);
     const saved = await batch.save();
 
-    // Reserve paddy as OUT from raw stock
     try {
       const ledger = new StockLedger({
         date: saved.date,
@@ -168,6 +195,10 @@ exports.createBatch = async (req, res) => {
       console.error("StockLedger (createBatch) error:", e);
     }
 
+    const groups = await ProductionBatch.find({ groupId: group._id }).lean();
+    await recomputeGroup(group, groups);
+    await group.save();
+
     return res.status(201).json({ success: true, data: saved });
   } catch (err) {
     console.error("createBatch error:", err);
@@ -179,9 +210,7 @@ exports.createBatch = async (req, res) => {
 
 /**
  * PUT /api/production/batches/:id
- * Body: { date?, paddyWeightKg?, remarks? }
- * Only when IN_PROCESS.
- * Adjusts paddy stock by delta.
+ * Body: { date?, paddyWeightKg?, remarks? } — only for IN_PROCESS.
  */
 exports.updateBatch = async (req, res) => {
   try {
@@ -195,20 +224,14 @@ exports.updateBatch = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Batch not found" });
 
-    ensureBatchSourceCompany(batch);
-
-    const { date, paddyWeightKg, remarks, adminPin } = req.body;
-
-    if (batch.status === "COMPLETED") {
-      const settings = await SystemSettings.findOne({}).select("adminPin").lean();
-      const expectedPin = (settings && settings.adminPin) || "0000";
-      if (!adminPin || String(adminPin).trim() !== String(expectedPin).trim()) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or missing admin PIN. Completed batch requires admin PIN to edit.",
-        });
-      }
+    if (batch.status !== "IN_PROCESS") {
+      return res.status(400).json({
+        success: false,
+        message: "Only in-process batches can be edited.",
+      });
     }
+
+    const { date, paddyWeightKg, remarks } = req.body;
 
     if (date) batch.date = date;
 
@@ -216,13 +239,15 @@ exports.updateBatch = async (req, res) => {
     if (paddyWeightKg != null && !isNaN(Number(paddyWeightKg))) {
       const newWeight = Number(paddyWeightKg);
       delta = newWeight - batch.paddyWeightKg;
-      if (delta > 0 && batch.status === "IN_PROCESS") {
+      if (delta > 0) {
         const sourceName = String(batch.sourceCompanyName || "").trim();
         const available = await getPaddyBalanceKg(sourceName);
         if (available < delta) {
           return res.status(400).json({
             success: false,
-            message: `Insufficient paddy stock for ${sourceName}. Available extra: ${available.toFixed(3)} kg.`,
+            message: `Insufficient paddy stock for ${sourceName}. Available extra: ${available.toFixed(
+              3
+            )} kg.`,
           });
         }
       }
@@ -233,14 +258,12 @@ exports.updateBatch = async (req, res) => {
       batch.remarks = remarks || "";
     }
 
-    recomputeAggregates(batch);
     const saved = await batch.save();
 
-    // Adjust raw paddy stock for delta (only for IN_PROCESS; completed batch edit does not change stock)
-    if (delta !== 0 && batch.status === "IN_PROCESS") {
+    if (delta !== 0) {
       try {
         const sourceName = String(batch.sourceCompanyName || "").trim();
-        const isIncrease = delta > 0; // more paddy consumed
+        const isIncrease = delta > 0;
         const ledger = new StockLedger({
           date: saved.date,
           type: isIncrease ? "OUT" : "IN",
@@ -262,6 +285,15 @@ exports.updateBatch = async (req, res) => {
       }
     }
 
+    if (batch.groupId) {
+      const group = await ProductionGroup.findById(batch.groupId);
+      if (group) {
+        const groups = await ProductionBatch.find({ groupId: group._id }).lean();
+        await recomputeGroup(group, groups);
+        await group.save();
+      }
+    }
+
     return res.json({ success: true, data: saved });
   } catch (err) {
     console.error("updateBatch error:", err);
@@ -273,8 +305,7 @@ exports.updateBatch = async (req, res) => {
 
 /**
  * DELETE /api/production/batches/:id
- * - If IN_PROCESS: delete + return paddy to stock (IN).
- * - If COMPLETED: delete + return paddy to stock (IN) + remove finished stock (OUT).
+ * Returns paddy to stock (IN) and removes the batch.
  */
 exports.deleteBatch = async (req, res) => {
   try {
@@ -288,24 +319,15 @@ exports.deleteBatch = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Batch not found" });
 
-    ensureBatchSourceCompany(batch);
-
-    const wasCompleted = batch.status === "COMPLETED";
-
-    // Keep data for stock reverse before deleting
     const paddyWeight = batch.paddyWeightKg || 0;
-    const outputs = batch.outputs || [];
+    const sourceName = String(batch.sourceCompanyName || "").trim();
+    const groupId = batch.groupId;
 
     await batch.deleteOne();
 
-    // Reverse stock
-    try {
-      const ledgerOps = [];
-
-      // 1) Return paddy to stock (IN)
-      if (paddyWeight > 0) {
-        const sourceName = String(batch.sourceCompanyName || "").trim();
-        ledgerOps.push({
+    if (paddyWeight > 0) {
+      try {
+        await StockLedger.create({
           date: batch.date,
           type: "IN",
           companyId: batch.sourceCompanyId || null,
@@ -318,43 +340,27 @@ exports.deleteBatch = async (req, res) => {
           gatePassNo: "",
           remarks: `Batch deleted, paddy returned - ${batch.batchNo} (${sourceName})`,
         });
+      } catch (e) {
+        console.error("StockLedger (deleteBatch) error:", e);
       }
-
-      // 2) Remove finished stock (OUT for each output)
-      if (outputs.length > 0) {
-        outputs.forEach((o) => {
-          if (!o.productTypeId || !o.netWeightKg) return;
-          // Accounting is manual-only; no automatic journal reversals.
-          ledgerOps.push({
-            date: o.outputDate || batch.date,
-            type: "OUT",
-            companyId: o.companyId || null,
-            companyName: o.companyName || "",
-            productTypeId: o.productTypeId,
-            productTypeName: o.productTypeName,
-            numBags: o.numBags || 0,
-            netWeightKg: o.netWeightKg || 0,
-            gatePassId: null,
-            gatePassNo: "",
-            remarks: `Batch deleted, finished stock reversed - ${batch.batchNo}`,
-          });
-        });
-      }
-
-      if (ledgerOps.length > 0) {
-        await StockLedger.insertMany(ledgerOps);
-      }
-    } catch {
-      // don’t crash if ledger fails; batch is already removed
     }
 
-    return res.json({
-      success: true,
-      message: wasCompleted
-        ? "Completed batch deleted and stock reversed."
-        : "Batch deleted and paddy returned to stock.",
-    });
+    if (groupId) {
+      const group = await ProductionGroup.findById(groupId);
+      if (group) {
+        const groups = await ProductionBatch.find({ groupId: group._id }).lean();
+        if (groups.length === 0 && (group.outputs || []).length === 0) {
+          await ProductionGroup.deleteOne({ _id: group._id });
+        } else {
+          await recomputeGroup(group, groups);
+          await group.save();
+        }
+      }
+    }
+
+    return res.json({ success: true, message: "Batch deleted and paddy returned to stock." });
   } catch (err) {
+    console.error("deleteBatch error:", err);
     return res
       .status(500)
       .json({ success: false, message: "Error deleting batch." });
@@ -363,7 +369,7 @@ exports.deleteBatch = async (req, res) => {
 
 /**
  * GET /api/production/batches
- * Query: status?, page?, limit?
+ * Query: status?, page?, limit?  (compat: batch list)
  */
 exports.listBatches = async (req, res) => {
   try {
@@ -416,331 +422,13 @@ exports.getBatchById = async (req, res) => {
 };
 
 /**
- * POST /api/production/batches/:id/outputs
- * Body: { productTypeId, productTypeName, companyId?, companyName?, numBags, perBagWeightKg, shift, adminPin? }
- * For COMPLETED batch, adminPin is required; adds output and creates IN stock entry immediately.
- */
-exports.addOutput = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      productTypeId,
-      productTypeName,
-      companyId,
-      companyName,
-      numBags,
-      perBagWeightKg,
-      outputDate,
-      adminPin,
-    } = req.body;
-
-    if (
-      !productTypeId ||
-      !productTypeName ||
-      numBags == null ||
-      perBagWeightKg == null
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Fields productTypeId, productTypeName, numBags, perBagWeightKg are required.",
-      });
-    }
-
-    const batch = await ProductionBatch.findById(id);
-    ensureBatchSourceCompany(batch);
-
-    if (!batch)
-      return res
-        .status(404)
-        .json({ success: false, message: "Batch not found" });
-
-    if (batch.status === "COMPLETED") {
-      const settings = await SystemSettings.findOne({}).select("adminPin").lean();
-      const expectedPin = (settings && settings.adminPin) || "0000";
-      if (!adminPin || String(adminPin).trim() !== String(expectedPin).trim()) {
-        return res.status(403).json({
-          success: false,
-          message: "Valid admin PIN required to add output to completed batch.",
-        });
-      }
-    } else if (batch.status !== "IN_PROCESS") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot add output to this batch.",
-      });
-    }
-
-    const sourceName = String(batch.sourceCompanyName || "").trim();
-    if (!sourceName) {
-      return res.status(400).json({
-        success: false,
-        message: "Batch source company is missing.",
-      });
-    }
-
-    const bags = Number(numBags);
-    const perBag = Number(perBagWeightKg);
-    const netWeight = +(bags * perBag).toFixed(3);
-
-    const now = new Date();
-    const outDate = outputDate ? new Date(outputDate) : now;
-    const hour = outDate.getHours();
-    const shift = hour >= 6 && hour < 18 ? "DAY" : "NIGHT";
-
-    const output = {
-      productTypeId,
-      productTypeName,
-      companyId: batch.sourceCompanyId || null,
-      companyName: sourceName,
-      numBags: bags,
-      netWeightKg: netWeight,
-      shift,
-      outputDate: outDate,
-    };
-
-    batch.outputs.push(output);
-    recomputeAggregates(batch);
-    const saved = await batch.save();
-
-    // Post stock immediately for SMJ-owned batches.
-    if (batch.ownerType !== "CUSTOM") {
-      try {
-        await StockLedger.create({
-          date: output.outputDate || new Date(),
-          type: "IN",
-          companyId: output.companyId || null,
-          companyName: output.companyName || "",
-          productTypeId: output.productTypeId,
-          productTypeName: output.productTypeName,
-          numBags: output.numBags,
-          netWeightKg: output.netWeightKg,
-          gatePassId: null,
-          gatePassNo: "",
-          remarks: `Production output (${output.shift}) - ${saved.batchNo}`,
-        });
-      } catch {
-        // don't crash if ledger fails
-      }
-      // Accounting is manual-only; no automatic journal posting.
-    }
-
-    return res.json({ success: true, data: saved });
-  } catch (err) {
-    console.error("addOutput error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Error adding output." });
-  }
-};
-
-/**
- * PATCH /api/production/batches/:id/outputs/:outputId
- * Body: { numBags?, perBagWeightKg?, shift?, companyId?, companyName?, productTypeId?, productTypeName? }
- * Edit output and adjust stock (OUT old, IN new). No admin PIN required.
- */
-exports.updateOutput = async (req, res) => {
-  try {
-    const { id, outputId } = req.params;
-    const {
-      numBags,
-      perBagWeightKg,
-      outputDate,
-      productTypeId,
-      productTypeName,
-    } = req.body;
-
-    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(outputId)) {
-      return res.status(400).json({ success: false, message: "Invalid id" });
-    }
-
-    const batch = await ProductionBatch.findById(id);
-    ensureBatchSourceCompany(batch);
-
-    if (!batch)
-      return res.status(404).json({ success: false, message: "Batch not found" });
-
-    const output = batch.outputs.id(outputId);
-    if (!output) {
-      return res.status(404).json({ success: false, message: "Output not found" });
-    }
-
-    const oldNet = Number(output.netWeightKg) || 0;
-    const oldProductTypeId = output.productTypeId;
-    const oldProductTypeName = output.productTypeName;
-    const oldCompanyId = output.companyId;
-    const oldCompanyName = output.companyName;
-    const oldNumBags = output.numBags;
-    const oldShift = output.shift;
-    const oldOutputDate = output.outputDate || batch.date;
-
-    if (numBags != null) output.numBags = Number(numBags);
-    if (perBagWeightKg != null) {
-      const bags = output.numBags || 0;
-      output.netWeightKg = +(bags * Number(perBagWeightKg)).toFixed(3);
-    } else if (numBags != null && output.numBags) {
-      const perBag = oldNet / output.numBags;
-      output.netWeightKg = +(Number(numBags) * perBag).toFixed(3);
-    }
-    if (outputDate) output.outputDate = new Date(outputDate);
-    output.companyId = batch.sourceCompanyId || null;
-    output.companyName = String(batch.sourceCompanyName || "").trim();
-
-    if (productTypeId !== undefined) output.productTypeId = productTypeId;
-    if (productTypeName !== undefined) output.productTypeName = productTypeName || "";
-
-    const newNet = Number(output.netWeightKg) || 0;
-    recomputeAggregates(batch);
-    const saved = await batch.save();
-
-    if (
-      batch.ownerType !== "CUSTOM" &&
-      (oldNet !== newNet ||
-        oldProductTypeId?.toString() !== output.productTypeId?.toString() ||
-        new Date(oldOutputDate).getTime() !==
-          new Date(output.outputDate || batch.date).getTime())
-    ) {
-      try {
-        // Accounting is manual-only; no automatic journal reversals.
-        await StockLedger.create({
-          date: oldOutputDate || batch.date,
-          type: "OUT",
-          companyId: oldCompanyId || null,
-          companyName: oldCompanyName || "",
-          productTypeId: oldProductTypeId,
-          productTypeName: oldProductTypeName,
-          numBags: oldNumBags,
-          netWeightKg: oldNet,
-          gatePassId: null,
-          gatePassNo: "",
-          remarks: `Production output edit reverse - ${batch.batchNo}`,
-        });
-        await StockLedger.create({
-          date: output.outputDate || batch.date,
-          type: "IN",
-          companyId: output.companyId || null,
-          companyName: output.companyName || "",
-          productTypeId: output.productTypeId,
-          productTypeName: output.productTypeName,
-          numBags: output.numBags,
-          netWeightKg: newNet,
-          gatePassId: null,
-          gatePassNo: "",
-          remarks: `Production output (${output.shift || "DAY"}) - ${batch.batchNo}`,
-        });
-        // Accounting is manual-only; no automatic journal posting.
-      } catch {
-        // don't crash if ledger fails
-      }
-    }
-
-    return res.json({ success: true, data: saved });
-  } catch (err) {
-    console.error("updateOutput error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Error updating output." });
-  }
-};
-
-/**
- * POST /api/production/batches/:id/remaining-paddy/decision
- * Body: { decision: "RETURN_TO_STOCK" | "KEEP_IN_BATCH" }
- * Resolves the pending remaining paddy action created on auto-complete.
- */
-exports.resolveRemainingPaddyDecision = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: "Invalid id" });
-    }
-    const decision = String(req.body?.decision || "").trim();
-    if (!["RETURN_TO_STOCK", "KEEP_IN_BATCH"].includes(decision)) {
-      return res.status(400).json({ success: false, message: "Invalid decision." });
-    }
-
-    const batch = await ProductionBatch.findById(id).lean();
-    if (!batch) {
-      return res.status(404).json({ success: false, message: "Batch not found" });
-    }
-
-    let action = await SystemAction.findOne({
-      type: "PADDY_REMAINING_DECISION",
-      status: "PENDING",
-      batchId: id,
-    });
-    let remainingKg = 0;
-    let brandName = String(batch.sourceCompanyName || "").trim() || "SMJ Own";
-    if (!action) {
-      // Fallback: compute remaining from batch if no pending action exists.
-      const raw = Number(batch.paddyWeightKg || 0) || 0;
-      const outKg = (batch.outputs || [])
-        .reduce((sum, o) => sum + (Number(o.netWeightKg) || 0), 0);
-      remainingKg = Math.max(0, +(raw - outKg).toFixed(3));
-      if (remainingKg <= 0) {
-        await ProductionBatch.updateOne(
-          { _id: id },
-          { $set: { batchDone: true, batchDoneAt: new Date() } }
-        );
-        return res
-          .status(200)
-          .json({ success: true, data: { remainingKg: 0 }, message: "No remaining paddy." });
-      }
-      action = await SystemAction.create({
-        type: "PADDY_REMAINING_DECISION",
-        status: "PENDING",
-        batchId: id,
-        batchNo: batch.batchNo,
-        brandName,
-        remainingPaddyKg: remainingKg,
-      });
-    } else {
-      remainingKg = Number(action.remainingPaddyKg || 0) || 0;
-      brandName = String(action.brandName || batch.sourceCompanyName || "").trim() || "SMJ Own";
-    }
-
-    if (decision === "RETURN_TO_STOCK" && remainingKg > 0) {
-      await StockLedger.create({
-        date: new Date(),
-        type: "IN",
-        companyId: batch.sourceCompanyId || null,
-        companyName: brandName,
-        productTypeId: null,
-        productTypeName: "Unprocessed Paddy",
-        numBags: 0,
-        netWeightKg: remainingKg,
-        gatePassId: null,
-        gatePassNo: "",
-        remarks: `Remaining paddy returned - ${batch.batchNo} (${brandName})`,
-      });
-    }
-
-    action.status = "RESOLVED";
-    action.decision = decision;
-    action.resolvedAt = new Date();
-    await action.save();
-    await ProductionBatch.updateOne(
-      { _id: id },
-      { $set: { batchDone: true, batchDoneAt: new Date() } }
-    );
-
-    return res.json({ success: true, data: action });
-  } catch (err) {
-    console.error("resolveRemainingPaddyDecision error:", err);
-    return res.status(500).json({ success: false, message: err.message || "Failed to resolve decision." });
-  }
-};
-
-/**
  * POST /api/production/batches/:id/complete
- * Marks batch COMPLETED and creates IN stock entries for outputs.
+ * Marks a daily run COMPLETED. Group becomes READY when all its batches are completed.
  */
 exports.completeBatch = async (req, res) => {
   try {
     const { id } = req.params;
-
     const batch = await ProductionBatch.findById(id);
-    ensureBatchSourceCompany(batch);
 
     if (!batch)
       return res
@@ -753,71 +441,21 @@ exports.completeBatch = async (req, res) => {
         .json({ success: false, message: "Batch already completed." });
     }
 
-    if (!batch.outputs || batch.outputs.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Add at least one output before completing batch.",
-      });
-    }
-
-    recomputeAggregates(batch);
     batch.status = "COMPLETED";
     const saved = await batch.save();
 
-    // Create pending decision for remaining paddy (if any).
-    try {
-      const raw = Number(saved.paddyWeightKg || 0) || 0;
-      const outKg = Number(saved.totalOutputWeightKg || 0) || 0;
-      const remaining = Math.max(0, +(raw - outKg).toFixed(3));
-      if (remaining > 0) {
-        const exists = await SystemAction.findOne({
-          type: "PADDY_REMAINING_DECISION",
-          status: "PENDING",
-          batchId: saved._id,
-        }).lean();
-        if (!exists) {
-          await SystemAction.create({
-            type: "PADDY_REMAINING_DECISION",
-            status: "PENDING",
-            batchId: saved._id,
-            batchNo: saved.batchNo,
-            brandName: String(saved.sourceCompanyName || "").trim(),
-            remainingPaddyKg: remaining,
-          });
-        }
+    if (batch.groupId) {
+      const group = await ProductionGroup.findById(batch.groupId);
+      if (group) {
+        const groups = await ProductionBatch.find({ groupId: group._id }).lean();
+        await recomputeGroup(group, groups);
+        await group.save();
       }
-    } catch (e) {
-      console.error("completeBatch remaining paddy action error:", e?.message || e);
     }
-
-    // Backward compatibility: if no output ledger exists for this batch, create once.
-    try {
-      const existing = await StockLedger.findOne({
-        type: "IN",
-        remarks: { $regex: `${saved.batchNo}$` },
-      }).lean();
-      if (!existing) {
-        const ops = (batch.outputs || []).map((o) => ({
-          date: o.outputDate || saved.date,
-          type: "IN",
-          companyId: o.companyId || null,
-          companyName: o.companyName || "",
-          productTypeId: o.productTypeId,
-          productTypeName: o.productTypeName,
-          numBags: o.numBags,
-          netWeightKg: o.netWeightKg,
-          gatePassId: null,
-          gatePassNo: "",
-          remarks: `Production output (${o.shift}) - ${saved.batchNo}`,
-        }));
-        if (ops.length > 0) {
-          await StockLedger.insertMany(ops);
-        }
-      }
-    } catch {}
 
     return res.json({ success: true, data: saved });
   } catch (err) {
+    console.error("completeBatch error:", err);
     return res
       .status(500)
       .json({ success: false, message: "Error completing batch." });
@@ -826,13 +464,12 @@ exports.completeBatch = async (req, res) => {
 
 /**
  * POST /api/production/batches/:id/reopen
- * Moves a completed batch back to IN_PROCESS (admin action).
+ * Moves a completed daily run back to IN_PROCESS (group back to OPEN).
  */
 exports.reopenBatch = async (req, res) => {
   try {
     const { id } = req.params;
     const batch = await ProductionBatch.findById(id);
-    ensureBatchSourceCompany(batch);
 
     if (!batch)
       return res.status(404).json({ success: false, message: "Batch not found" });
@@ -842,67 +479,515 @@ exports.reopenBatch = async (req, res) => {
     }
 
     batch.status = "IN_PROCESS";
-    batch.batchDone = false;
-    batch.batchDoneAt = null;
     const saved = await batch.save();
 
-    try {
-      await SystemAction.updateMany(
-        { type: "PADDY_REMAINING_DECISION", status: "PENDING", batchId: saved._id },
-        { $set: { status: "CANCELLED", decision: "REOPENED", resolvedAt: new Date() } }
-      );
-    } catch {}
+    if (batch.groupId) {
+      const group = await ProductionGroup.findById(batch.groupId);
+      if (group) {
+        group.status = "OPEN";
+        await group.save();
+      }
+    }
 
     return res.json({ success: true, data: saved });
   } catch (err) {
+    console.error("reopenBatch error:", err);
     return res.status(500).json({ success: false, message: "Error reopening batch." });
+  }
+};
+
+/** Attach batches to groups (handles legacy batches with no groupId). */
+function attachBatches(groups, batches) {
+  const byId = new Map();
+  groups.forEach((g) => {
+    byId.set(String(g._id), { ...g, batches: [], outputs: g.outputs || [] });
+  });
+  const orphanBatches = [];
+  batches.forEach((b) => {
+    const key = String(b.groupId || "");
+    if (byId.has(key)) byId.get(key).batches.push(b);
+    else orphanBatches.push(b);
+  });
+  const result = Array.from(byId.values());
+  if (orphanBatches.length) {
+    const bySource = new Map();
+    orphanBatches.forEach((b) => {
+      const name = normBrand(b.sourceCompanyName) || "SMJ Own";
+      if (!bySource.has(name)) {
+        bySource.set(name, {
+          _id: null,
+          groupNo: "",
+          sourceCompanyId: b.sourceCompanyId || null,
+          sourceCompanyName: name,
+          status: b.status === "COMPLETED" ? "READY" : "OPEN",
+          batchDone: false,
+          totalPaddyWeightKg: 0,
+          totalOutputWeightKg: 0,
+          remainingPaddyKg: 0,
+          batches: [],
+          outputs: [],
+          legacy: true,
+        });
+      }
+      bySource.get(name).batches.push(b);
+    });
+    bySource.forEach((g) => {
+      g.totalPaddyWeightKg = +g.batches
+        .reduce((s, b) => s + (Number(b.paddyWeightKg) || 0), 0)
+        .toFixed(3);
+      g.remainingPaddyKg = g.totalPaddyWeightKg;
+      g.allBatchesCompleted = g.batches.every((b) => b.status === "COMPLETED");
+      result.push(g);
+    });
+  }
+  result.forEach((g) => {
+    g.batches.sort((a, b) => new Date(b.date) - new Date(a.date));
+    g.allBatchesCompleted =
+      g.batches.length > 0 && g.batches.every((b) => b.status === "COMPLETED");
+    if (g.batchDone) g.status = "DONE";
+    else if (!g.allBatchesCompleted) g.status = "OPEN";
+    else g.status = "READY";
+  });
+  result.sort((a, b) => {
+    const aDate = a.batches[0]?.date || 0;
+    const bDate = b.batches[0]?.date || 0;
+    return new Date(bDate) - new Date(aDate);
+  });
+  return result;
+}
+
+/**
+ * GET /api/production/overview
+ * Returns all source groups with their batches and outputs.
+ */
+exports.getOverview = async (req, res) => {
+  try {
+    const [groups, batches] = await Promise.all([
+      ProductionGroup.find({}).sort({ createdAt: -1 }).lean(),
+      ProductionBatch.find({}).sort({ date: -1 }).lean(),
+    ]);
+
+    const data = attachBatches(groups, batches);
+
+    const summary = {
+      groups: data.length,
+      openGroups: data.filter((g) => g.status === "OPEN").length,
+      readyGroups: data.filter((g) => g.status === "READY").length,
+      doneGroups: data.filter((g) => g.status === "DONE").length,
+      totalPaddyKg: +data
+        .reduce((s, g) => s + (Number(g.totalPaddyWeightKg) || 0), 0)
+        .toFixed(3),
+      totalOutputKg: +data
+        .reduce((s, g) => s + (Number(g.totalOutputWeightKg) || 0), 0)
+        .toFixed(3),
+    };
+
+    return res.json({ success: true, data, summary });
+  } catch (err) {
+    console.error("getOverview error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error fetching production overview." });
+  }
+};
+
+/**
+ * GET /api/production/groups/:id
+ */
+exports.getGroupById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id))
+      return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const [group, batches] = await Promise.all([
+      ProductionGroup.findById(id).lean(),
+      ProductionBatch.find({ groupId: id }).sort({ date: -1 }).lean(),
+    ]);
+    if (!group)
+      return res
+        .status(404)
+        .json({ success: false, message: "Group not found" });
+
+    const data = attachBatches([group], batches)[0] || { ...group, batches: [], outputs: group.outputs || [] };
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("getGroupById error:", err);
+    return res.status(500).json({ success: false, message: "Error fetching group." });
+  }
+};
+
+/**
+ * POST /api/production/groups/:id/outputs
+ * Body: { productTypeId, productTypeName, weightKg, numBags, emptyBagWeightKg, outputDate? }
+ * Requires group READY (all batches completed). netWeight = weightKg - numBags*emptyBagWeightKg.
+ */
+exports.addOutput = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id))
+      return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const { productTypeId, productTypeName, weightKg, numBags, emptyBagWeightKg, outputDate } = req.body;
+
+    if (!productTypeId || !productTypeName) {
+      return res.status(400).json({
+        success: false,
+        message: "Fields productTypeId and productTypeName are required.",
+      });
+    }
+
+    const group = await ProductionGroup.findById(id);
+    if (!group)
+      return res.status(404).json({ success: false, message: "Group not found" });
+
+    if (group.status !== "READY") {
+      return res.status(400).json({
+        success: false,
+        message: "All batches must be completed before adding products.",
+      });
+    }
+    if (group.batchDone) {
+      return res.status(400).json({
+        success: false,
+        message: "This production group is already finalized.",
+      });
+    }
+
+    const bags = Number(numBags) || 0;
+    const emptyBag = Number(emptyBagWeightKg) || 0;
+    const gross = Number(weightKg) || 0;
+    const netWeight = +(gross - bags * emptyBag).toFixed(3);
+
+    if (netWeight < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Net weight cannot be negative. Check weight and empty bag weight.",
+      });
+    }
+    if (netWeight <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Net weight must be greater than 0.",
+      });
+    }
+
+    const currentOutput = (group.outputs || []).reduce(
+      (s, o) => s + (Number(o.netWeightKg) || 0),
+      0
+    );
+    const remaining = Math.max(
+      0,
+      (Number(group.totalPaddyWeightKg) || 0) - currentOutput
+    );
+    if (netWeight > remaining) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum product weight remaining: ${Math.round(remaining)} kg.`,
+      });
+    }
+
+    const output = {
+      productTypeId,
+      productTypeName,
+      weightKg: gross,
+      numBags: bags,
+      emptyBagWeightKg: emptyBag,
+      netWeightKg: netWeight,
+      outputDate: outputDate ? new Date(outputDate) : new Date(),
+    };
+
+    group.outputs.push(output);
+    group.totalOutputWeightKg = +(
+      (group.outputs || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0)
+    ).toFixed(3);
+    group.remainingPaddyKg = Math.max(
+      0,
+      +(Number(group.totalPaddyWeightKg || 0) - group.totalOutputWeightKg).toFixed(3)
+    );
+    const saved = await group.save();
+
+    // Post finished-product stock for the source company.
+    try {
+      await StockLedger.create({
+        date: output.outputDate || new Date(),
+        type: "IN",
+        companyId: group.sourceCompanyId || null,
+        companyName: group.sourceCompanyName || "",
+        productTypeId: output.productTypeId,
+        productTypeName: output.productTypeName,
+        numBags: output.numBags,
+        netWeightKg: output.netWeightKg,
+        gatePassId: null,
+        gatePassNo: "",
+        remarks: `Production output - ${saved.groupNo} (${group.sourceCompanyName})`,
+      });
+    } catch (e) {
+      console.error("StockLedger (addOutput) error:", e);
+    }
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    console.error("addOutput error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error adding output." });
+  }
+};
+
+/**
+ * PATCH /api/production/groups/:id/outputs/:outputId
+ * Body: { weightKg?, numBags?, emptyBagWeightKg?, productTypeId?, productTypeName? }
+ */
+exports.updateOutput = async (req, res) => {
+  try {
+    const { id, outputId } = req.params;
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(outputId)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    const group = await ProductionGroup.findById(id);
+    if (!group)
+      return res.status(404).json({ success: false, message: "Group not found" });
+    if (group.batchDone) {
+      return res.status(400).json({ success: false, message: "Group is finalized." });
+    }
+
+    const output = group.outputs.id(outputId);
+    if (!output) {
+      return res.status(404).json({ success: false, message: "Output not found" });
+    }
+
+    const oldNet = Number(output.netWeightKg) || 0;
+    const oldProductTypeId = output.productTypeId;
+    const oldProductTypeName = output.productTypeName;
+
+    if (req.body.weightKg != null) output.weightKg = Number(req.body.weightKg) || 0;
+    if (req.body.numBags != null) output.numBags = Number(req.body.numBags) || 0;
+    if (req.body.emptyBagWeightKg != null)
+      output.emptyBagWeightKg = Number(req.body.emptyBagWeightKg) || 0;
+    if (req.body.productTypeId !== undefined) output.productTypeId = req.body.productTypeId;
+    if (req.body.productTypeName !== undefined) output.productTypeName = req.body.productTypeName || "";
+    if (req.body.outputDate) output.outputDate = new Date(req.body.outputDate);
+
+    const net = +(output.weightKg - output.numBags * output.emptyBagWeightKg).toFixed(3);
+    if (net < 0) {
+      return res.status(400).json({ success: false, message: "Net weight cannot be negative." });
+    }
+    output.netWeightKg = net;
+
+    const otherTotal = (group.outputs || [])
+      .filter((o) => String(o._id) !== String(output._id))
+      .reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0);
+    if (net + otherTotal > (Number(group.totalPaddyWeightKg) || 0)) {
+      const remaining = Math.max(0, (Number(group.totalPaddyWeightKg) || 0) - otherTotal);
+      return res.status(400).json({
+        success: false,
+        message: `Maximum product weight remaining: ${Math.round(remaining)} kg.`,
+      });
+    }
+
+    group.totalOutputWeightKg = +(
+      (group.outputs || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0)
+    ).toFixed(3);
+    group.remainingPaddyKg = Math.max(
+      0,
+      +(Number(group.totalPaddyWeightKg || 0) - group.totalOutputWeightKg).toFixed(3)
+    );
+    const saved = await group.save();
+
+    try {
+      await StockLedger.create({
+        date: new Date(),
+        type: "OUT",
+        companyId: group.sourceCompanyId || null,
+        companyName: group.sourceCompanyName || "",
+        productTypeId: oldProductTypeId,
+        productTypeName: oldProductTypeName,
+        numBags: 0,
+        netWeightKg: oldNet,
+        gatePassId: null,
+        gatePassNo: "",
+        remarks: `Production output edit reverse - ${saved.groupNo}`,
+      });
+      await StockLedger.create({
+        date: output.outputDate || new Date(),
+        type: "IN",
+        companyId: group.sourceCompanyId || null,
+        companyName: group.sourceCompanyName || "",
+        productTypeId: output.productTypeId,
+        productTypeName: output.productTypeName,
+        numBags: output.numBags,
+        netWeightKg: output.netWeightKg,
+        gatePassId: null,
+        gatePassNo: "",
+        remarks: `Production output - ${saved.groupNo} (${group.sourceCompanyName})`,
+      });
+    } catch (e) {
+      console.error("StockLedger (updateOutput) error:", e);
+    }
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    console.error("updateOutput error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error updating output." });
+  }
+};
+
+/**
+ * DELETE /api/production/groups/:id/outputs/:outputId
+ */
+exports.deleteOutput = async (req, res) => {
+  try {
+    const { id, outputId } = req.params;
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(outputId)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    const group = await ProductionGroup.findById(id);
+    if (!group)
+      return res.status(404).json({ success: false, message: "Group not found" });
+    if (group.batchDone) {
+      return res.status(400).json({ success: false, message: "Group is finalized." });
+    }
+
+    const output = group.outputs.id(outputId);
+    if (!output) {
+      return res.status(404).json({ success: false, message: "Output not found" });
+    }
+
+    const removed = { ...output.toObject() };
+    output.remove();
+
+    group.totalOutputWeightKg = +(
+      (group.outputs || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0)
+    ).toFixed(3);
+    group.remainingPaddyKg = Math.max(
+      0,
+      +(Number(group.totalPaddyWeightKg || 0) - group.totalOutputWeightKg).toFixed(3)
+    );
+    const saved = await group.save();
+
+    try {
+      await StockLedger.create({
+        date: new Date(),
+        type: "OUT",
+        companyId: group.sourceCompanyId || null,
+        companyName: group.sourceCompanyName || "",
+        productTypeId: removed.productTypeId,
+        productTypeName: removed.productTypeName,
+        numBags: removed.numBags,
+        netWeightKg: removed.netWeightKg,
+        gatePassId: null,
+        gatePassNo: "",
+        remarks: `Production output deleted - ${saved.groupNo}`,
+      });
+    } catch (e) {
+      console.error("StockLedger (deleteOutput) error:", e);
+    }
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    console.error("deleteOutput error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error deleting output." });
+  }
+};
+
+/**
+ * POST /api/production/groups/:id/done
+ * Finalizes the group: returns remaining paddy to stock and marks DONE.
+ */
+exports.markGroupDone = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id))
+      return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const group = await ProductionGroup.findById(id);
+    if (!group)
+      return res.status(404).json({ success: false, message: "Group not found" });
+
+    if (group.status !== "READY") {
+      return res.status(400).json({
+        success: false,
+        message: "Complete all batches first before finalizing the group.",
+      });
+    }
+    if (group.batchDone) {
+      return res.status(400).json({ success: false, message: "Group already finalized." });
+    }
+
+    const remaining = Number(group.remainingPaddyKg || 0);
+    if (remaining > 0) {
+      try {
+        await StockLedger.create({
+          date: new Date(),
+          type: "IN",
+          companyId: group.sourceCompanyId || null,
+          companyName: group.sourceCompanyName || "",
+          productTypeId: null,
+          productTypeName: "Unprocessed Paddy",
+          numBags: 0,
+          netWeightKg: remaining,
+          gatePassId: null,
+          gatePassNo: "",
+          remarks: `Remaining paddy returned - ${group.groupNo} (${group.sourceCompanyName})`,
+        });
+      } catch (e) {
+        console.error("StockLedger (markGroupDone) error:", e);
+      }
+    }
+
+    group.batchDone = true;
+    group.batchDoneAt = new Date();
+    group.status = "DONE";
+    const saved = await group.save();
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    console.error("markGroupDone error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error finalizing group." });
   }
 };
 
 /**
  * GET /api/production/summary/today
- * For cards: day/night/total outputs, batch count.
+ * Cards: total output today (product-wise) and batch count today.
  */
 exports.getTodaySummary = async (req, res) => {
   try {
     const now = new Date();
-    const start = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0
-    );
-    const end = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999
-    );
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const batches = await ProductionBatch.find({}).lean();
+    const [groups, batches] = await Promise.all([
+      ProductionGroup.find({}).select("outputs").lean(),
+      ProductionBatch.find({}).select("date").lean(),
+    ]);
 
-    let day = 0;
-    let night = 0;
     let totalOutput = 0;
     const productWise = {};
-
-    batches.forEach((b) => {
-      (b.outputs || []).forEach((o) => {
-        const outDate = new Date(o.outputDate || b.date);
+    groups.forEach((g) => {
+      (g.outputs || []).forEach((o) => {
+        const outDate = new Date(o.outputDate);
         if (outDate < start || outDate > end) return;
         const net = Number(o.netWeightKg) || 0;
-        if (o.shift === "DAY") day += net;
-        if (o.shift === "NIGHT") night += net;
         totalOutput += net;
         const name = o.productTypeName || "Other";
         productWise[name] = (productWise[name] || 0) + net;
       });
     });
+
+    const batchCount = batches.filter((b) => {
+      const d = new Date(b.date);
+      return d >= start && d <= end;
+    }).length;
 
     const productWiseOutput = Object.entries(productWise).map(([productTypeName, totalKg]) => ({
       productTypeName,
@@ -912,15 +997,8 @@ exports.getTodaySummary = async (req, res) => {
     return res.json({
       success: true,
       data: {
-        dayShiftOutputWeightKg: +day.toFixed(3),
-        nightShiftOutputWeightKg: +night.toFixed(3),
         totalOutputWeightKg: +totalOutput.toFixed(3),
-        batchCount: batches.filter((b) =>
-          (b.outputs || []).some((o) => {
-            const outDate = new Date(o.outputDate || b.date);
-            return outDate >= start && outDate <= end;
-          })
-        ).length,
+        batchCount,
         productWiseOutput,
       },
     });

@@ -156,46 +156,7 @@ exports.getCurrentStock = async (req, res) => {
       );
     }
 
-    // 1️⃣ COMPLETED production batches → add outputs
-    const batches = await ProductionBatch.find({
-      status: "COMPLETED",
-    }).lean();
-
-    for (const b of batches) {
-      if (b.ownerType === "CUSTOM") continue;
-      const outputs = b.outputs || [];
-      const batchDate = b.date || b.createdAt;
-      const batchDateTime = b.updatedAt || b.createdAt;
-
-      for (const o of outputs) {
-        const productTypeId =
-          o.productTypeId != null ? String(o.productTypeId) : null;
-        const brandName = getBrandName(productTypeId, o.companyName || "");
-        const productTypeName = o.productTypeName || "";
-        const net = Number(o.netWeightKg || 0);
-
-        if (net > 0) {
-          addToMap(
-            null,
-            brandName,
-            productTypeId,
-            productTypeName,
-            net,
-            batchDateTime,
-            {
-              sourceType: "Batch",
-              refNo: b.batchNo || "-",
-              date: batchDate,
-              dateTime: batchDateTime,
-              qtyKg: net,
-              direction: "IN",
-            }
-          );
-        }
-      }
-    }
-
-    // 2️⃣ PURCHASE transactions → add items
+    // 1️⃣ PURCHASE transactions → add items
     const purchases = await Transaction.find({ type: "PURCHASE" }).lean();
     for (const t of purchases) {
       const items = t.items || [];
@@ -287,6 +248,9 @@ exports.getCurrentStock = async (req, res) => {
       }
 
       if (!val.brandName) val.brandName = val.companyName || "";
+
+      // Split inventory into Raw (paddy/raw materials) and Production (finished products).
+      val.category = val.productTypeId ? "PRODUCTION" : "RAW";
 
       rows.push(val);
     }

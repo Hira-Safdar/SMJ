@@ -2,6 +2,7 @@
 const Company = require("../models/companyModel");
 const ProductType = require("../models/productTypeModel");
 const ProductionBatch = require("../models/productionBatchModel");
+const ProductionGroup = require("../models/productionGroupModel");
 const Transaction = require("../models/transactionModel");
 const GatePass = require("../models/gatePassModel");
 const SystemSettings = require("../models/systemSettingsModel");
@@ -171,7 +172,7 @@ const getDashboardStats = async (req, res) => {
       ProductionBatch.find({ status: "COMPLETED" })
         .sort({ updatedAt: -1 })
         .limit(RECENT_LIMIT)
-        .select("batchNo totalOutputWeightKg updatedAt")
+        .select("batchNo paddyWeightKg updatedAt")
         .lean(),
       StockLedger.find({
         type: "IN",
@@ -217,7 +218,7 @@ const getDashboardStats = async (req, res) => {
       activityRows.push({
         type: "PRODUCTION",
         title: "Production Complete",
-        meta: `${b.batchNo} · ${Number(b.totalOutputWeightKg || 0).toFixed(0)} kg`,
+        meta: `${b.batchNo} · ${Number(b.paddyWeightKg || 0).toFixed(0)} kg paddy`,
         amount: 0,
         createdAt: b.updatedAt,
       });
@@ -253,9 +254,9 @@ const getDashboardStats = async (req, res) => {
     );
     const recentActivities = activityRows.slice(0, RECENT_LIMIT);
 
-    const [completedBatches, salesAll, purchasesAll] =
+    const [productionGroups, salesAll, purchasesAll] =
       await Promise.all([
-        ProductionBatch.find({ status: "COMPLETED" })
+        ProductionGroup.find({})
           .select("outputs")
           .lean(),
         Transaction.find({ type: "SALE" })
@@ -266,8 +267,8 @@ const getDashboardStats = async (req, res) => {
           .lean(),
       ]);
 
-    const productionInKg = completedBatches.reduce((sum, b) => {
-      const outputs = b.outputs || [];
+    const productionInKg = productionGroups.reduce((sum, g) => {
+      const outputs = g.outputs || [];
       const outSum = outputs.reduce(
         (s, o) => s + Number(o.netWeightKg || 0),
         0
@@ -280,8 +281,8 @@ const getDashboardStats = async (req, res) => {
       const current = productionByProductMap.get(key) || 0;
       productionByProductMap.set(key, current + delta);
     };
-    completedBatches.forEach((b) => {
-      const outputs = b.outputs || [];
+    productionGroups.forEach((g) => {
+      const outputs = g.outputs || [];
       outputs.forEach((o) => {
         const name = o.productTypeName || "Unknown";
         const net = Number(o.netWeightKg || 0);

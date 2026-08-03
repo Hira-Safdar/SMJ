@@ -12,6 +12,7 @@ const SystemSettings = require("./models/systemSettingsModel");
 const GatePass = require("./models/gatePassModel");
 const StockLedger = require("./models/stockLedgerModel");
 const ProductionBatch = require("./models/productionBatchModel");
+const ProductionGroup = require("./models/productionGroupModel");
 const Transaction = require("./models/transactionModel");
 
 /**
@@ -34,21 +35,20 @@ async function seedBrandOptions() {
       const key = name.toLowerCase();
       if (key && !existing.has(key)) existing.set(key, name);
     };
-    const [gatePasses, ledgers, batches, transactions] = await Promise.all([
+    const [gatePasses, ledgers, batches, transactions, groups] = await Promise.all([
       GatePass.find({}).select("supplier items.brand").lean(),
       StockLedger.find({}).select("companyName").lean(),
-      ProductionBatch.find({}).select("sourceCompanyName outputs.companyName").lean(),
+      ProductionBatch.find({}).select("sourceCompanyName").lean(),
       Transaction.find({}).select("companyName").lean(),
+      ProductionGroup.find({}).select("sourceCompanyName").lean(),
     ]);
     gatePasses.forEach((gp) => {
       addName(gp.supplier);
       (gp.items || []).forEach((it) => addName(it?.brand));
     });
     ledgers.forEach((l) => addName(l.companyName));
-    batches.forEach((b) => {
-      addName(b.sourceCompanyName);
-      (b.outputs || []).forEach((o) => addName(o?.companyName));
-    });
+    batches.forEach((b) => addName(b.sourceCompanyName));
+    groups.forEach((g) => addName(g.sourceCompanyName));
     transactions.forEach((t) => addName(t.companyName));
     const nextOptions = Array.from(existing.values()).sort();
     if (nextOptions.length > (settings.brandOptions || []).length) {
