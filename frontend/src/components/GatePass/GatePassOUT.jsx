@@ -4,6 +4,7 @@ import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
 import AddOptionModal from "../ui/AddOptionModal";
+import GatePassFilter, { applyGatePassFilters, gatePassFilterSummary } from "./GatePassFilter";
 
 const OTHER_OPTION = "__OTHER__";
 
@@ -11,6 +12,9 @@ export default function GatePassOUT({ highlightId = "" }) {
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     customer: "",
+    customerMode: "list",
+    customerInput: "",
+    truckNo: "",
   });
   const [items, setItems] = useState([
     {
@@ -65,12 +69,13 @@ export default function GatePassOUT({ highlightId = "" }) {
   const calculateItemTotals = (item = {}) => {
     const bagCount = Number(item?.bagCount || 0);
     const bagWeightEach = Number(item?.bagWeightEachKg || 0);
-    const emptyBagWeight = Number(item?.emptyBagWeightKg || 0);
+    const emptyBagWeightPerBag = Number(item?.emptyBagWeightKg || 0);
     const rate = Number(item?.rate || 0);
     const grossWeightKg = +(bagCount * bagWeightEach).toFixed(2);
-    const netWeightKg = +Math.max(grossWeightKg - emptyBagWeight, 0).toFixed(2);
+    const totalEmptyBagWeightKg = +(bagCount * emptyBagWeightPerBag).toFixed(2);
+    const netWeightKg = +Math.max(grossWeightKg - totalEmptyBagWeightKg, 0).toFixed(2);
     const amount = Math.round((rate * netWeightKg) / 40);
-    return { grossWeightKg, netWeightKg, amount };
+    return { grossWeightKg, totalEmptyBagWeightKg, netWeightKg, amount };
   };
 
   useEffect(() => {
@@ -109,6 +114,7 @@ export default function GatePassOUT({ highlightId = "" }) {
   const [errors, setErrors] = useState({});
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [filterCriteria, setFilterCriteria] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -160,8 +166,8 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Validation functions
   const validateTruckNo = (v) => {
-    if (!v) return "Truck number is required.";
-    if (!truckRegex.test(v)) return "Format: ABCD-1234";
+    if (!v) return "";
+    if (!/^[A-Z]{2,4}-\d{3,4}$/.test(String(v || "").trim())) return "Format: ABC-123 or ABCD-1234";
     return "";
   };
 
@@ -200,6 +206,13 @@ export default function GatePassOUT({ highlightId = "" }) {
         : item?.productName || item?.customName || ""
     ).trim();
 
+  const getCustomerDisplayName = (value = form) =>
+    String(
+      value?.customerMode === "input"
+        ? value?.customerInput || ""
+        : value?.customer || ""
+    ).trim();
+
   const validateItemRow = (item = {}) => {
     const rowErrors = {};
     if (!String(item?.brand || "").trim()) rowErrors.brand = "Select company name.";
@@ -220,7 +233,8 @@ export default function GatePassOUT({ highlightId = "" }) {
   const validateField = (name, value) => {
     let msg = "";
     if (name === "date") msg = value ? "" : "Date is required.";
-    if (name === "customer") msg = value ? "" : "Send-to company name is required.";
+    if (name === "customer") msg = String(value || "").trim() ? "" : "Send-to company name is required.";
+    if (name === "truckNo") msg = validateTruckNo(value);
     if (msg) setFieldError(name, msg);
     else clearFieldError(name);
   };
@@ -228,7 +242,9 @@ export default function GatePassOUT({ highlightId = "" }) {
   const validateForm = () => {
     setSubmitAttempted(true);
     const e0 = form.date ? "" : "Date is required.";
-    const e6 = form.customer ? "" : "Send-to company name is required.";
+    const customerName = getCustomerDisplayName(form);
+    const e6 = customerName ? "" : "Send-to company name is required.";
+    const eTruck = validateTruckNo(form.truckNo);
     const itemRows = (items || []).map((it) => validateItemRow(it));
     const hasItem = (items || []).some(
       (it) =>
@@ -242,6 +258,7 @@ export default function GatePassOUT({ highlightId = "" }) {
     const newErr = {};
     if (e0) newErr.date = e0;
     if (e6) newErr.customer = e6;
+    if (eTruck) newErr.truckNo = eTruck;
     if (itemRows.some((row) => Object.keys(row).length > 0)) newErr.itemRows = itemRows;
     else if (!hasItem) newErr.items = "Add at least one item with net weight.";
 
@@ -261,13 +278,11 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Format truck input
   const formatTruckInput = (raw) => {
-    let s = raw.toUpperCase();
-    s = s.replace(/[^A-Z0-9]/g, "");
-    const letters = s.replace(/[^A-Z]/g, "").slice(0, 4);
-    const digits = s.replace(/[^0-9]/g, "").slice(0, 4);
-    if (!digits && !letters) return "";
-    if (letters.length < 4) return letters;
-    return `${letters}-${digits}`.slice(0, 9);
+    return String(raw || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]/g, "")
+      .replace(/-+/g, "-")
+      .slice(0, 9);
   };
 
   // Format contact input
@@ -374,6 +389,28 @@ export default function GatePassOUT({ highlightId = "" }) {
       const res = await api.get("/customers");
       setCustomerOptions(res.data?.data || []);
     } catch {}
+  };
+
+  const ensureCustomerOption = async (name) => {
+    const normalized = toTitleCase(String(name || "").trim().replace(/\s+/g, " "));
+    if (!normalized) return "";
+    const existing = (customerOptions || []).find(
+      (c) => normalizeText(c?.name) === normalizeText(normalized)
+    );
+    if (existing?.name) return existing.name;
+    try {
+      const res = await api.post("/customers", { name: normalized });
+      const saved = res.data?.data;
+      setCustomerOptions((prev) => {
+        const list = Array.isArray(prev) ? [...prev] : [];
+        const hasMatch = list.some((c) => normalizeText(c?.name) === normalizeText(normalized));
+        if (!hasMatch) list.push(saved?.name ? saved : { _id: normalized, name: normalized });
+        return list.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+      });
+      return saved?.name || normalized;
+    } catch {
+      return normalized;
+    }
   };
 
   useEffect(() => {
@@ -673,12 +710,95 @@ export default function GatePassOUT({ highlightId = "" }) {
   const handleChange = (e) => {
     const { name, value } = e.target;
     let v = value;
-    if (name === "customer") {
-      v = value.replace(/[^A-Za-z0-9\s.,&()\-]/g, "");
-      v = v.replace(/\s+/g, " ");
+    if (name === "truckNo") {
+      v = formatTruckInput(value);
     }
     setForm((prev) => ({ ...prev, [name]: v }));
     validateField(name, v);
+  };
+
+  const sanitizeCustomerName = (value) =>
+    String(value || "")
+      .replace(/[^A-Za-z0-9\s.,&()\-]/g, "")
+      .replace(/\s+/g, " ");
+
+  const renderCustomerDropdown = () => {
+    const errorMessage = errors.customer;
+    const selectedLabel = String(form?.customer || "").trim();
+    const options = (customerOptions || [])
+      .map((c) => String(c?.name || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    if (form.customerMode === "input") {
+      return (
+        <div className="flex items-center gap-2">
+          <input
+            value={form.customerInput || ""}
+            onChange={(e) => {
+              const nextValue = sanitizeCustomerName(e.target.value);
+              setForm((prev) => ({ ...prev, customerInput: nextValue }));
+              validateField("customer", nextValue);
+            }}
+            placeholder="Enter company name"
+            className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
+              errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
+            }`}
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              const savedName = await ensureCustomerOption(form.customerInput);
+              if (!savedName) {
+                validateField("customer", "");
+                return;
+              }
+              setForm((prev) => ({
+                ...prev,
+                customer: savedName,
+                customerMode: "list",
+                customerInput: "",
+              }));
+              clearFieldError("customer");
+            }}
+            className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+          >
+            List
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <select
+        value={selectedLabel}
+        onChange={(e) => {
+          const selectedValue = String(e.target.value || "");
+          if (selectedValue === OTHER_OPTION) {
+            setForm((prev) => ({
+              ...prev,
+              customerMode: "input",
+              customerInput: "",
+            }));
+            clearFieldError("customer");
+            return;
+          }
+          setForm((prev) => ({ ...prev, customer: selectedValue }));
+          validateField("customer", selectedValue);
+        }}
+        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+          errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
+        }`}
+      >
+        <option value="">Select company</option>
+        {options.map((name, idx) => (
+          <option key={`${name}-${idx}`} value={name}>
+            {name}
+          </option>
+        ))}
+        <option value={OTHER_OPTION}>Add New</option>
+      </select>
+    );
   };
 
   const updateItem = (idx, patch) => {
@@ -799,6 +919,8 @@ export default function GatePassOUT({ highlightId = "" }) {
       return;
     }
 
+    const savedCustomerName = await ensureCustomerOption(getCustomerDisplayName(form));
+
     const normalizedItems = await Promise.all(
       (items || [])
         .filter((it) => {
@@ -851,8 +973,8 @@ export default function GatePassOUT({ highlightId = "" }) {
       ...form,
       type: "OUT",
       date: form.date,
-      truckNo: "OUT-0000",
-      customer: form.customer,
+      truckNo: form.truckNo ? form.truckNo.trim() : "OUT-0000",
+      customer: savedCustomerName || form.customer,
       items: normalizedItems,
       paymentStatus: paymentInfo.status,
       amountPaid: paymentInfo.amountPaid ? Number(paymentInfo.amountPaid) : 0,
@@ -883,6 +1005,9 @@ export default function GatePassOUT({ highlightId = "" }) {
       setForm({
         date: new Date().toISOString().slice(0, 10),
         customer: "",
+        customerMode: "list",
+        customerInput: "",
+        truckNo: "",
       });
       setPaymentInfo({ status: "PAID", amountPaid: "", remaining: "" });
       setItems([
@@ -930,6 +1055,9 @@ export default function GatePassOUT({ highlightId = "" }) {
     setForm({
       date: row.date ? new Date(row.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       customer: row.customer || "",
+      customerMode: "list",
+      customerInput: "",
+      truckNo: row.truckNo === "OUT-0000" ? "" : row.truckNo || "",
     });
 
     const rowItems = Array.isArray(row.items) && row.items.length ? row.items : [];
@@ -1151,6 +1279,9 @@ export default function GatePassOUT({ highlightId = "" }) {
         <div><span class="label">Company Name (Send To):</span><span class="value">${
           customerName || "-"
         }</span></div>
+        <div><span class="label">Truck No:</span><span class="value">${
+          row.truckNo === "OUT-0000" ? "-" : row.truckNo || "-"
+        }</span></div>
         <div><span class="label">Payment:</span><span class="value">${
           row.paymentStatus || "-"
         }</span></div>
@@ -1208,6 +1339,11 @@ export default function GatePassOUT({ highlightId = "" }) {
     },
     { key: "gatePassNo", label: "GP No" },
     { key: "customer", label: "Company Name (Send To)" },
+    {
+      key: "truckNo",
+      label: "Truck No",
+      render: (val) => (val && val !== "OUT-0000" ? val : "-"),
+    },
     {
       key: "companyNames",
       label: "Company Name (Product Owner)",
@@ -1314,6 +1450,7 @@ export default function GatePassOUT({ highlightId = "" }) {
     { key: "date", label: "Date", render: (val) => (val ? new Date(val).toLocaleDateString() : "-") },
     { key: "gatePassNo", label: "GP No" },
     { key: "customer", label: "Company Name (Send To)" },
+    { key: "truckNo", label: "Truck No" },
     { key: "companyName", label: "Company Name (Product Owner)" },
     { key: "productName", label: "Product Name" },
     { key: "bagCount", label: "No. of Bags" },
@@ -1335,6 +1472,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         date: row.date,
         gatePassNo: row.gatePassNo,
         customer: row.customer || "",
+        truckNo: row.truckNo === "OUT-0000" ? "" : row.truckNo || "",
         companyName: String(it.brand || "").trim(),
         productName: it.itemType || it.customItemName || "",
         bagCount: it.bagCount || "",
@@ -1350,11 +1488,20 @@ export default function GatePassOUT({ highlightId = "" }) {
       }));
     });
 
+  const filteredRows = React.useMemo(
+    () => applyGatePassFilters(rows, filterCriteria, { senderKeys: ["customer"] }),
+    [rows, filterCriteria]
+  );
+
+  const reportLines = React.useMemo(
+    () => gatePassFilterSummary(filterCriteria, "Company (Send To)"),
+    [filterCriteria]
+  );
+
   return (
     <div className="space-y-4">
       {/* Confirmation Dialog */}
-      {confirmDialog.open && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      {confirmDialog.open && (        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
             <div className="flex items-start justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
@@ -1543,7 +1690,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           Outward Gate Pass
         </h2>
 
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="grid md:grid-cols-3 gap-4">
           <div id="field-date">
             <label className="block text-sm font-medium mb-1">
               Date <span className="text-red-500">*</span>
@@ -1563,24 +1710,23 @@ export default function GatePassOUT({ highlightId = "" }) {
             <label className="block text-sm font-medium mb-1">
               Company Name (Send To) <span className="text-red-500">*</span>
             </label>
+            {renderCustomerDropdown()}
+            {renderFieldError(errors.customer)}
+          </div>
+          <div id="field-truckNo">
+            <label className="block text-sm font-medium mb-1">
+              Truck No
+            </label>
             <input
-              name="customer"
-              list="gatepass-out-send-to-companies"
-              value={form.customer}
+              name="truckNo"
+              value={form.truckNo}
               onChange={handleChange}
-              placeholder="Company receiving this stock"
+              placeholder="ABCD-1234"
               className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                errors.customer ? "border-red-500" : "border-gray-300"
+                errors.truckNo ? "border-red-500" : "border-gray-300"
               }`}
             />
-            <datalist id="gatepass-out-send-to-companies">
-              {customerOptions.map((c) => (
-                <option key={c._id || c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </datalist>
-            {renderFieldError(errors.customer)}
+            {renderFieldError(errors.truckNo)}
           </div>
         </div>
 
@@ -1840,6 +1986,9 @@ export default function GatePassOUT({ highlightId = "" }) {
                   setForm({
                     date: new Date().toISOString().slice(0, 10),
                     customer: "",
+                    customerMode: "list",
+                    customerInput: "",
+                    truckNo: "",
                   });
                   setPaymentInfo({ status: "PAID", amountPaid: "", remaining: "" });
                   setSubmitAttempted(false);
@@ -1872,17 +2021,27 @@ export default function GatePassOUT({ highlightId = "" }) {
         </div>
       </form>
 
+      <GatePassFilter
+        rows={rows}
+        senderKeys={["customer"]}
+        senderLabel="Company (Send To)"
+        onChange={setFilterCriteria}
+      />
+
       <DataTable
         title="Gate Pass OUT"
         columns={tableColumns}
-        data={rows}
+        data={filteredRows}
         idKey="_id"
         highlightId={highlightId}
         highlightKey={/^[a-f\d]{24}$/i.test(String(highlightId || "")) ? "_id" : "gatePassNo"}
         searchPlaceholder="Search gate passes..."
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
+        showSearch={false}
+        showFilters={false}
         exportColumns={exportColumns}
         exportData={exportData}
+        reportContextLines={reportLines}
         deleteAll={{
           description: "This will permanently delete ALL Gate Pass OUT records from the database.",
           onConfirm: async () => {

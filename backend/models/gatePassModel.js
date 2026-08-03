@@ -72,6 +72,11 @@ const ItemSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    weightOnArrival: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     grossWeightKg: {
       type: Number,
       min: 0,
@@ -149,9 +154,9 @@ const GatePassSchema = new mongoose.Schema(
       validate: {
         validator: function (v) {
           if (!v) return true;
-          return /^[A-Za-z\s]+$/.test(v);
+          return companyNamePattern.test(v);
         },
-        message: "Sender name: letters and spaces only.",
+        message: "Sender name contains invalid characters.",
       },
     },
 
