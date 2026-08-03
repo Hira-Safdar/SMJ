@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -126,6 +126,164 @@ const ensureAccountSuffix = (value) => {
   return `${text} A/C`;
 };
 
+const gpFmtNum = (v) => {
+  const n = Number(v || 0);
+  if (!n) return "";
+  return Number.isInteger(n)
+    ? String(n)
+    : String(+n.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+};
+const gpFormatKgToMan = (kg) => {
+  const total = Number(kg || 0);
+  if (total <= 0) return "";
+  const man = Math.floor(total / 40);
+  const remainder = +(total - man * 40).toFixed(2);
+  const w = (value) =>
+    Number.isInteger(value) ? String(value) : String(value).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  if (man === 0) return `${w(remainder)} kg`;
+  if (remainder === 0) return `${man} man`;
+  return `${man} man ${w(remainder)} kg`;
+};
+const gpComputeBags = (item = {}) => {
+  const gross = Number(item?.weightAtSmjKg || 0);
+  const emptyPerBag = Number(item?.emptyBagWeightKg || 0);
+  const bagW = Number(item?.bagWeightEachKg || item?.bagWeightKg || 0);
+  if (gross <= 0) return "";
+  if (bagW <= 0) return `${gpFmtNum(gross)}kg`;
+  const fullBags = Math.floor(gross / bagW);
+  const looseKg = +(gross - fullBags * bagW).toFixed(2);
+  const bagsLabel = fullBags > 0 ? `${fullBags} bag${fullBags > 1 ? "s" : ""}` : "";
+  const looseLabel = looseKg > 0 ? `${gpFmtNum(looseKg)}kg` : "";
+  return [bagsLabel, looseLabel].filter(Boolean).join(" ") || "";
+};
+const gpItemListText = (row, getter) => {
+  const list = (row?.items || []).map(getter).filter(Boolean);
+  return list.length ? Array.from(new Set(list)).join(", ") : "-";
+};
+const gpItemBrand = (it = {}) => String(it?.brand || it?.brandName || it?.companyName || "").trim();
+const gpItemName = (it = {}) =>
+  String(it?.itemType === "Other" && it?.customItemName ? it?.customItemName : it?.itemType || "Item").trim();
+
+const gatePassInReportColumns = [
+  { key: "date", label: "Date", render: (v) => fmtDate(v) },
+  { key: "gatePassNo", label: "GP No" },
+  { key: "senderName", label: "Sender Name" },
+  {
+    key: "companyNames",
+    label: "Company",
+    render: (_v, row) => gpItemListText(row, (it) => gpItemBrand(it)),
+  },
+  {
+    key: "productNames",
+    label: "Product Name",
+    render: (_v, row) => gpItemListText(row, (it) => gpItemName(it)),
+  },
+  {
+    key: "weightOnArrival",
+    label: "Wt on Arrival (kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.weightOnArrival)),
+  },
+  {
+    key: "weightAtSmjKg",
+    label: "Wt at SMJ (kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.weightAtSmjKg)),
+  },
+  {
+    key: "emptyBagWeightKg",
+    label: "Empty Bag Wt (kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.emptyBagWeightKg)),
+  },
+  {
+    key: "netWeightKg",
+    label: "Net Weight (kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.netWeightKg || it?.quantity)),
+  },
+  {
+    key: "netWeightMan",
+    label: "Net Weight (man/kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFormatKgToMan(it?.netWeightKg || it?.quantity)),
+  },
+  {
+    key: "bagWeightEachKg",
+    label: "Bag Wt Each (kg)",
+    render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.bagWeightEachKg || it?.bagWeightKg)),
+  },
+  {
+    key: "bagCount",
+    label: "No. of Bags",
+    render: (_v, row) => gpItemListText(row, (it) => gpComputeBags(it)),
+  },
+];
+
+const gatePassOutReportColumns = [
+  { key: "date", label: "Date", render: (v) => fmtDate(v) },
+  { key: "gatePassNo", label: "GP No" },
+  { key: "partyName", label: "Company Name (Send To)" },
+  {
+    key: "truckNo",
+    label: "Truck No",
+    render: (v) => (v && v !== "OUT-0000" ? v : "-"),
+  },
+  {
+    key: "companyNames",
+    label: "Company Name (Product Owner)",
+    render: (_v, row) => gpItemListText(row, (it) => gpItemBrand(it)),
+  },
+  {
+    key: "productNames",
+    label: "Product Name",
+    render: (_v, row) => {
+      const list = (row?.items || [])
+        .map((it) => {
+          const name = it?.itemType === "Other" && it?.customItemName ? it?.customItemName : it?.itemType;
+          const qty = gpFmtNum(it?.netWeightKg || it?.quantity || 0);
+          return `${name}${qty ? ` (${qty} kg)` : ""}`;
+        })
+        .filter(Boolean);
+      return list.length ? Array.from(new Set(list)).join(", ") : "-";
+    },
+  },
+  {
+    key: "bagCount",
+    label: "No. of Bags",
+    render: (_v, row) => gpItemListText(row, (it) => String(it?.bagCount || "").trim()),
+  },
+  {
+    key: "netWeightKg",
+    label: "Net Weight",
+    render: (_v, row) =>
+      gpItemListText(row, (it) => {
+        const net = gpFmtNum(it?.netWeightKg || it?.quantity || 0);
+        return net ? `${net} kg` : "";
+      }),
+  },
+  {
+    key: "rate",
+    label: "Price/Man",
+    render: (_v, row) => gpItemListText(row, (it) => String(Math.round(Number(it?.rate || 0)) || "").trim()),
+  },
+  {
+    key: "totalAmount",
+    label: "Amount",
+    render: (v) => (v != null ? Math.round(Number(v)) : "0"),
+  },
+  {
+    key: "paymentStatus",
+    label: "Payment",
+    render: (v) => String(v || "-"),
+  },
+  {
+    key: "amountPaid",
+    label: "Paid",
+    render: (v) => Math.round(Number(v || 0)),
+  },
+  {
+    key: "remainingAmount",
+    label: "Remaining",
+    render: (v) => Math.round(Number(v || 0)),
+  },
+];
+
 const mapStockRows = (payload = {}) => {
   const production = (payload?.production || []).map((r, idx) => ({
     id: `p-${idx}`,
@@ -252,8 +410,29 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [invProductTypeIds, setInvProductTypeIds] = useState([]);
   const [stockFilterOpen, setStockFilterOpen] = useState(false);
 
-  // Gatepass report sub-tabs
-  const [gatepassSubTab, setGatepassSubTab] = useState("history"); // history|inward|outward
+  // Gatepass report cards + generated reports
+  const [gpSenders, setGpSenders] = useState([]);
+  const [gpCustomers, setGpCustomers] = useState([]);
+  const [gpStock, setGpStock] = useState([]);
+  const [gpGeneratedList, setGpGeneratedList] = useState([]);
+  const [gpGeneratedLoading, setGpGeneratedLoading] = useState(false);
+  const [gpExpandedCompany, setGpExpandedCompany] = useState("");
+  const [gpInCriteria, setGpInCriteria] = useState({
+    range: "all",
+    startDate: "",
+    endDate: "",
+    sender: "",
+    company: "",
+    product: "",
+  });
+  const [gpOutCriteria, setGpOutCriteria] = useState({
+    range: "all",
+    startDate: "",
+    endDate: "",
+    customer: "",
+    company: "",
+    product: "",
+  });
 
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
@@ -416,43 +595,28 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     return lines;
   }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockAsOfDateLabel]);
 
-  const gatepassSubTabs = useMemo(
-    () => [
-      { key: "history", label: "History (All)" },
-      { key: "inward", label: "Inward" },
-      { key: "outward", label: "Outward" },
-    ],
-    []
-  );
-
-  const gatepassFilteredRows = useMemo(() => {
-    if (activeTab !== "gatepass") return rows;
-    if (gatepassSubTab === "inward") return (rows || []).filter((r) => String(r?.type || "").trim() === "IN");
-    if (gatepassSubTab === "outward") return (rows || []).filter((r) => String(r?.type || "").trim() === "OUT");
-    return rows;
-  }, [activeTab, gatepassSubTab, rows]);
-
-  const gatepassFilterOptions = useMemo(() => {
-    if (activeTab !== "gatepass") {
-      return { types: ["IN", "OUT"], paymentStatuses: ["Paid", "Partial Paid", "Unpaid/Pending"] };
-    }
-    const types = new Set();
-    (rows || []).forEach((r) => {
-      const type = String(r?.type || "").trim();
-      if (type) types.add(type);
+  const gpStockCompanies = useMemo(() => {
+    const set = new Set();
+    (gpStock || []).forEach((r) => {
+      const c = String(r.companyName || r.brandName || "").trim();
+      if (c && c !== "Mill Own Stock") set.add(c);
     });
-    const sortText = (a, b) => String(a).localeCompare(String(b));
-    return {
-      types: Array.from(types.size ? types : new Set(["IN", "OUT"])).sort(sortText),
-      paymentStatuses: ["Paid", "Partial Paid", "Unpaid/Pending"],
-    };
-  }, [activeTab, rows]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [gpStock]);
 
-  const gatepassReportContextLines = useMemo(() => {
-    if (activeTab !== "gatepass") return [];
-    const subLabel = gatepassSubTabs.find((t) => t.key === gatepassSubTab)?.label || "History (All)";
-    return [`View: ${subLabel}`, `Date Range: ${stockAsOfDateLabel}`];
-  }, [activeTab, gatepassSubTab, gatepassSubTabs, stockAsOfDateLabel]);
+  const gpProductsForCompany = useCallback(
+    (company) => {
+      const set = new Set();
+      (gpStock || []).forEach((r) => {
+        if (String(r.companyName || r.brandName || "").trim() === company) {
+          const p = String(r.productTypeName || "").trim();
+          if (p) set.add(p);
+        }
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b));
+    },
+    [gpStock]
+  );
 
   const visibleTabs = useMemo(() => {
     if (!Array.isArray(allowedTabs) || !allowedTabs.length) return REPORT_TABS;
@@ -821,6 +985,53 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       }
     };
     loadPartyBuckets();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "gatepass") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [settingsRes, customersRes, stockRes] = await Promise.all([
+          api.get("/settings"),
+          api.get("/customers"),
+          api.get("/stock/current"),
+        ]);
+        const settingsData = settingsRes.data?.data || settingsRes.data || {};
+        const senderOptions = Array.isArray(settingsData.senderOptions) ? settingsData.senderOptions : [];
+        const senderSet = new Set();
+        senderOptions.forEach((s) => {
+          const t = String(s || "").trim();
+          if (t) senderSet.add(t);
+        });
+        (rows || []).forEach((r) => {
+          const t = String(r?.senderName || r?.partyName || "").trim();
+          if (t && t !== "-") senderSet.add(t);
+        });
+        const stockRowsArr = Array.isArray(stockRes.data?.data) ? stockRes.data.data : [];
+        if (!cancelled) {
+          setGpSenders(Array.from(senderSet).sort((a, b) => a.localeCompare(b)));
+          setGpCustomers(
+            (customersRes.data?.data || [])
+              .map((c) => String(c?.name || "").trim())
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b))
+          );
+          setGpStock(stockRowsArr.filter((r) => Number(r?.balanceKg || 0) > 0));
+        }
+      } catch {
+        /* best effort */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, rows]);
+
+  useEffect(() => {
+    if (activeTab !== "gatepass") return;
+    loadGatePassGeneratedList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   function closeDrill() {
@@ -1350,7 +1561,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
               v || "-"
             ),
         },
-        { key: "type", label: "Type", filterOptions: gatepassFilterOptions.types },
+        { key: "type", label: "Type" },
+        { key: "senderName", label: "Sender" },
         { key: "partyName", label: "Party" },
         { key: "companyNames", label: "Company" },
         { key: "productNames", label: "Products" },
@@ -1358,7 +1570,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "totalBags", label: "Bags" },
         { key: "totalWeightKg", label: "Weight (kg)" },
         { key: "totalAmount", label: "Amount (PKR)", render: (v) => fmt(v) },
-        { key: "paymentStatusLabel", label: "Payment", filterOptions: gatepassFilterOptions.paymentStatuses },
+        { key: "paymentStatusLabel", label: "Payment" },
       ];
     }
     if (activeTab === "ledger") {
@@ -1509,8 +1721,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     ];
   }, [
     activeTab,
-    gatepassFilterOptions.types,
-    gatepassFilterOptions.paymentStatuses,
     navigate,
     openLedgerDrill,
     openVoucherDrill,
@@ -2467,6 +2677,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     else if (kind === "trial") await handleDeleteGeneratedTrial(item);
     else if (kind === "pl") await handleDeleteGeneratedPl(item);
     else if (kind === "balance") await handleDeleteGeneratedBalance(item);
+    else if (kind === "gatepass-generated") await handleDeleteGatePassGenerated(item);
     closeDeleteConfirm();
   };
 
@@ -2511,6 +2722,219 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     });
 
     doc.save(`ledger_${asOfDate}.pdf`);
+  };
+
+  const loadGatePassGeneratedList = async () => {
+    try {
+      setGpGeneratedLoading(true);
+      const res = await api.get("/gatepass-generated");
+      setGpGeneratedList(res.data?.data || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load generated gatepass reports.");
+      setGpGeneratedList([]);
+    } finally {
+      setGpGeneratedLoading(false);
+    }
+  };
+
+  const gatePassRangeLabel = ({ range: r = "all", startDate: sd = "", endDate: ed = "" }) => {
+    if (r === "custom") {
+      if (sd && ed) return `${sd} to ${ed}`;
+      return sd || ed || "All Dates";
+    }
+    return "All Dates";
+  };
+
+  const gatePassReportCellToText = (col, row) => {
+    const v = col.render ? col.render(row[col.key], row) : row[col.key] ?? "";
+    if (v == null) return "";
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
+    if (typeof v === "object" && v?.props?.children) return String(row[col.key] ?? "");
+    return String(v);
+  };
+
+  const buildGatePassReport = async ({
+    type = "",
+    sender = "",
+    company = "",
+    product = "",
+    customer = "",
+    range: r = "all",
+    startDate: sd = "",
+    endDate: ed = "",
+  } = {}) => {
+    try {
+      setLoading(true);
+      const reportParams = { range: r };
+      if (r === "custom" && sd && ed) {
+        reportParams.startDate = sd;
+        reportParams.endDate = ed;
+      }
+      if (type) reportParams.type = type;
+      if (sender) reportParams.sender = sender;
+      if (company) reportParams.company = company;
+      if (product) reportParams.product = product;
+      if (customer) reportParams.customer = customer;
+
+      const res = await api.get("/reports/gatepass", { params: reportParams });
+      const mapped = (res.data?.data || []).map((r) => ({
+        id: r._id,
+        ...r,
+        paymentStatusLabel: normalizePaymentStatus(r.paymentStatus),
+      }));
+
+      const reportColumns = type === "OUT" ? gatePassOutReportColumns : gatePassInReportColumns;
+      const titleParts = ["Gate Pass Report"];
+      const contextLines = [];
+      if (type) {
+        titleParts.push(type === "IN" ? "IN" : "OUT");
+        contextLines.push(`Type: ${type}`);
+      }
+      if (sender) {
+        titleParts.push(`- ${sender}`);
+        contextLines.push(`Sender: ${sender}`);
+      }
+      if (company) {
+        titleParts.push(`- ${company}`);
+        contextLines.push(`Company: ${company}`);
+      }
+      if (product) contextLines.push(`Product: ${product}`);
+      if (customer) {
+        titleParts.push(`- ${customer}`);
+        contextLines.push(`Send To: ${customer}`);
+      }
+      const title = titleParts.join(" ");
+      contextLines.push(`Date Range: ${gatePassRangeLabel({ range: r, startDate: sd, endDate: ed })}`);
+      contextLines.push(`Records: ${mapped.length}`);
+      const filterLabel = contextLines.join("\n");
+
+      await saveGatePassGeneratedReport({
+        title,
+        reportKind: "gatepass",
+        filterLabel,
+        criteria: reportParams,
+        columns: reportColumns.map((c) => c.label),
+        rows: mapped.map((row) => reportColumns.map((c) => gatePassReportCellToText(c, row))),
+      });
+      return true;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to generate gatepass report.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveGatePassGeneratedReport = async ({ title, reportKind, filterLabel, criteria, columns: cols, rows: body }) => {
+    try {
+      await api.post("/gatepass-generated", {
+        name: title,
+        reportKind,
+        filterLabel,
+        criteria,
+        columns: cols,
+        rows: body,
+      });
+      toast.success("Report generated and saved.");
+      loadGatePassGeneratedList();
+      return true;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Report could not be saved.");
+      return false;
+    }
+  };
+
+  const generateGpListReport = async (kind) => {
+    let title = "";
+    let cols = [];
+    let dataRows = [];
+    if (kind === "senders") {
+      title = "Sender List";
+      cols = [
+        { key: "sr", label: "Sr. No" },
+        { key: "name", label: "Sender Name" },
+      ];
+      dataRows = (gpSenders || []).map((s, i) => ({ sr: i + 1, name: s }));
+    } else if (kind === "companies") {
+      title = "Companies & In-Stock Products";
+      cols = [
+        { key: "sr", label: "Sr. No" },
+        { key: "company", label: "Company" },
+        { key: "products", label: "Products (In Stock)" },
+      ];
+      dataRows = (gpStockCompanies || []).map((c, i) => ({
+        sr: i + 1,
+        company: c,
+        products: gpProductsForCompany(c).join(", "),
+      }));
+    } else if (kind === "send-to") {
+      title = "Send To Companies List";
+      cols = [
+        { key: "sr", label: "Sr. No" },
+        { key: "name", label: "Company Name" },
+      ];
+      dataRows = (gpCustomers || []).map((c, i) => ({ sr: i + 1, name: c }));
+    } else {
+      return false;
+    }
+    const filterLabel = `Total Records: ${dataRows.length}`;
+    return saveGatePassGeneratedReport({
+      title,
+      reportKind: `gatepass-${kind}`,
+      filterLabel,
+      criteria: { kind },
+      columns: cols.map((c) => c.label),
+      rows: dataRows.map((r) => cols.map((c) => String(r[c.key] ?? ""))),
+    });
+  };
+
+  const downloadGatePassGenerated = (j, format) => {
+    if (!j) return;
+    const headers = Array.isArray(j.columns) ? j.columns : [];
+    const body = Array.isArray(j.rows) ? j.rows : [];
+    const title = String(j.name || "Gatepass Report").trim() || "Gatepass Report";
+    const createdAt = j.createdAt || new Date().toISOString();
+    const safeName = title.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+    if (format === "excel") {
+      const ws = XLSX.utils.aoa_to_sheet(body.length ? [headers, ...body] : [headers]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, title.replace(/\s/g, "_").slice(0, 31));
+      XLSX.writeFile(wb, `${safeName}_${new Date(createdAt).toISOString().slice(0, 10)}.xlsx`);
+      return;
+    }
+    const doc = new jsPDF();
+    let startY = 18;
+    doc.setFontSize(14);
+    doc.text(title, 14, startY);
+    startY += 7;
+    doc.setFontSize(10);
+    String(j.filterLabel || "")
+      .split("\n")
+      .forEach((line) => {
+        const t = String(line).trim();
+        if (!t) return;
+        doc.text(t, 14, startY);
+        startY += 5;
+      });
+    startY += 2;
+    autoTable(doc, {
+      head: [headers],
+      body,
+      startY,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [236, 253, 245], textColor: 6 },
+    });
+    doc.save(`${safeName}_${new Date(createdAt).toISOString().slice(0, 10)}.pdf`);
+  };
+
+  const handleDeleteGatePassGenerated = async (j) => {
+    try {
+      await api.delete(`/gatepass-generated/${j._id}`);
+      toast.success("Report deleted.");
+      loadGatePassGeneratedList();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete report.");
+    }
   };
 
   const saveTemplate = async (templateName) => {
@@ -2948,47 +3372,368 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                     </div>
                   )
                 ) : activeTab === "gatepass" ? (
-                  loading ? (
-                    <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap gap-2">
-                        {gatepassSubTabs.map((t) => (
-                          <button
-                            key={t.key}
-                            type="button"
-                            onClick={() => setGatepassSubTab(t.key)}
-                            className={`inline-flex items-center rounded-lg border px-3 py-2 text-xs ${
-                              gatepassSubTab === t.key
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                            }`}
-                          >
-                            {t.label}
-                          </button>
-                        ))}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Truck size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Sender List</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">All senders recorded in the system</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpSenders.length === 0 ? (
+                            <div className="text-xs text-gray-400">No senders found.</div>
+                          ) : (
+                            gpSenders.map((s) => (
+                              <div key={s} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
+                                {s}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("senders")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Senders List
+                        </button>
                       </div>
-                      <DataTable
-                        title={
-                          gatepassSubTab === "inward"
-                            ? "Gatepass History (Inward)"
-                            : gatepassSubTab === "outward"
-                              ? "Gatepass History (Outward)"
-                              : "Gatepass History (All)"
-                        }
-                        columns={columns}
-                        data={gatepassFilteredRows}
-                        idKey="id"
-                        searchPlaceholder="Search gatepass history..."
-                        emptyMessage={emptyMessage}
-                        rowClassName={reportRowClass}
-                        showExport
-                        showPrint
-                        reportContextLines={gatepassReportContextLines}
-                        showRecordCount={!(embedded && activeTab === "ledger")}
-                      />
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Factory size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Companies (Product Owner)</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Companies with in-stock products</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpStockCompanies.length === 0 ? (
+                            <div className="text-xs text-gray-400">No companies found.</div>
+                          ) : (
+                            gpStockCompanies.map((c) => (
+                              <div key={c} className="overflow-hidden rounded-lg border border-gray-200">
+                                <button
+                                  type="button"
+                                  onClick={() => setGpExpandedCompany(gpExpandedCompany === c ? "" : c)}
+                                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                                >
+                                  <span className="truncate">{c}</span>
+                                  <ChevronDown
+                                    size={14}
+                                    className={`shrink-0 text-gray-400 transition-transform ${gpExpandedCompany === c ? "rotate-180" : ""}`}
+                                  />
+                                </button>
+                                {gpExpandedCompany === c && (
+                                  <div className="space-y-1 border-t border-gray-100 bg-gray-50/60 px-2 py-2">
+                                    {gpProductsForCompany(c).length === 0 ? (
+                                      <div className="px-1 text-[11px] text-gray-400">No in-stock products.</div>
+                                    ) : (
+                                      gpProductsForCompany(c).map((p) => (
+                                        <div key={p} className="rounded-md px-2 py-1.5 text-[11px] text-gray-600">
+                                          {p}
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("companies")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Companies Report
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <UserRound size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Send To Companies</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">All companies goods are sent to</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpCustomers.length === 0 ? (
+                            <div className="text-xs text-gray-400">No customers found.</div>
+                          ) : (
+                            gpCustomers.map((c) => (
+                              <div key={c} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
+                                {c}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("send-to")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Send To List
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Truck size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Gate Pass IN Report</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
+                        <div className="mt-3 flex-1 space-y-2">
+                          <div>
+                            <label className={filterLabelClass}>Date Range</label>
+                            <select
+                              value={gpInCriteria.range}
+                              onChange={(e) => setGpInCriteria((p) => ({ ...p, range: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="all">All Dates</option>
+                              <option value="custom">From-To Date</option>
+                            </select>
+                          </div>
+                          {gpInCriteria.range === "custom" && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={filterLabelClass}>From</label>
+                                <input
+                                  type="date"
+                                  value={gpInCriteria.startDate}
+                                  onChange={(e) => setGpInCriteria((p) => ({ ...p, startDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                              <div>
+                                <label className={filterLabelClass}>To</label>
+                                <input
+                                  type="date"
+                                  value={gpInCriteria.endDate}
+                                  onChange={(e) => setGpInCriteria((p) => ({ ...p, endDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <label className={filterLabelClass}>Sender</label>
+                            <select
+                              value={gpInCriteria.sender}
+                              onChange={(e) => setGpInCriteria((p) => ({ ...p, sender: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Senders</option>
+                              {gpSenders.map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Company</label>
+                            <select
+                              value={gpInCriteria.company}
+                              onChange={(e) => setGpInCriteria((p) => ({ ...p, company: e.target.value, product: "" }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpStockCompanies.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Product</label>
+                            <select
+                              value={gpInCriteria.product}
+                              onChange={(e) => setGpInCriteria((p) => ({ ...p, product: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Products</option>
+                              {gpProductsForCompany(gpInCriteria.company).map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => buildGatePassReport({ type: "IN", ...gpInCriteria })}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate IN Report
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Truck size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Gate Pass OUT Report</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
+                        <div className="mt-3 flex-1 space-y-2">
+                          <div>
+                            <label className={filterLabelClass}>Date Range</label>
+                            <select
+                              value={gpOutCriteria.range}
+                              onChange={(e) => setGpOutCriteria((p) => ({ ...p, range: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="all">All Dates</option>
+                              <option value="custom">From-To Date</option>
+                            </select>
+                          </div>
+                          {gpOutCriteria.range === "custom" && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={filterLabelClass}>From</label>
+                                <input
+                                  type="date"
+                                  value={gpOutCriteria.startDate}
+                                  onChange={(e) => setGpOutCriteria((p) => ({ ...p, startDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                              <div>
+                                <label className={filterLabelClass}>To</label>
+                                <input
+                                  type="date"
+                                  value={gpOutCriteria.endDate}
+                                  onChange={(e) => setGpOutCriteria((p) => ({ ...p, endDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <label className={filterLabelClass}>Send To</label>
+                            <select
+                              value={gpOutCriteria.customer}
+                              onChange={(e) => setGpOutCriteria((p) => ({ ...p, customer: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpCustomers.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Company</label>
+                            <select
+                              value={gpOutCriteria.company}
+                              onChange={(e) => setGpOutCriteria((p) => ({ ...p, company: e.target.value, product: "" }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpStockCompanies.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Product</label>
+                            <select
+                              value={gpOutCriteria.product}
+                              onChange={(e) => setGpOutCriteria((p) => ({ ...p, product: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Products</option>
+                              {gpProductsForCompany(gpOutCriteria.company).map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => buildGatePassReport({ type: "OUT", ...gpOutCriteria })}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate OUT Report
+                        </button>
+                      </div>
                     </div>
-                  )
+
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold text-gray-900">Generated Reports</div>
+                      <div className="overflow-x-auto rounded-xl border border-gray-200">
+                        <table className="min-w-[640px] w-full text-sm">
+                          <thead className="bg-emerald-50 text-emerald-900">
+                            <tr>
+                              <th className="w-[60px] px-3 py-2 text-left font-semibold">Sr. No</th>
+                              <th className="px-3 py-2 text-left font-semibold">Report Name</th>
+                              <th className="w-[190px] px-3 py-2 text-left font-semibold">Generated At</th>
+                              <th className="w-[170px] px-3 py-2 text-left font-semibold">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {gpGeneratedLoading && (
+                              <tr>
+                                <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
+                                  Loading generated reports...
+                                </td>
+                              </tr>
+                            )}
+                            {!gpGeneratedLoading && gpGeneratedList.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
+                                  No generated reports yet.
+                                </td>
+                              </tr>
+                            )}
+                            {gpGeneratedList.map((j, idx) => (
+                              <tr key={j._id}>
+                                <td className="px-3 py-2">{idx + 1}</td>
+                                <td className="px-3 py-2">{j.name}</td>
+                                <td className="px-3 py-2">
+                                  {fmtDate(j.createdAt)}{" "}
+                                  <span className="text-gray-400">{new Date(j.createdAt).toLocaleTimeString()}</span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadGatePassGenerated(j, "pdf")}
+                                      className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                                      title="Download PDF"
+                                    >
+                                      <FileText size={13} /> PDF
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadGatePassGenerated(j, "excel")}
+                                      className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                                      title="Download Excel"
+                                    >
+                                      <Download size={13} /> Excel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openDeleteConfirm("gatepass-generated", j, j.name)}
+                                      className="rounded border border-red-200 p-1.5 text-red-700 hover:bg-red-50"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
                 ) : loading ? (
                   <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
                 ) : (

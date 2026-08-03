@@ -60,13 +60,25 @@ const persistBrandOptions = async (body) => {
       const brand = normalizeBrandName(it?.brand);
       if (brand) names.add(toTitleCase(brand));
     });
-    if (!names.size) return;
+    const senderName = String(body?.senderName || body?.supplier || "").trim();
+    if (!names.size && !senderName) return;
     const settings = await SystemSettings.findOne({});
     if (!settings) return;
+    let changed = false;
+    if (senderName) {
+      const senderList = Array.isArray(settings.senderOptions) ? settings.senderOptions : [];
+      const senderMap = new Map(
+        senderList.map((s) => [String(s).trim().toLowerCase(), s])
+      );
+      if (!senderMap.has(senderName.toLowerCase())) {
+        senderMap.set(senderName.toLowerCase(), toTitleCase(senderName));
+        settings.senderOptions = Array.from(senderMap.values()).sort();
+        changed = true;
+      }
+    }
     const existing = new Map(
       (settings.brandOptions || []).map((b) => [String(b).trim().toLowerCase(), b])
     );
-    let changed = false;
     names.forEach((name) => {
       const key = name.toLowerCase();
       if (!existing.has(key)) {

@@ -180,8 +180,10 @@ function GroupedProductDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [activeIdx, setActiveIdx] = useState(-1);
   const ref = useRef(null);
   const inputRef = useRef(null);
+  const optionRefs = useRef({});
 
   useEffect(() => {
     if (!open) return;
@@ -197,6 +199,7 @@ function GroupedProductDropdown({
   useEffect(() => {
     if (open) return;
     setQ(valueId ? String(valueLabel || "") : "");
+    setActiveIdx(-1);
   }, [open, valueId, valueLabel]);
 
   const normalizedPreferred = String(preferredBrandKey || "").trim().toLowerCase();
@@ -218,6 +221,73 @@ function GroupedProductDropdown({
   }, [q, scopedGroups]);
 
   const showBrandInItem = !normalizedPreferred && String(q || "").trim().length > 0;
+
+  const navItems = useMemo(() => {
+    const list = [];
+    if (valueId) list.push({ key: "__clear__", id: "", label: "Clear selection", isClear: true });
+    (filtered || []).forEach((g) => {
+      (g.items || []).forEach((p) => {
+        const label = showBrandInItem
+          ? `${String(g.brand || "").trim()} - ${String(p?.name || "").trim()}`.trim()
+          : String(p?.name || "").trim();
+        list.push({ key: String(p._id), id: String(p._id), label });
+      });
+    });
+    return list;
+  }, [filtered, valueId, showBrandInItem]);
+
+  const commitSelect = (item) => {
+    onSelect?.({ id: item.id, label: item.label });
+    setQ(item.label);
+    setOpen(false);
+    setActiveIdx(-1);
+  };
+
+  useEffect(() => {
+    if (activeIdx > navItems.length - 1) setActiveIdx(navItems.length - 1);
+  }, [navItems.length, activeIdx]);
+
+  useEffect(() => {
+    if (!open || activeIdx < 0) return;
+    const el = optionRefs.current?.[activeIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [open, activeIdx]);
+
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        queueMicrotask(() => inputRef.current?.focus());
+        return;
+      }
+      setActiveIdx((i) =>
+        e.key === "ArrowDown"
+          ? Math.min(i + 1, navItems.length - 1)
+          : Math.max(i - 1, 0)
+      );
+    } else if (e.key === "Enter") {
+      if (open && activeIdx >= 0 && navItems[activeIdx]) {
+        e.preventDefault();
+        commitSelect(navItems[activeIdx]);
+      } else if (!open) {
+        e.preventDefault();
+        setOpen(true);
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setActiveIdx(-1);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+      setActiveIdx(-1);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      if (!open) setOpen(true);
+      setActiveIdx(-1);
+    }
+  };
 
   return (
     <div ref={ref} className="relative">
@@ -241,7 +311,9 @@ function GroupedProductDropdown({
           onChange={(e) => {
             setQ(e.target.value);
             setOpen(true);
+            setActiveIdx(-1);
           }}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm focus:outline-none ${
             disabled ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
@@ -269,7 +341,13 @@ function GroupedProductDropdown({
                   setQ("");
                   setOpen(false);
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-900 hover:bg-blue-50"
+                onMouseEnter={() => setActiveIdx(0)}
+                ref={(el) => {
+                  optionRefs.current[0] = el;
+                }}
+                className={`w-full text-left px-3 py-2 text-sm ${
+                  activeIdx === 0 ? "bg-blue-600 text-white" : "text-gray-900 hover:bg-blue-50"
+                }`}
               >
                 Clear selection
               </button>
@@ -280,6 +358,7 @@ function GroupedProductDropdown({
                   {g.brand || "Other"}
                 </div>
                 {(g.items || []).map((p) => {
+                  const idx = navItems.findIndex((n) => n.key === String(p._id));
                   const label = showBrandInItem
                     ? `${String(g.brand || "").trim()} - ${String(p?.name || "").trim()}`.trim()
                     : String(p?.name || "").trim();
@@ -288,13 +367,21 @@ function GroupedProductDropdown({
                     <button
                       key={p._id}
                       type="button"
+                      onMouseEnter={() => setActiveIdx(idx)}
                       onClick={() => {
                         onSelect?.({ id: String(p._id), label });
                         setQ(label);
                         setOpen(false);
                       }}
+                      ref={(el) => {
+                        optionRefs.current[idx] = el;
+                      }}
                       className={`w-full text-left px-3 py-2 text-sm ${
-                        selected ? "bg-blue-600 text-white hover:bg-blue-600" : "text-gray-900 hover:bg-blue-50"
+                        selected
+                          ? "bg-blue-600 text-white hover:bg-blue-600"
+                          : activeIdx === idx
+                            ? "bg-blue-50 text-gray-900"
+                            : "text-gray-900 hover:bg-blue-50"
                       }`}
                     >
                       {label}
@@ -323,8 +410,10 @@ function SearchableAccountDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [activeIdx, setActiveIdx] = useState(-1);
   const ref = useRef(null);
   const inputRef = useRef(null);
+  const optionRefs = useRef({});
 
   useEffect(() => {
     if (!open) return;
@@ -340,6 +429,7 @@ function SearchableAccountDropdown({
   useEffect(() => {
     if (open) return;
     setQ(valueId ? String(valueLabel || "") : "");
+    setActiveIdx(-1);
   }, [open, valueId, valueLabel]);
 
   const filtered = useMemo(() => {
@@ -350,6 +440,68 @@ function SearchableAccountDropdown({
       return name.includes(s);
     });
   }, [q, options]);
+
+  const navItems = useMemo(() => {
+    const list = [];
+    if (valueId) list.push({ key: "__clear__", id: "", label: "Clear selection", isClear: true });
+    (filtered || []).forEach((a) => {
+      list.push({ key: String(a.id), id: String(a.id), label: String(a?.label || a?.name || "").trim() });
+    });
+    return list;
+  }, [filtered, valueId]);
+
+  const commitSelect = (item) => {
+    onSelect?.({ id: item.id, label: item.label });
+    setQ(item.label);
+    setOpen(false);
+    setActiveIdx(-1);
+  };
+
+  useEffect(() => {
+    if (activeIdx > navItems.length - 1) setActiveIdx(navItems.length - 1);
+  }, [navItems.length, activeIdx]);
+
+  useEffect(() => {
+    if (!open || activeIdx < 0) return;
+    const el = optionRefs.current?.[activeIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [open, activeIdx]);
+
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        queueMicrotask(() => inputRef.current?.focus());
+        return;
+      }
+      setActiveIdx((i) =>
+        e.key === "ArrowDown"
+          ? Math.min(i + 1, navItems.length - 1)
+          : Math.max(i - 1, 0)
+      );
+    } else if (e.key === "Enter") {
+      if (open && activeIdx >= 0 && navItems[activeIdx]) {
+        e.preventDefault();
+        commitSelect(navItems[activeIdx]);
+      } else if (!open) {
+        e.preventDefault();
+        setOpen(true);
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setActiveIdx(-1);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+      setActiveIdx(-1);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      if (!open) setOpen(true);
+      setActiveIdx(-1);
+    }
+  };
 
   return (
     <div ref={ref} className="relative">
@@ -373,7 +525,9 @@ function SearchableAccountDropdown({
           onChange={(e) => {
             setQ(e.target.value);
             setOpen(true);
+            setActiveIdx(-1);
           }}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className={`w-full px-3 py-2 pr-10 rounded-lg border text-sm focus:outline-none ${
             disabled ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
@@ -401,25 +555,40 @@ function SearchableAccountDropdown({
                   setQ("");
                   setOpen(false);
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-900 hover:bg-blue-50"
+                onMouseEnter={() => setActiveIdx(0)}
+                ref={(el) => {
+                  optionRefs.current[0] = el;
+                }}
+                className={`w-full text-left px-3 py-2 text-sm ${
+                  activeIdx === 0 ? "bg-blue-600 text-white" : "text-gray-900 hover:bg-blue-50"
+                }`}
               >
                 Clear selection
               </button>
             )}
-            {(filtered || []).map((a) => {
+            {(filtered || []).map((a, oi) => {
+              const idx = valueId ? oi + 1 : oi;
               const label = String(a?.label || a?.name || "").trim();
               const selected = String(valueId) === String(a.id);
               return (
                 <button
                   key={a.id}
                   type="button"
+                  onMouseEnter={() => setActiveIdx(idx)}
                   onClick={() => {
                     onSelect?.({ id: String(a.id), label });
                     setQ(label);
                     setOpen(false);
                   }}
+                  ref={(el) => {
+                    optionRefs.current[idx] = el;
+                  }}
                   className={`w-full text-left px-3 py-2 text-sm ${
-                    selected ? "bg-blue-600 text-white hover:bg-blue-600" : "text-gray-900 hover:bg-blue-50"
+                    selected
+                      ? "bg-blue-600 text-white hover:bg-blue-600"
+                      : activeIdx === idx
+                        ? "bg-blue-50 text-gray-900"
+                        : "text-gray-900 hover:bg-blue-50"
                   }`}
                 >
                   {label}

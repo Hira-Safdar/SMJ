@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { Edit2, Trash2, Printer, X, Plus, ChevronDown } from "lucide-react";
 import { toast } from "react-hot-toast";
 import api from "../../services/api";
@@ -31,6 +31,7 @@ const createBrandModalState = () => ({
 
 export default function GatePassIN({ highlightId = "" }) {
   const [brandOptions, setBrandOptions] = useState([]);
+  const [senderOptions, setSenderOptions] = useState([]);
   const [productCatalog, setProductCatalog] = useState([]);
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -65,6 +66,10 @@ export default function GatePassIN({ highlightId = "" }) {
   const [stockRows, setStockRows] = useState([]);
   const [openBrandDropdown, setOpenBrandDropdown] = useState(null);
   const [openSenderDropdown, setOpenSenderDropdown] = useState(false);
+  const [activeBrandIdx, setActiveBrandIdx] = useState(-1);
+  const [activeSenderIdx, setActiveSenderIdx] = useState(-1);
+  const brandOptionRefs = useRef({});
+  const senderOptionRefs = useRef({});
 
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({
@@ -322,6 +327,11 @@ export default function GatePassIN({ highlightId = "" }) {
               mergeOptionsCaseInsensitive(prev || [], s.brandOptions || [])
             );
           }
+          if (Array.isArray(s.senderOptions)) {
+            setSenderOptions((prev) =>
+              mergeOptionsCaseInsensitive(prev || [], s.senderOptions || [])
+            );
+          }
         }
       } catch {}
     };
@@ -461,6 +471,33 @@ export default function GatePassIN({ highlightId = "" }) {
     setBrandOptions(nextOptions);
     try {
       await api.put("/settings", { brandOptions: nextOptions });
+    } catch {}
+    return clean;
+  };
+
+  const ensureSenderOption = async (name) => {
+    const clean = toTitleCase(String(name || "").trim());
+    if (!clean) return "";
+    const existing = (senderOptions || []).find(
+      (s) => normalizeText(s) === normalizeText(clean)
+    );
+    if (existing) {
+      if (normalizeText(existing) !== normalizeText(clean)) {
+        toast.error(`Similar sender already exists: "${existing}".`);
+      }
+      return existing;
+    }
+    const nextOptions = Array.from(
+      new Map(
+        [...(senderOptions || []), clean].map((value) => [
+          normalizeText(value),
+          toTitleCase(value),
+        ])
+      ).values()
+    ).sort();
+    setSenderOptions(nextOptions);
+    try {
+      await api.put("/settings", { senderOptions: nextOptions });
     } catch {}
     return clean;
   };
@@ -879,12 +916,97 @@ export default function GatePassIN({ highlightId = "" }) {
     }
   };
 
+  useEffect(() => {
+    if (activeBrandIdx < 0) return;
+    const el = brandOptionRefs.current?.[activeBrandIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeBrandIdx]);
+
+  useEffect(() => {
+    if (activeSenderIdx < 0) return;
+    const el = senderOptionRefs.current?.[activeSenderIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeSenderIdx]);
+
+  const getFilteredBrands = (selectedLabel = "") =>
+    (brandOptions || []).filter(
+      (brand) => !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))
+    );
+
+  const getFilteredSenders = (selectedLabel = "") =>
+    (allSenderOptions || []).filter(
+      (sender) => !selectedLabel || normalizeText(sender).includes(normalizeText(selectedLabel))
+    );
+
+  const handleBrandKeyDown = (e, idx, list) => {
+    if (!openBrandDropdown || openBrandDropdown !== idx) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveBrandIdx(0);
+        setOpenBrandDropdown(idx);
+      }
+      return;
+    }
+    const count = list.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveBrandIdx((p) => (count ? (p < 0 ? 0 : (p + 1) % count) : -1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveBrandIdx((p) => (count ? (p <= 0 ? count - 1 : p - 1) : -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeBrandIdx >= 0 && list[activeBrandIdx]) {
+        const brand = list[activeBrandIdx];
+        setItems((prev) => {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], brand, productName: "" };
+          return updated;
+        });
+        clearItemFieldError(idx, "brand");
+        setOpenBrandDropdown(null);
+      }
+    } else if (e.key === "Escape") {
+      setOpenBrandDropdown(null);
+    }
+  };
+
+  const handleSenderKeyDown = (e, list) => {
+    if (!openSenderDropdown) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveSenderIdx(0);
+        setOpenSenderDropdown(true);
+      }
+      return;
+    }
+    const count = list.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveSenderIdx((p) => (count ? (p < 0 ? 0 : (p + 1) % count) : -1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveSenderIdx((p) => (count ? (p <= 0 ? count - 1 : p - 1) : -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeSenderIdx >= 0 && list[activeSenderIdx]) {
+        setForm((prev) => ({ ...prev, senderName: list[activeSenderIdx] }));
+        clearFieldError("senderName");
+        setOpenSenderDropdown(false);
+      }
+    } else if (e.key === "Escape") {
+      setOpenSenderDropdown(false);
+    }
+  };
+
   const renderBrandDropdown = (item, idx) => {
     const selectedLabel = String(item?.brand || "");
     const errorMessage = errors.itemRows?.[idx]?.brand || "";
-    const filteredBrands = (brandOptions || []).filter((brand) =>
-      !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))
-    );
+    const filteredBrands = getFilteredBrands(selectedLabel);
     return (
       <div className="relative">
         <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
@@ -892,7 +1014,11 @@ export default function GatePassIN({ highlightId = "" }) {
           }`}>
           <input
             value={selectedLabel}
-            onFocus={() => setOpenBrandDropdown(idx)}
+            onFocus={() => {
+              setActiveBrandIdx(-1);
+              setOpenBrandDropdown(idx);
+            }}
+            onKeyDown={(e) => handleBrandKeyDown(e, idx, filteredBrands)}
             onChange={(e) => {
               const next = sanitizeBrandText(e.target.value, 100);
               setItems((prev) => {
@@ -901,6 +1027,7 @@ export default function GatePassIN({ highlightId = "" }) {
                 return updated;
               });
               clearItemFieldError(idx, "brand");
+              setActiveBrandIdx(-1);
               setOpenBrandDropdown(idx);
             }}
             onBlur={async () => {
@@ -939,7 +1066,15 @@ export default function GatePassIN({ highlightId = "" }) {
                       clearItemFieldError(idx, "brand");
                       setOpenBrandDropdown(null);
                     }}
-                    className="flex-1 text-left text-sm text-gray-700 hover:text-emerald-700"
+                    onMouseEnter={() => setActiveBrandIdx(optionIdx)}
+                    ref={(el) => {
+                      brandOptionRefs.current[optionIdx] = el;
+                    }}
+                    className={`flex-1 text-left text-sm ${
+                      activeBrandIdx === optionIdx
+                        ? "text-emerald-700 bg-emerald-50 font-medium"
+                        : "text-gray-700 hover:text-emerald-700"
+                    }`}
                   >
                     {brand}
                   </button>
@@ -954,27 +1089,36 @@ export default function GatePassIN({ highlightId = "" }) {
 
   const renderSenderDropdown = () => {
     const selectedLabel = String(form.senderName || "");
-    const filteredSenders = (brandOptions || []).filter((sender) =>
-      !selectedLabel || normalizeText(sender).includes(normalizeText(selectedLabel))
-    );
+    const errorMessage = errors.senderName || "";
+    const filteredSenders = getFilteredSenders(selectedLabel);
     return (
       <div className="relative">
         <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
-            errors.senderName ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
+            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
           }`}>
           <input
             value={selectedLabel}
-            onFocus={() => setOpenSenderDropdown(true)}
+            onFocus={() => {
+              setActiveSenderIdx(-1);
+              setOpenSenderDropdown(true);
+            }}
+            onKeyDown={(e) => handleSenderKeyDown(e, filteredSenders)}
             onChange={(e) => {
               setForm((prev) => ({ ...prev, senderName: e.target.value }));
               clearFieldError("senderName");
+              setActiveSenderIdx(-1);
               setOpenSenderDropdown(true);
             }}
-            onBlur={() => {
+            onBlur={async () => {
+              const typed = String(form.senderName || "").trim();
+              if (typed) {
+                const resolved = await ensureSenderOption(typed);
+                setForm((prev) => ({ ...prev, senderName: resolved || typed }));
+              }
               validateField("senderName", String(form.senderName || "").trim());
               setTimeout(() => setOpenSenderDropdown(false), 120);
             }}
-            placeholder="Type or select company name"
+            placeholder="Type or select sender name"
             className="flex-1 bg-transparent outline-none"
           />
           <ChevronDown size={16} className="text-gray-400" />
@@ -982,7 +1126,7 @@ export default function GatePassIN({ highlightId = "" }) {
         {openSenderDropdown ? (
           <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
             {filteredSenders.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-gray-400">No matching companies</div>
+              <div className="px-3 py-2 text-sm text-gray-400">No matching senders</div>
             ) : (
               filteredSenders.map((sender, optionIdx) => {
                 return (
@@ -997,7 +1141,15 @@ export default function GatePassIN({ highlightId = "" }) {
                         clearFieldError("senderName");
                         setOpenSenderDropdown(false);
                       }}
-                      className="flex-1 text-left text-sm text-gray-700 hover:text-emerald-700"
+                      onMouseEnter={() => setActiveSenderIdx(optionIdx)}
+                      ref={(el) => {
+                        senderOptionRefs.current[optionIdx] = el;
+                      }}
+                      className={`flex-1 text-left text-sm ${
+                        activeSenderIdx === optionIdx
+                          ? "text-emerald-700 bg-emerald-50 font-medium"
+                          : "text-gray-700 hover:text-emerald-700"
+                      }`}
                     >
                       {sender}
                     </button>
@@ -1524,6 +1676,19 @@ export default function GatePassIN({ highlightId = "" }) {
     () => applyGatePassFilters(rows, filterCriteria, { senderKeys: ["supplier", "senderName"] }),
     [rows, filterCriteria]
   );
+
+  const allSenderOptions = React.useMemo(() => {
+    const map = new Map();
+    (senderOptions || []).forEach((name) => {
+      const clean = String(name || "").trim();
+      if (clean) map.set(normalizeText(clean), clean);
+    });
+    (rows || []).forEach((r) => {
+      const name = String(r?.supplier || r?.senderName || "").trim();
+      if (name) map.set(normalizeText(name), name);
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [senderOptions, rows]);
 
   const reportLines = React.useMemo(
     () => gatePassFilterSummary(filterCriteria, "Sender"),

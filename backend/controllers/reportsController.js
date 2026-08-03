@@ -121,11 +121,24 @@ exports.getProductionReport = async (req, res) => {
 exports.getGatePassReport = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
-    const rows = await GatePass.find({
-      date: { $gte: start, $lte: end },
-    })
+    const type = String(req.query.type || "").trim().toUpperCase();
+    const sender = String(req.query.sender || req.query.senderName || "").trim();
+    const company = String(req.query.company || req.query.companyName || "").trim();
+    const product = String(req.query.product || req.query.productName || "").trim();
+    const customer = String(req.query.customer || req.query.customerName || "").trim();
+
+    const filter = { date: { $gte: start, $lte: end } };
+    if (type === "IN" || type === "OUT") filter.type = type;
+
+    const rows = await GatePass.find(filter)
       .sort({ date: -1, createdAt: -1 })
       .lean();
+
+    const matches = (haystack = "", needle = "") => {
+      const h = String(haystack || "").toLowerCase();
+      const n = String(needle || "").trim().toLowerCase();
+      return n ? h.includes(n) : true;
+    };
 
     const data = (rows || []).map((gp) => {
       const items = Array.isArray(gp.items) ? gp.items : [];
@@ -168,6 +181,7 @@ exports.getGatePassReport = async (req, res) => {
         date: gp.date || gp.createdAt,
         gatePassNo: gp.gatePassNo || "-",
         type: gp.type || "-",
+        senderName: String(gp.senderName || gp.supplier || "").trim() || "-",
         partyName: gp.type === "OUT" ? gp.customer || "-" : gp.supplier || "-",
         truckNo: gp.truckNo || "-",
         companyNames: companyNames.join(", ") || "-",
@@ -175,13 +189,22 @@ exports.getGatePassReport = async (req, res) => {
         totalBags: Number(totalBags || 0),
         totalWeightKg: Number(totalWeightKg.toFixed(3)),
         totalAmount: Number(Number(gp.totalAmount || 0).toFixed(2)),
+        amountPaid: Number(gp.amountPaid || 0),
+        remainingAmount: Number(gp.remainingAmount || 0),
         paymentStatus: gp.paymentStatus || "-",
         status: gp.status || "-",
+        items: items,
         targetPath: `/gatepass?tab=${gp.type || "IN"}&highlight=${encodeURIComponent(String(gp._id || ""))}`,
       };
     });
 
-    res.json({ success: true, data });
+    let result = data;
+    if (sender) result = result.filter((r) => matches(r.senderName, sender) || matches(r.partyName, sender));
+    if (company) result = result.filter((r) => matches(r.companyNames, company));
+    if (product) result = result.filter((r) => matches(r.productNames, product));
+    if (customer) result = result.filter((r) => matches(r.partyName, customer));
+
+    res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to load gatepass report." });
   }

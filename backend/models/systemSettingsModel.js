@@ -73,6 +73,7 @@ const systemSettingsSchema = new mongoose.Schema(
     purchaseCategoryOptions: { type: [String], default: [] },
     transporterOptions: { type: [String], default: [] },
     brandOptions: { type: [String], default: [] },
+    senderOptions: { type: [String], default: [] },
     // Backup center
     backupAutomationEnabled: { type: Boolean, default: false },
     backupScheduleTime: { type: String, default: "02:00" },
