@@ -37,6 +37,19 @@ const toTitleCase = (value = "") =>
     .replace(/\s+/g, " ")
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 
+const applyGatePassTotals = (body) => {
+  if (!Array.isArray(body?.items)) return body;
+  body.totalQuantity = body.items.reduce(
+    (sum, item) => sum + (Number(item?.quantity || item?.netWeightKg || 0) || 0),
+    0
+  );
+  body.totalAmount = body.items.reduce(
+    (sum, item) => sum + (Number(item?.amount || 0) || 0),
+    0
+  );
+  return body;
+};
+
 /** Ensure all supplier/brand names from a gate pass are persisted in SystemSettings.brandOptions */
 const persistBrandOptions = async (body) => {
   try {
@@ -166,6 +179,7 @@ exports.createGatePass = async (req, res) => {
       });
     }
 
+    applyGatePassTotals(body);
     const gp = await GatePass.create(body);
     await persistBrandOptions(body);
     try {
@@ -246,6 +260,7 @@ exports.updateGatePass = async (req, res) => {
   try {
     const body = { ...req.body };
     delete body.gatePassNo;
+    applyGatePassTotals(body);
 
     if (body.type === "IN") {
       const hasProductionItem = Array.isArray(body.items)
@@ -275,27 +290,29 @@ exports.updateGatePass = async (req, res) => {
 
     if (gp) {
       await persistBrandOptions(body);
-      try {
-        await StockLedger.deleteMany({ gatePassId: gp._id });
-        const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
-        const bagWeightKg = settings && settings.defaultBagWeightKg != null ? settings.defaultBagWeightKg : 65;
-        const productDocs = await ProductType.find({})
-          .select("_id name brand")
-          .lean();
-        const productTypeMap = new Map();
-        productDocs.forEach((p) => {
-          if (!p?.name) return;
-          const nameKey = String(p.name).toLowerCase();
-          const brandKey = String(p.brand || "").toLowerCase();
-          productTypeMap.set(`${brandKey}::${nameKey}`, p._id);
-          productTypeMap.set(`::${nameKey}`, p._id);
-        });
-        const productionOps = buildProductionOpsFromItems(body.items || gp.items || [], gp, bagWeightKg, productTypeMap);
-        if (productionOps.length > 0) {
-          await StockLedger.insertMany(productionOps);
+      if (Array.isArray(body.items) || body.type) {
+        try {
+          await StockLedger.deleteMany({ gatePassId: gp._id });
+          const settings = await SystemSettings.findOne({}).select("defaultBagWeightKg").lean();
+          const bagWeightKg = settings && settings.defaultBagWeightKg != null ? settings.defaultBagWeightKg : 65;
+          const productDocs = await ProductType.find({})
+            .select("_id name brand")
+            .lean();
+          const productTypeMap = new Map();
+          productDocs.forEach((p) => {
+            if (!p?.name) return;
+            const nameKey = String(p.name).toLowerCase();
+            const brandKey = String(p.brand || "").toLowerCase();
+            productTypeMap.set(`${brandKey}::${nameKey}`, p._id);
+            productTypeMap.set(`::${nameKey}`, p._id);
+          });
+          const productionOps = buildProductionOpsFromItems(body.items || gp.items || [], gp, bagWeightKg, productTypeMap);
+          if (productionOps.length > 0) {
+            await StockLedger.insertMany(productionOps);
+          }
+        } catch (e) {
+          console.error("Gate pass stock update error:", e);
         }
-      } catch (e) {
-        console.error("Gate pass stock update error:", e);
       }
     }
 
@@ -321,9 +338,7 @@ exports.deleteGatePass = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Gate pass not found." });
-    // StockLedger entries are intentionally NOT deleted here.
-    // Stock records persist so company/stock data remains visible.
-    // To remove stock, use the Stock module's delete feature.
+    await StockLedger.deleteMany({ gatePassId: gp._id });
     res.json({ success: true });
   } catch (err) {
     res

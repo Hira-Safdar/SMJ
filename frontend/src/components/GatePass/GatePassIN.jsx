@@ -34,8 +34,7 @@ export default function GatePassIN({ highlightId = "" }) {
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     truckNo: "",
-    supplier: "",
-    weightOnArrival: "",
+    senderName: "",
     freightCharges: "",
   });
   const emptyItem = () => ({
@@ -45,13 +44,13 @@ export default function GatePassIN({ highlightId = "" }) {
     productName: "",
     productMode: "list",
     productInput: "",
+    weightOnArrival: "",
     weightAtSmjKg: "",
     emptyBagWeightKg: "",
     netWeightKg: "",
     netWeightManDisplay: "",
     bagWeightEachKg: "65",
     bagCount: "",
-    remainingWeight: "",
   });
   const [items, setItems] = useState([emptyItem()]);
 
@@ -190,8 +189,8 @@ export default function GatePassIN({ highlightId = "" }) {
     let msg = "";
     if (name === "date") msg = value ? "" : "Date is required.";
     if (name === "truckNo") msg = validateTruckNo(value);
-    if (name === "supplier") {
-      msg = value ? (nameRegex.test(value) ? "" : "Company Name: letters and spaces only.") : "";
+    if (name === "senderName") {
+      msg = value ? (nameRegex.test(value) ? "" : "Sender Name: letters and spaces only.") : "";
     }
     if (name === "driverName") msg = value ? validateDriverName(value) : "";
     if (name === "driverContact") msg = value ? validateDriverContact(value) : "";
@@ -212,15 +211,15 @@ export default function GatePassIN({ highlightId = "" }) {
         Number(it?.netWeightKg || 0) > 0
     );
     const e2 = needsBrand()
-      ? form.supplier || hasItem
+      ? form.senderName || hasItem
         ? ""
-        : "Company Name is required."
+        : "Sender Name is required."
       : "";
 
     const newErr = {};
     if (e0) newErr.date = e0;
     if (e1) newErr.truckNo = e1;
-    if (e2) newErr.supplier = e2;
+    if (e2) newErr.senderName = e2;
     if (itemRows.some((row) => Object.keys(row).length > 0)) newErr.itemRows = itemRows;
     else if (!hasItem) newErr.items = "Add at least one item with net weight.";
     setErrors(newErr);
@@ -682,10 +681,6 @@ export default function GatePassIN({ highlightId = "" }) {
     if (name === "driverContact") {
       v = formatContactInput(value);
     }
-    if (name === "supplier" && value === OTHER_OPTION) {
-      setBrandModal({ ...createBrandModalState(), open: true });
-      return;
-    }
     if (name === "freightCharges" || name === "weightOnArrival") {
       v = value.replace(/[^\d.]/g, "");
     }
@@ -763,8 +758,6 @@ export default function GatePassIN({ highlightId = "" }) {
       const pRes = await api.get("/product-types");
       setProductCatalog(pRes.data?.data || []);
 
-      setForm((prev) => ({ ...prev, supplier: brandName }));
-      clearFieldError("supplier");
       setBrandModal(createBrandModalState());
       toast.success(
         changedCount > 0
@@ -786,11 +779,47 @@ export default function GatePassIN({ highlightId = "" }) {
     const row = { ...(updated[idx] || {}) };
 
     if (field === "bagWeightEachKg") {
-      row[field] = cleanInt(value, 6);
+      const cleanDec = (v) => {
+        const raw = String(v || "");
+        const cleaned = raw.replace(/[^0-9.]/g, "");
+        if (!cleaned) return "";
+        const parts = cleaned.split(".");
+        if (parts.length > 2) {
+          return parts[0] + "." + parts.slice(1).join("");
+        }
+        const intPart = parts[0].slice(0, 6);
+        const decPart = parts[1] ? parts[1].slice(0, 2) : "";
+        if (cleaned.endsWith(".")) {
+          return intPart + ".";
+        }
+        return decPart ? `${intPart}.${decPart}` : intPart;
+      };
+      row[field] = cleanDec(value);
+    } else if (field === "weightOnArrival") {
+      row[field] = cleanInt(value, 8);
     } else if (field === "weightAtSmjKg") {
       row[field] = cleanInt(value, 8);
     } else if (field === "emptyBagWeightKg") {
-      row[field] = cleanInt(value, 8);
+      const cleanDec = (v) => {
+        const raw = String(v || "");
+        // Remove everything except digits and decimal point
+        const cleaned = raw.replace(/[^0-9.]/g, "");
+        if (!cleaned) return "";
+        // Only allow one decimal point
+        const parts = cleaned.split(".");
+        if (parts.length > 2) {
+          return parts[0] + "." + parts.slice(1).join("");
+        }
+        // Limit integer part to 8 digits and decimal part to 2 digits
+        const intPart = parts[0].slice(0, 8);
+        const decPart = parts[1] ? parts[1].slice(0, 2) : "";
+        // If user just typed decimal point or decimal point with no digits after, keep it
+        if (cleaned.endsWith(".")) {
+          return intPart + ".";
+        }
+        return decPart ? `${intPart}.${decPart}` : intPart;
+      };
+      row[field] = cleanDec(value);
     } else if (field === "productName" || field === "brand") {
       row[field] = value;
     }
@@ -805,13 +834,20 @@ export default function GatePassIN({ highlightId = "" }) {
     // Auto-calculate No of Bags + Remaining Weight
     const bagWeightEach = Number(row.bagWeightEachKg || 0);
     if (netKg > 0 && bagWeightEach > 0) {
-      const bags = Math.floor(netKg / bagWeightEach);
-      row.bagCount = String(bags);
-      const remaining = netKg - (bags * bagWeightEach);
-      row.remainingWeight = remaining > 0 ? `${remaining} kg extra` : "";
+      const bags = netKg / bagWeightEach;
+      const bagsInt = Math.floor(bags);
+      const remaining = netKg - (bagsInt * bagWeightEach);
+      if (remaining > 0) {
+        // Show bags with decimal if it's not a whole number
+        const bagsDisplay = Number.isInteger(bags) ? bagsInt : bags.toFixed(2);
+        row.bagCount = `${bagsDisplay} bags ${remaining.toFixed(2)}kg`;
+      } else {
+        // Show bags with decimal if it's not a whole number
+        const bagsDisplay = Number.isInteger(bags) ? bagsInt : bags.toFixed(2);
+        row.bagCount = `${bagsDisplay} bags`;
+      }
     } else {
       row.bagCount = "";
-      row.remainingWeight = "";
     }
 
     updated[idx] = row;
@@ -828,7 +864,7 @@ export default function GatePassIN({ highlightId = "" }) {
 
   const renderBrandDropdown = (item, idx) => {
     const selectedLabel = String(item?.brand || "");
-    const errorMessage = errors.itemRows?.[idx]?.brand || (idx === 0 ? errors.supplier : "");
+    const errorMessage = errors.itemRows?.[idx]?.brand || "";
     const filteredBrands = (brandOptions || []).filter((brand) =>
       !selectedLabel || normalizeText(brand).includes(normalizeText(selectedLabel))
     );
@@ -847,10 +883,6 @@ export default function GatePassIN({ highlightId = "" }) {
                 updated[idx] = { ...updated[idx], brand: next, productName: "" };
                 return updated;
               });
-              if (idx === 0) {
-                setForm((prev) => ({ ...prev, supplier: next }));
-                clearFieldError("supplier");
-              }
               clearItemFieldError(idx, "brand");
               setOpenBrandDropdown(idx);
             }}
@@ -863,9 +895,6 @@ export default function GatePassIN({ highlightId = "" }) {
                   updated[idx] = { ...updated[idx], brand: resolved || typed };
                   return updated;
                 });
-                if (idx === 0) {
-                  setForm((prev) => ({ ...prev, supplier: resolved || typed }));
-                }
               }
               setTimeout(() => setOpenBrandDropdown(null), 120);
             }}
@@ -890,10 +919,6 @@ export default function GatePassIN({ highlightId = "" }) {
                         updated[idx] = { ...updated[idx], brand, productName: "" };
                         return updated;
                       });
-                      if (idx === 0) {
-                        setForm((prev) => ({ ...prev, supplier: brand }));
-                        clearFieldError("supplier");
-                      }
                       clearItemFieldError(idx, "brand");
                       setOpenBrandDropdown(null);
                     }}
@@ -964,6 +989,7 @@ export default function GatePassIN({ highlightId = "" }) {
             emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
             netWeightKg: Number(it.netWeightKg || 0),
             weightAtSmjKg: Number(it.weightAtSmjKg || 0),
+            weightOnArrival: Number(it.weightOnArrival || 0),
           };
         })
     );
@@ -973,7 +999,7 @@ export default function GatePassIN({ highlightId = "" }) {
     const payload = {
       ...form,
       date: form.date,
-      supplier: String(form.supplier || "").trim() || firstBrand || "",
+      senderName: String(form.senderName || "").trim() || "",
       type: "IN",
       items: manualItems,
       freightCharges: form.freightCharges
@@ -1018,7 +1044,7 @@ export default function GatePassIN({ highlightId = "" }) {
     setForm({
       date: row.date ? String(row.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
       truckNo: row.truckNo || "",
-      supplier: row.supplier || "",
+      senderName: row.supplier || row.senderName || "",
       weightOnArrival: row.weightOnArrival ? String(row.weightOnArrival) : "",
       freightCharges: row.freightCharges ? String(row.freightCharges) : "",
     });
@@ -1028,26 +1054,30 @@ export default function GatePassIN({ highlightId = "" }) {
       const emptyW = Number(it?.emptyBagWeightKg || 0);
       const netKg = wSmj > 0 ? Math.max(wSmj - emptyW, 0) : qty;
       return {
-        brand: String(it.brand || "").trim() || String(row.supplier || "").trim(),
+        brand: String(it.brand || "").trim(),
         brandMode: "list",
         brandInput: "",
         productName: String(it.itemType || it.customItemName || "").trim(),
         productMode: "list",
         productInput: "",
+        weightOnArrival: it.weightOnArrival != null ? String(it.weightOnArrival) : "",
         weightAtSmjKg: wSmj ? String(wSmj) : "",
         emptyBagWeightKg: it.emptyBagWeightKg != null ? String(it.emptyBagWeightKg) : "",
         netWeightKg: netKg ? String(Math.round(netKg)) : "",
         netWeightManDisplay: netKg ? formatKgToMan(Math.round(netKg)) : "",
         bagWeightEachKg: it.bagWeightEachKg != null ? String(it.bagWeightEachKg) : (it.bagWeightKg != null ? String(it.bagWeightKg) : "65"),
-        bagCount: it.bagCount != null ? String(it.bagCount) : "",
-        remainingWeight: (() => {
+        bagCount: (() => {
           const bagW = Number(it.bagWeightEachKg || it.bagWeightKg || 0);
-          const bags = Number(it.bagCount || 0);
           if (netKg > 0 && bagW > 0) {
-            const rem = netKg - (bags * bagW);
-            return rem > 0 ? `${rem} kg extra` : "";
+            const bags = Math.floor(netKg / bagW);
+            const remaining = netKg - (bags * bagW);
+            if (remaining > 0) {
+              return `${bags} bags ${remaining}kg`;
+            } else {
+              return `${bags} bags`;
+            }
           }
-          return "";
+          return it.bagCount != null ? String(it.bagCount) : "";
         })(),
       };
     });
@@ -1120,7 +1150,7 @@ export default function GatePassIN({ highlightId = "" }) {
       new Set(
         (row.items || [])
           .filter((it) => String(it?.itemType || "").toLowerCase() === "paddy")
-          .map((it) => String(it?.brand || row.supplier || "").trim())
+          .map((it) => String(it?.brand || "").trim())
           .filter(Boolean),
       ),
     );
@@ -1129,24 +1159,41 @@ export default function GatePassIN({ highlightId = "" }) {
     if (row.items && row.items.length > 0) {
       itemsHtml = row.items
         .map((item) => {
-          const companyName = String(item?.brand || row.supplier || "").trim();
+          const companyName = String(item?.brand || "").trim();
           const displayName =
             item.itemType === "Other" && item.customItemName
               ? `${item.itemType} (${item.customItemName})`
               : item.itemType || "-";
-          const bags = item.bagCount || 0;
-          const bagW = item.bagWeightKg || 0;
-          const emptyW = item.emptyBagWeightKg || 0;
           const net = item.netWeightKg || item.quantity || 0;
+          const bagW = item.bagWeightEachKg || item.bagWeightKg || 0;
+          const emptyW = item.emptyBagWeightKg || 0;
+          const weightAtSmj = item.weightAtSmjKg || 0;
+          const weightOnArrival = item.weightOnArrival || 0;
+
+          // Format bags with remaining weight
+          let bagsDisplay = "";
+          if (net > 0 && bagW > 0) {
+            const bags = Math.floor(net / bagW);
+            const remaining = net - (bags * bagW);
+            if (remaining > 0) {
+              bagsDisplay = `${bags} bags ${remaining}kg`;
+            } else {
+              bagsDisplay = `${bags} bags`;
+            }
+          } else {
+            bagsDisplay = String(item.bagCount || 0);
+          }
+
           return `<tr>
           <td style="border:1px solid #ddd;padding:6px;">${companyName || "-"}</td>
           <td style="border:1px solid #ddd;padding:6px;">${displayName}</td>
-          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bags}</td>
-          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bagW}</td>
-          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${emptyW}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${weightOnArrival || 0}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${weightAtSmj || 0}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${emptyW || 0}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${Math.round(
             Number(net || 0)
           )}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bagsDisplay}</td>
         </tr>`;
         })
         .join("");
@@ -1155,11 +1202,11 @@ export default function GatePassIN({ highlightId = "" }) {
     // Inward gate pass is manual (no invoices).
     const itemsTableHtml = `
       <table>
-        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Bags</th><th style="text-align:right;">Bag Wt</th><th style="text-align:right;">Empty Wt</th><th style="text-align:right;">Net (kg)</th></tr></thead>
+        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Weight on Arrival</th><th style="text-align:right;">Weight at SMJ</th><th style="text-align:right;">Empty Wt</th><th style="text-align:right;">Net (kg)</th><th style="text-align:right;">Bags</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
         <tfoot>
           <tr style="background:#f0fdf4;font-weight:700;">
-            <td style="border:1px solid #ddd;padding:6px;" colspan="5">Total</td>
+            <td style="border:1px solid #ddd;padding:6px;" colspan="6">Total</td>
             <td style="border:1px solid #ddd;padding:6px;text-align:right;">${
               (row.items || []).reduce((sum, it) => sum + Number(it.netWeightKg || it.quantity || 0), 0)
             }</td>
@@ -1206,14 +1253,14 @@ export default function GatePassIN({ highlightId = "" }) {
             ? new Date(row.date).toLocaleDateString()
             : (row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "-")
         }</span></div>
+        <div><span class="label">Sender Name:</span><span class="value">${
+          row.supplier || row.senderName || "-"
+        }</span></div>
         <div><span class="label">Truck No:</span><span class="value">${
           row.truckNo || "-"
         }</span></div>
-        <div><span class="label">Driver:</span><span class="value">${
-          row.driverName || "-"
-        }</span></div>
-        <div><span class="label">Contact:</span><span class="value">${
-          row.driverContact || "-"
+        <div><span class="label">Weight on Arrival:</span><span class="value">${
+          row.weightOnArrival || "-"
         }</span></div>
       </div>
 
@@ -1244,16 +1291,31 @@ export default function GatePassIN({ highlightId = "" }) {
     },
     { key: "gatePassNo", label: "GP No" },
     {
+      key: "senderName",
+      label: "Sender Name",
+      render: (_val, row) => row.supplier || row.senderName || "-",
+    },
+    {
       key: "companyNames",
       label: "Company",
       render: (_val, row) => {
         const list = (row.items || [])
-          .map((it) => String(it.brand || row.supplier || "").trim())
+          .map((it) => String(it.brand || "").trim())
           .filter(Boolean);
         return list.length ? Array.from(new Set(list)).join(", ") : "-";
       },
     },
     { key: "truckNo", label: "Truck" },
+    {
+      key: "weightOnArrival",
+      label: "Weight on Arrival",
+      render: (_val, row) => {
+        const list = (row.items || [])
+          .map((it) => it.weightOnArrival || "")
+          .filter(Boolean);
+        return list.length ? list.join(", ") : "-";
+      },
+    },
     {
       key: "items",
       label: "Items",
@@ -1305,32 +1367,48 @@ export default function GatePassIN({ highlightId = "" }) {
     { key: "date", label: "Date", render: (val) => (val ? new Date(val).toLocaleDateString() : "-") },
     { key: "gatePassNo", label: "GP No" },
     { key: "truckNo", label: "Truck" },
+    { key: "senderName", label: "Sender Name" },
     { key: "companyName", label: "Company" },
     { key: "productName", label: "Product" },
-    { key: "bagCount", label: "Bags" },
-    { key: "bagWeightKg", label: "Bag Weight (kg)" },
+    { key: "weightOnArrival", label: "Weight on Arrival (kg)" },
+    { key: "weightAtSmjKg", label: "Weight at SMJ (kg)" },
     { key: "emptyBagWeightKg", label: "Empty Bag (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
-    { key: "driverName", label: "Driver" },
-    { key: "driverContact", label: "Contact" },
+    { key: "bagWeightEachKg", label: "Bag Weight Each (kg)" },
+    { key: "bagCount", label: "Bags" },
   ];
 
   const exportData = (rows) =>
     (rows || []).flatMap((row) => {
       const itemsList = Array.isArray(row.items) && row.items.length ? row.items : [{}];
-      return itemsList.map((it) => ({
-        date: row.date,
-        gatePassNo: row.gatePassNo,
-        truckNo: row.truckNo,
-        companyName: String(it.brand || row.supplier || "").trim(),
-        productName: it.itemType || it.customItemName || "",
-        bagCount: it.bagCount || "",
-        bagWeightKg: it.bagWeightKg || "",
-        emptyBagWeightKg: it.emptyBagWeightKg || "",
-        netWeightKg: Math.round(Number(it.netWeightKg || it.quantity || 0)),
-        driverName: row.driverName || "",
-        driverContact: row.driverContact || "",
-      }));
+      return itemsList.map((it) => {
+        const netKg = Number(it.netWeightKg || it.quantity || 0);
+        const bagW = Number(it.bagWeightEachKg || it.bagWeightKg || 0);
+        let bagCountDisplay = it.bagCount || "";
+        if (netKg > 0 && bagW > 0 && !String(bagCountDisplay).includes("bags")) {
+          const bags = Math.floor(netKg / bagW);
+          const remaining = netKg - (bags * bagW);
+          if (remaining > 0) {
+            bagCountDisplay = `${bags} bags ${remaining}kg`;
+          } else {
+            bagCountDisplay = `${bags} bags`;
+          }
+        }
+        return {
+          date: row.date,
+          gatePassNo: row.gatePassNo,
+          truckNo: row.truckNo,
+          senderName: row.supplier || row.senderName || "",
+          companyName: String(it.brand || "").trim(),
+          productName: it.itemType || it.customItemName || "",
+          weightOnArrival: it.weightOnArrival || "",
+          weightAtSmjKg: it.weightAtSmjKg || "",
+          emptyBagWeightKg: it.emptyBagWeightKg || "",
+          netWeightKg: Math.round(netKg),
+          bagWeightEachKg: it.bagWeightEachKg || it.bagWeightKg || "",
+          bagCount: bagCountDisplay,
+        };
+      });
     });
 
   return (
@@ -1465,48 +1543,20 @@ export default function GatePassIN({ highlightId = "" }) {
           </div>
 
           {/* Sender Name */}
-          <div id="field-supplier">
+          <div id="field-senderName">
             <label className="block text-sm font-medium mb-1">
               Sender Name <span className="text-red-500">*</span>
             </label>
             <input
-              name="supplier"
-              value={form.supplier}
+              name="senderName"
+              value={form.senderName}
               onChange={handleChange}
               placeholder="Sender / Company name"
               className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                errors.supplier ? "border-red-500" : "border-gray-300"
+                errors.senderName ? "border-red-500" : "border-gray-300"
               }`}
             />
-            {renderFieldError(errors.supplier)}
-          </div>
-
-          {/* Weight on Arrival */}
-          <div id="field-weightOnArrival">
-            <label className="block text-sm font-medium mb-1">
-              Weight on Arrival (kg)
-            </label>
-            <input
-              name="weightOnArrival"
-              value={form.weightOnArrival}
-              onChange={handleChange}
-              placeholder="0"
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-            />
-          </div>
-
-          {/* Freight Charges */}
-          <div id="field-freightCharges">
-            <label className="block text-sm font-medium mb-1">
-              Freight Charges
-            </label>
-            <input
-              name="freightCharges"
-              value={form.freightCharges}
-              onChange={handleChange}
-              placeholder="0"
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
-            />
+            {renderFieldError(errors.senderName)}
           </div>
         </div>
 
@@ -1533,7 +1583,7 @@ export default function GatePassIN({ highlightId = "" }) {
               </button>
             </div>
 
-            {/* Row 1: Company, Product, Weight at SMJ */}
+            {/* Row 1: Company, Product, Weight on Arrival */}
             <div className="grid md:grid-cols-3 gap-3 items-start">
               <div id="field-supplier">
                 <div className="flex items-center justify-between mb-1">
@@ -1542,7 +1592,7 @@ export default function GatePassIN({ highlightId = "" }) {
                   </label>
                 </div>
                 {renderBrandDropdown(items[0], 0)}
-                {renderFieldError(errors.itemRows?.[0]?.brand || errors.supplier)}
+                {renderFieldError(errors.itemRows?.[0]?.brand)}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Product Name</label>
@@ -1627,6 +1677,20 @@ export default function GatePassIN({ highlightId = "" }) {
                 {renderFieldError(errors.itemRows?.[0]?.productName)}
               </div>
               <div>
+                <label className="block text-xs text-gray-500 mb-1">Weight on Arrival (kg)</label>
+                <input
+                  inputMode="numeric"
+                  value={items[0]?.weightOnArrival ?? ""}
+                  onChange={(e) => handleItemChange(0, "weightOnArrival", e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Weight at SMJ, Empty Bags Weight, Net Weight (kg) */}
+            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+              <div>
                 <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
                 <input
                   value={items[0]?.weightAtSmjKg ?? ""}
@@ -1638,13 +1702,11 @@ export default function GatePassIN({ highlightId = "" }) {
                 />
                 {renderFieldError(errors.itemRows?.[0]?.weightAtSmjKg)}
               </div>
-            </div>
-
-            {/* Row 2: Empty Bags Weight, Net Weight (kg), Net Weight (man) */}
-            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                 <input
+                  type="number"
+                  step="any"
                   value={items[0]?.emptyBagWeightKg ?? ""}
                   onChange={(e) => handleItemChange(0, "emptyBagWeightKg", e.target.value)}
                   placeholder="0"
@@ -1662,6 +1724,10 @@ export default function GatePassIN({ highlightId = "" }) {
                 />
                 {renderFieldError(errors.itemRows?.[0]?.netWeightKg)}
               </div>
+            </div>
+
+            {/* Row 3: Net Weight (man/kg), Bag Weight Each, No. of Bags (auto) */}
+            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
                 <input
@@ -1671,13 +1737,11 @@ export default function GatePassIN({ highlightId = "" }) {
                   placeholder="Auto"
                 />
               </div>
-            </div>
-
-            {/* Row 3: Bag Weight Each, No. of Bags (auto), Remaining */}
-            <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
                 <input
+                  type="number"
+                  step="any"
                   value={items[0]?.bagWeightEachKg ?? ""}
                   onChange={(e) => handleItemChange(0, "bagWeightEachKg", e.target.value)}
                   placeholder="65"
@@ -1696,13 +1760,18 @@ export default function GatePassIN({ highlightId = "" }) {
                   placeholder="Auto"
                 />
               </div>
+            </div>
+
+            {/* Row 4: Freight Charges */}
+            <div className="grid md:grid-cols-1 gap-3 items-start mt-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Remaining Weight</label>
+                <label className="block text-xs text-gray-500 mb-1">Freight Charges</label>
                 <input
-                  value={items[0]?.remainingWeight ?? ""}
-                  readOnly
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-orange-50 text-orange-600 font-semibold border-orange-200"
-                  placeholder="—"
+                  name="freightCharges"
+                  value={form.freightCharges}
+                  onChange={handleChange}
+                  placeholder="0"
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                 />
               </div>
             </div>
@@ -1796,6 +1865,18 @@ export default function GatePassIN({ highlightId = "" }) {
                           {renderFieldError(errors.itemRows?.[realIdx]?.productName)}
                         </div>
                         <div>
+                          <label className="block text-xs text-gray-500 mb-1">Weight on Arrival (kg)</label>
+                          <input
+                            inputMode="numeric"
+                            value={it?.weightOnArrival ?? ""}
+                            onChange={(e) => handleItemChange(realIdx, "weightOnArrival", e.target.value)}
+                            placeholder="0"
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+                        <div>
                           <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
                           <input
                             value={it?.weightAtSmjKg ?? ""}
@@ -1807,11 +1888,11 @@ export default function GatePassIN({ highlightId = "" }) {
                           />
                           {renderFieldError(errors.itemRows?.[realIdx]?.weightAtSmjKg)}
                         </div>
-                      </div>
-                      <div className="grid md:grid-cols-4 gap-3 items-start">
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Empty Bags (kg)</label>
+                          <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                           <input
+                            type="number"
+                            step="any"
                             value={it?.emptyBagWeightKg ?? ""}
                             onChange={(e) => handleItemChange(realIdx, "emptyBagWeightKg", e.target.value)}
                             placeholder="0"
@@ -1820,12 +1901,31 @@ export default function GatePassIN({ highlightId = "" }) {
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
-                          <input value={it?.netWeightKg ?? ""} readOnly className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300" />
+                          <input
+                            value={it?.netWeightKg ?? ""}
+                            readOnly
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold ${
+                              errors.itemRows?.[realIdx]?.netWeightKg ? "border-red-500" : "border-gray-300"
+                            }`}
+                          />
                           {renderFieldError(errors.itemRows?.[realIdx]?.netWeightKg)}
                         </div>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg)</label>
+                          <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
                           <input
+                            value={it?.netWeightManDisplay ?? ""}
+                            readOnly
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-emerald-50 text-emerald-700 font-semibold border-gray-300"
+                            placeholder="Auto"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
+                          <input
+                            type="number"
+                            step="any"
                             value={it?.bagWeightEachKg ?? ""}
                             onChange={(e) => handleItemChange(realIdx, "bagWeightEachKg", e.target.value)}
                             placeholder="65"
@@ -1836,12 +1936,25 @@ export default function GatePassIN({ highlightId = "" }) {
                           {renderFieldError(errors.itemRows?.[realIdx]?.bagWeightEachKg)}
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Bags / Weight</label>
-                          <div className="flex gap-2">
-                            <input value={it?.bagCount ?? ""} readOnly className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300" placeholder="Auto" />
-                            <span className="self-center text-xs text-emerald-600 whitespace-nowrap">{it?.netWeightManDisplay || ""}</span>
-                          </div>
-                          {it?.remainingWeight && <span className="text-xs text-orange-500 mt-1">{it.remainingWeight}</span>}
+                          <label className="block text-xs text-gray-500 mb-1">No. of Bags (auto)</label>
+                          <input
+                            value={it?.bagCount ?? ""}
+                            readOnly
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 font-semibold border-gray-300"
+                            placeholder="Auto"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid md:grid-cols-1 gap-3 items-start mt-3">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Freight Charges</label>
+                          <input
+                            name="freightCharges"
+                            value={form.freightCharges}
+                            onChange={handleChange}
+                            placeholder="0"
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                          />
                         </div>
                       </div>
                     </div>
@@ -1850,37 +1963,36 @@ export default function GatePassIN({ highlightId = "" }) {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Submit Buttons */}
-        <div className="flex items-center justify-end gap-3">
-          <button
-            type="submit"
-            className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
-          >
-            {editingId ? "Update Gate Pass" : "Generate Gate Pass"}
-          </button>
-
-          {editingId && (
+          {/* Submit Buttons */}
+          <div className="flex items-center justify-end gap-3">
             <button
-              type="button"
-              onClick={() => {
-                setEditingId(null);
-                setForm({
-                  date: new Date().toISOString().slice(0, 10),
-                  truckNo: "",
-                  supplier: "",
-                  weightOnArrival: "",
-                  freightCharges: "",
-                });
-                setItems([emptyItem()]);
-                setErrors({});
-              }}
-              className="px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-xs"
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
             >
-              Cancel Edit
+              {editingId ? "Update Gate Pass" : "Generate Gate Pass"}
             </button>
-          )}
+
+            {editingId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  setForm({
+                    date: new Date().toISOString().slice(0, 10),
+                    truckNo: "",
+                    senderName: "",
+                    freightCharges: "",
+                  });
+                  setItems([emptyItem()]);
+                  setErrors({});
+                }}
+                className="px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-xs"
+              >
+                Cancel Edit
+              </button>
+            )}
+          </div>
         </div>
       </form>
 
@@ -2141,7 +2253,7 @@ export default function GatePassIN({ highlightId = "" }) {
                     onClick={addDraftProductRow}
                     className="ml-auto px-3 py-2 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700"
                   >
-                    + Add Product
+                    Add Product
                   </button>
                 </div>
                 {Object.values(brandModal.errors?.draft || {}).length > 0 ? (

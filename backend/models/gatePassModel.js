@@ -38,6 +38,11 @@ const ItemSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    rateType: {
+      type: String,
+      enum: ["KG", "BAG", "MAN"],
+      default: "KG",
+    },
     amount: {
       type: Number,
       min: 0,
@@ -100,10 +105,18 @@ const GatePassSchema = new mongoose.Schema(
 
     truckNo: {
       type: String,
-      required: [true, "Truck number is required."],
+      required: function () {
+        return this.type === "IN";
+      },
       minlength: [6, "Truck number too short."],
       maxlength: [12, "Truck number too long."],
-      match: [/^[A-Z]{2,4}-\d{3,4}$/, "Format: ABC-123 or AB-1234"],
+      validate: {
+        validator: function (v) {
+          if (!v) return this.type !== "IN";
+          return /^[A-Z]{2,4}-\d{3,4}$/.test(v);
+        },
+        message: "Format: ABC-123 or AB-1234",
+      },
     },
 
     customer: {
@@ -112,9 +125,9 @@ const GatePassSchema = new mongoose.Schema(
       validate: {
         validator: function (v) {
           if (!v) return true;
-          return /^[A-Za-z\s]+$/.test(v);
+          return companyNamePattern.test(v);
         },
-        message: "Customer name: letters and spaces only.",
+        message: "Customer/company name contains invalid characters.",
       },
     },
 
@@ -130,17 +143,23 @@ const GatePassSchema = new mongoose.Schema(
       },
     },
 
+    senderName: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: function (v) {
+          if (!v) return true;
+          return /^[A-Za-z\s]+$/.test(v);
+        },
+        message: "Sender name: letters and spaces only.",
+      },
+    },
+
     // Multiple items array
     items: {
       type: [ItemSchema],
       default: [],
     },
-
-    // Deprecated fields (kept for backward compatibility)
-    itemType: String,
-    customItemName: String,
-    quantity: Number,
-    unit: String,
 
     totalQuantity: {
       type: Number,
