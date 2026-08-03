@@ -22,9 +22,11 @@ import {
   Download,
   ChevronDown,
   RefreshCcw,
+  Tags,
 } from "lucide-react";
 import api from "../services/api";
 import DataTable from "../components/ui/DataTable";
+import Combobox from "../components/ui/Combobox";
 import Reports from "./Reports";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -791,6 +793,10 @@ export default function AccountingFinance() {
   const [accountSaveError, setAccountSaveError] = useState("");
   const [accountFieldErrors, setAccountFieldErrors] = useState({ name: "", createdOn: "" });
 
+  const [selectedAccounts, setSelectedAccounts] = useState([]);
+  const [clearSelectionSignal, setClearSelectionSignal] = useState(0);
+  const [subTypeDialog, setSubTypeDialog] = useState({ open: false, subType: "", error: "", saving: false });
+
   useEffect(() => {
     const tab = searchParams.get("tab");
     if (tab && !TABS.some((t) => t.key === tab)) {
@@ -836,6 +842,15 @@ export default function AccountingFinance() {
   }, [entries]);
 
   const entryTotalsById = useMemo(() => new Map(entryTotals.map((t) => [t.entryId, t])), [entryTotals]);
+
+  const subTypeOptions = useMemo(() => {
+    const set = new Set();
+    (accounts || []).forEach((a) => {
+      const s = String(a?.subType || "").trim();
+      if (s) set.add(s);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [accounts]);
 
   const totals = useMemo(() => {
     const totalDebit = round2(entryTotals.reduce((s, t) => s + n0(t.totalDebit), 0));
@@ -1147,6 +1162,7 @@ export default function AccountingFinance() {
       form: {
         name: "",
         manualType: "EXPENSE",
+        subType: "",
         createdOn: todayIso(),
       },
     });
@@ -1162,6 +1178,7 @@ export default function AccountingFinance() {
       form: {
         name: String(row?.name || ""),
         manualType: getManualAccountTypeKey(row),
+        subType: String(row?.subType || ""),
         createdOn: toDateInputValue(row?.createdOn || row?.createdAt),
       },
     });
@@ -1181,10 +1198,12 @@ export default function AccountingFinance() {
       setAccountSaveError("");
       setLoading(true);
       const type = getManualAccountTypeKey({ type: f.manualType });
+      const subType = String(f.subType || "").trim();
       if (accountDialog.mode === "edit" && accountDialog.id) {
         await api.put(`/accounting/accounts/${accountDialog.id}`, {
           name,
           type,
+          subType,
           createdOn,
           journalSide: "BOTH",
         });
@@ -1193,6 +1212,7 @@ export default function AccountingFinance() {
         await api.post("/accounting/accounts", {
           name,
           type,
+          subType,
           createdOn,
           journalSide: "BOTH",
         });
@@ -1234,6 +1254,40 @@ export default function AccountingFinance() {
       toast.error(err?.response?.data?.message || "Failed to activate account.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openSubTypeDialog = () => {
+    setSubTypeDialog({ open: true, subType: "", error: "", saving: false });
+  };
+
+  const applySubType = async () => {
+    const count = selectedAccounts.length;
+    const subType = String(subTypeDialog.subType || "").trim();
+    if (!count) {
+      setSubTypeDialog((d) => ({ ...d, error: "Select at least one account." }));
+      return;
+    }
+    if (!subType) {
+      setSubTypeDialog((d) => ({ ...d, error: "Sub-Type is required." }));
+      return;
+    }
+    try {
+      setSubTypeDialog((d) => ({ ...d, saving: true, error: "" }));
+      await api.put("/accounting/accounts/bulk-subtype", {
+        ids: selectedAccounts.map((a) => String(a._id)),
+        subType,
+      });
+      setSubTypeDialog((d) => ({ ...d, open: false, saving: false }));
+      setClearSelectionSignal((s) => s + 1);
+      toast.success(`Sub-Type applied to ${count} account(s).`);
+      await loadDropdowns();
+    } catch (err) {
+      setSubTypeDialog((d) => ({
+        ...d,
+        saving: false,
+        error: err?.response?.data?.message || err?.message || "Failed to set sub-type.",
+      }));
     }
   };
 
@@ -6427,6 +6481,11 @@ export default function AccountingFinance() {
                   filterOptions: ["EXPENSE", "INCOME", "ACCOUNT_PAYABLE"],
                   render: (_v, row) => getManualAccountTypeLabel(row),
                 },
+                {
+                  key: "subType",
+                  label: "Sub-Type",
+                  render: (_v, row) => (String(row?.subType || "").trim() ? row.subType : "-"),
+                },
                 { key: "createdOn", label: "Created On", render: (_v, row) => formatAccountCreatedOn(row) },
                 {
                   key: "actions",
@@ -6463,14 +6522,28 @@ export default function AccountingFinance() {
                 },
               ]}
               data={accounts}
+              selectable
+              onSelectionChange={setSelectedAccounts}
+              selectionResetSignal={clearSelectionSignal}
               toolbarActions={
-                <button
-                  type="button"
-                  onClick={openNewAccount}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-                >
-                  <Plus size={16} /> New Account
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={openSubTypeDialog}
+                    disabled={selectedAccounts.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Apply a sub-type to selected accounts"
+                  >
+                    <Tags size={16} /> Set Sub-Type ({selectedAccounts.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openNewAccount}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                  >
+                    <Plus size={16} /> New Account
+                  </button>
+                </div>
               }
               showPrint={false}
             />
@@ -6525,6 +6598,19 @@ export default function AccountingFinance() {
                   </div>
 
                   <div>
+                    <label className="block text-xs text-gray-600 mb-1">Sub-Type</label>
+                    <Combobox
+                      value={accountDialog.form.subType || ""}
+                      onChange={(v) => setAccountDialog((d) => ({ ...d, form: { ...d.form, subType: v } }))}
+                      options={subTypeOptions}
+                      placeholder="e.g. Raw Material (optional)"
+                    />
+                    <div className="mt-1 text-xs text-gray-500">
+                      Pick an existing sub-type or type a new one. It will be available next time.
+                    </div>
+                  </div>
+
+                  <div>
                     <label className="block text-xs text-gray-600 mb-1">Created On</label>
                     <input
                       type="date"
@@ -6558,6 +6644,59 @@ export default function AccountingFinance() {
                     className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-60"
                   >
                     Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {subTypeDialog.open && (
+            <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-gray-900">
+                    Set Sub-Type for {selectedAccounts.length} Account{selectedAccounts.length === 1 ? "" : "s"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSubTypeDialog((d) => ({ ...d, open: false, error: "" }))}
+                    className="p-2 rounded hover:bg-gray-100"
+                    title="Close"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Sub-Type</label>
+                  <Combobox
+                    value={subTypeDialog.subType || ""}
+                    onChange={(v) => setSubTypeDialog((d) => ({ ...d, subType: v, error: "" }))}
+                    options={subTypeOptions}
+                    placeholder="e.g. Raw Material"
+                    error={!!subTypeDialog.error}
+                  />
+                  <div className="mt-1 text-xs text-gray-500">
+                    Pick an existing sub-type or type a new one. It will be available next time.
+                  </div>
+                  {subTypeDialog.error && <div className="mt-1 text-xs text-red-600">{subTypeDialog.error}</div>}
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSubTypeDialog((d) => ({ ...d, open: false, error: "" }))}
+                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applySubType}
+                    disabled={subTypeDialog.saving}
+                    className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {subTypeDialog.saving ? "Applying..." : "Apply"}
                   </button>
                 </div>
               </div>

@@ -42,6 +42,9 @@ export default function DataTable({
   deleteAll,
   bulkDelete,
   bulkDeleteAlign = "left",
+  selectable = false,
+  onSelectionChange,
+  selectionResetSignal = 0,
   highlightId = "",
   highlightKey = "id",
   reportContextLines = [],
@@ -189,6 +192,14 @@ export default function DataTable({
       return Array.from(s);
     });
   };
+
+  useEffect(() => {
+    if (typeof onSelectionChange === "function") onSelectionChange(selectedRows);
+  }, [selectedRows, onSelectionChange]);
+
+  useEffect(() => {
+    if (selectionResetSignal) setSelectedKeys([]);
+  }, [selectionResetSignal]);
 
   useEffect(() => {
     if (highlightIndex < 0) return;
@@ -343,6 +354,7 @@ export default function DataTable({
   }, [handlePrint]);
 
   const hasBulkDelete = bulkDelete && typeof bulkDelete.onConfirm === "function";
+  const showCheckboxes = hasBulkDelete || selectable;
   const showBulkDeleteOnRight = hasBulkDelete && bulkDeleteAlign === "right";
   const showBulkDeleteOnLeft = hasBulkDelete && !showBulkDeleteOnRight;
 
@@ -665,7 +677,7 @@ export default function DataTable({
         <table className="w-full text-sm">
           <thead className="bg-emerald-50 text-emerald-800">
             <tr>
-              {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+              {showCheckboxes && (
                 <th className="p-2 text-center w-10">
                   <input
                     type="checkbox"
@@ -724,7 +736,7 @@ export default function DataTable({
                   rowClassName ? rowClassName(row) : ""
                 }`}
               >
-                {bulkDelete && typeof bulkDelete.onConfirm === "function" && (
+                {showCheckboxes && (
                   <td className="p-2 text-center">
                     <input
                       type="checkbox"
@@ -746,7 +758,7 @@ export default function DataTable({
             )})}
             {pageData.length === 0 && (
               <tr>
-                <td colSpan={columns.length + (bulkDelete && typeof bulkDelete.onConfirm === "function" ? 1 : 0)} className="p-6 text-center text-gray-400">
+                <td colSpan={columns.length + (showCheckboxes ? 1 : 0)} className="p-6 text-center text-gray-400">
                   {emptyMessage}
                 </td>
               </tr>

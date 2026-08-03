@@ -1141,6 +1141,7 @@ exports.createAccount = async (req, res) => {
     const payload = req.body || {};
     const name = String(payload.name || "").trim();
     const type = normalizeAccountType(payload.type);
+    const subType = String(payload.subType || "").trim();
     const createdOn = parseAccountCreatedOn(payload.createdOn);
     if (!name) return res.status(400).json({ success: false, message: "Account name is required." });
     if (!MANUAL_ACCOUNT_TYPES.includes(type)) {
@@ -1151,7 +1152,7 @@ exports.createAccount = async (req, res) => {
       name,
       createdOn,
       type,
-      subType: "",
+      subType,
       parentAccountId: null,
       isControl: false,
       isActive: true,
@@ -1183,6 +1184,7 @@ exports.updateAccount = async (req, res) => {
       patch.type = type;
       patch.subType = "";
     }
+    if (payload.subType != null) patch.subType = String(payload.subType || "").trim();
     if (payload.createdOn != null) {
       const createdOn = parseAccountCreatedOn(payload.createdOn);
       if (!createdOn) return res.status(400).json({ success: false, message: "Created On date is invalid." });
@@ -1197,6 +1199,27 @@ exports.updateAccount = async (req, res) => {
     res.json({ success: true, data: doc });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to update account." });
+  }
+};
+
+exports.bulkSetSubType = async (req, res) => {
+  try {
+    await ensureAccountCodeIndex();
+    const payload = req.body || {};
+    const ids = (Array.isArray(payload.ids) ? payload.ids : [])
+      .map((i) => String(i || "").trim())
+      .filter(Boolean);
+    const subType = String(payload.subType || "").trim();
+    if (!ids.length) {
+      return res.status(400).json({ success: false, message: "Select at least one account." });
+    }
+    const result = await Account.updateMany(
+      { _id: { $in: ids }, type: { $in: MANUAL_ACCOUNT_TYPES } },
+      { $set: { subType } }
+    );
+    res.json({ success: true, data: { matched: result.matchedCount, modified: result.modifiedCount } });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || "Unable to set account sub-type." });
   }
 };
 
