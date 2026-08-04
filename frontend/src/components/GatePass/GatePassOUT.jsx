@@ -1446,7 +1446,7 @@ export default function GatePassOUT({ highlightId = "" }) {
     { key: "companyName", label: "Company Name (Product Owner)" },
     { key: "productName", label: "Product Name" },
     { key: "bagCount", label: "No. of Bags" },
-    { key: "emptyBagWeightKg", label: "Empty Bags (kg)" },
+    { key: "emptyBagWeightKg", label: "Weight of Empty Bags (kg)" },
     { key: "bagWeightEachKg", label: "Weight Per Bag (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
     { key: "netWeightMan", label: "Net Weight (man / kg)" },
@@ -1822,7 +1822,7 @@ export default function GatePassOUT({ highlightId = "" }) {
                 </div>
                 <div className="grid md:grid-cols-3 gap-3 items-start">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Total Empty Bags Wt (kg)</label>
+                    <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                     <input
                       value={it.emptyBagWeightKg || ""}
                       onChange={(e) => updateItemValue(idx, "emptyBagWeightKg", e.target.value)}

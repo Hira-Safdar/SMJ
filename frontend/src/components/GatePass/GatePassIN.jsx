@@ -1547,7 +1547,7 @@ export default function GatePassIN({ highlightId = "" }) {
     },
     {
       key: "emptyBagWeightKg",
-      label: "Empty Bags Wt (kg)",
+      label: "Weight of Empty Bags (kg)",
       render: (_val, row) => itemListText(row, (it) => fmtNum(it.emptyBagWeightKg)),
     },
     {
@@ -1625,7 +1625,7 @@ export default function GatePassIN({ highlightId = "" }) {
     { key: "productName", label: "Product" },
     { key: "weightOnArrival", label: "Weight on Arrival (kg)" },
     { key: "weightAtSmjKg", label: "Weight at SMJ (kg)" },
-    { key: "emptyBagWeightKg", label: "Empty Bags (kg)" },
+    { key: "emptyBagWeightKg", label: "Weight of Empty Bags (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
     { key: "bagWeightEachKg", label: "Bag Weight Each (kg)" },
     { key: "bagCount", label: "Bags" },
