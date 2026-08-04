@@ -1,5 +1,6 @@
 // backend/models/gatePassModel.js
 const mongoose = require("mongoose");
+const Counter = require("./counterModel");
 const companyNamePattern = /^[A-Za-z0-9\s.,&()\-]+$/;
 
 const ItemSchema = new mongoose.Schema(
@@ -110,17 +111,9 @@ const GatePassSchema = new mongoose.Schema(
 
     truckNo: {
       type: String,
+      trim: true,
       required: function () {
         return this.type === "IN";
-      },
-      minlength: [6, "Truck number too short."],
-      maxlength: [12, "Truck number too long."],
-      validate: {
-        validator: function (v) {
-          if (!v) return this.type !== "IN";
-          return /^[A-Z]{2,4}-\d{3,4}$/.test(v);
-        },
-        message: "Format: ABC-123 or AB-1234",
       },
     },
 
@@ -252,26 +245,43 @@ const GatePassSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Auto number
+// Auto number.
+// Numbers come from a monotonic counter (keyed by type-year). The counter is
+// seeded from the highest number currently in use and is NEVER decremented,
+// so even if the latest gate pass is deleted its number is not reused.
 GatePassSchema.pre("save", async function (next) {
   if (!this.isNew || this.gatePassNo) return next();
 
   try {
     const year = new Date().getFullYear();
     const prefix = this.type === "IN" ? "GPI" : "GPO";
-    const last = await this.constructor
-      .find({ gatePassNo: new RegExp(`^${prefix}-${year}-`) })
-      .sort({ _id: -1 })
-      .limit(1);
+    const key = `${prefix}-${year}`;
 
-    let number = 1;
-    if (last.length > 0) {
-      const parts = last[0].gatePassNo.split("-");
-      const lastNumber = parseInt(parts[2], 10);
-      if (!Number.isNaN(lastNumber)) number = lastNumber + 1;
-    }
+    const lastDocs = await this.constructor
+      .find({ gatePassNo: new RegExp(`^${key}-`) })
+      .select("gatePassNo")
+      .lean();
+    const maxExisting = lastDocs.reduce((max, d) => {
+      const n = parseInt(String(d.gatePassNo || "").split("-")[2], 10);
+      return Number.isNaN(n) ? max : Math.max(max, n);
+    }, 0);
 
-    this.gatePassNo = `${prefix}-${year}-${String(number).padStart(5, "0")}`;
+    // $setOnInsert seeds the counter from the existing max (idempotent upsert),
+    // then $inc atomically moves past it. Because the counter never goes
+    // backwards, a deleted number is never regenerated. The unique index on
+    // gatePassNo remains as a safety net.
+    await Counter.updateOne(
+      { _id: key },
+      { $setOnInsert: { seq: maxExisting } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+    const counter = await Counter.findOneAndUpdate(
+      { _id: key },
+      { $inc: { seq: 1 } },
+      { new: true }
+    );
+
+    this.gatePassNo = `${key}-${String(counter.seq).padStart(5, "0")}`;
 
     // Calculate totals from items array
     if (this.items && this.items.length > 0) {
