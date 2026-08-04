@@ -381,16 +381,3 @@ exports.deleteGatePass = async (req, res) => {
       .json({ success: false, message: "Unable to delete gate pass." });
   }
 };
-
-// Get unique custom item names for suggestions
-exports.getCustomItems = async (req, res) => {
-  try {
-    const items = await GatePass.distinct("items.customItemName");
-    const filtered = items.filter((item) => item && item.trim() !== "");
-    res.json({ success: true, data: filtered });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch custom items." });
-  }
-};

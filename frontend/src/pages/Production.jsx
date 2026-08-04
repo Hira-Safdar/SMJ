@@ -457,6 +457,14 @@ export default function Production() {
         toast.error("Enter product name.");
         return "";
       }
+      if (name.length < 2) {
+        toast.error("Product name must be at least 2 characters.");
+        return "";
+      }
+      if (name.length > 50) {
+        toast.error("Product name must not exceed 50 characters.");
+        return "";
+      }
       const existing = (products || []).find(
         (p) => String(p.name || "").toLowerCase() === name.toLowerCase()
       );

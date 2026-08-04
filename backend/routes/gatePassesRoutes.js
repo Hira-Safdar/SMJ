@@ -5,7 +5,6 @@ const gatePassController = require("../controllers/gatePassController");
 
 router.post("/", gatePassController.createGatePass);
 router.get("/", gatePassController.getGatePasses);
-router.get("/custom-items", gatePassController.getCustomItems);
 router.get("/:id", gatePassController.getGatePass);
 router.put("/:id", gatePassController.updateGatePass);
 router.delete("/:id", gatePassController.deleteGatePass);

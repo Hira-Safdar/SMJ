@@ -105,20 +105,6 @@ exports.getStockReport = async (req, res) => {
   }
 };
 
-exports.getProductionReport = async (req, res) => {
-  try {
-    const { start, end } = parseRange(req);
-    const batches = await ProductionBatch.find({
-      date: { $gte: start, $lte: end },
-    })
-      .sort({ date: -1 })
-      .lean();
-    res.json({ success: true, data: batches });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load production report." });
-  }
-};
-
 exports.getGatePassReport = async (req, res) => {
   try {
     const { start, end } = parseRange(req);
@@ -374,94 +360,6 @@ exports.getProductionSummaryReport = async (req, res) => {
   }
 };
 
-exports.getByProductReport = async (req, res) => {
-  try {
-    const { start, end } = parseRange(req);
-    const companyIds = parseListParam(req.query.companyId || req.query.companyIds); // source company filter
-
-    const filter = { date: { $gte: start, $lte: end } };
-    if (companyIds.length) filter.sourceCompanyId = { $in: companyIds };
-
-    const batches = await ProductionBatch.find(filter).lean();
-    const groupIds = Array.from(
-      new Set(batches.map((b) => b.groupId).filter(Boolean))
-    );
-    const groups = groupIds.length
-      ? await ProductionGroup.find({ _id: { $in: groupIds } }).lean()
-      : [];
-
-    const bucket = new Map(); // key = productTypeName
-
-    groups.forEach((g) => {
-      (g.outputs || []).forEach((o) => {
-        const d = o.outputDate ? new Date(o.outputDate) : null;
-        if (d && (d < start || d > end)) return;
-        const key = o.productTypeName || "-";
-        const prev = bucket.get(key) || {
-          productTypeName: o.productTypeName || "-",
-          outputKg: 0,
-          batches: 0,
-        };
-        prev.outputKg += Number(o.netWeightKg || 0);
-        bucket.set(key, prev);
-      });
-    });
-
-    const data = Array.from(bucket.values())
-      .map((r) => ({ ...r, outputKg: Number(r.outputKg.toFixed(3)) }))
-      .sort((a, b) => b.outputKg - a.outputKg);
-
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load by-product report." });
-  }
-};
-
-// -------------------- MASTER DATA REPORTS --------------------
-
-exports.getCompanyListReport = async (_req, res) => {
-  try {
-    const [rows, products] = await Promise.all([
-      Company.find({}).sort({ name: 1 }).lean(),
-      ProductType.find({}).select("name brand").lean(),
-    ]);
-
-    const productMap = new Map(); // brandLower -> Set(productName)
-    (products || []).forEach((p) => {
-      const brand = String(p?.brand || "").trim().toLowerCase();
-      const name = String(p?.name || "").trim();
-      if (!brand || !name) return;
-      if (!productMap.has(brand)) productMap.set(brand, new Set());
-      productMap.get(brand).add(name);
-    });
-
-    const data = (rows || []).map((c) => {
-      const brandKey = String(c?.name || "").trim().toLowerCase();
-      const list = productMap.has(brandKey)
-        ? Array.from(productMap.get(brandKey)).sort((a, b) => a.localeCompare(b))
-        : [];
-      return {
-        ...c,
-        products: list,
-        productCount: list.length,
-      };
-    });
-
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load company list." });
-  }
-};
-
-exports.getProductListReport = async (_req, res) => {
-  try {
-    const rows = await ProductType.find({}).sort({ name: 1 }).lean();
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to load product list." });
-  }
-};
-
 // -------------------- REPORT FILTER TEMPLATES --------------------
 
 exports.getReportTemplates = async (req, res) => {
@@ -495,16 +393,5 @@ exports.createReportTemplate = async (req, res) => {
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || "Unable to create template." });
-  }
-};
-
-exports.deleteReportTemplate = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const doc = await AccountingFilterTemplate.findByIdAndUpdate(id, { $set: { isActive: false } }, { new: true }).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Template not found." });
-    res.json({ success: true, message: "Template deleted." });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message || "Unable to delete template." });
   }
 };

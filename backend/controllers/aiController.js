@@ -1047,44 +1047,6 @@ exports.sendMessage = async (req, res) => {
   }
 };
 
-// Get chat history
-exports.getChatHistory = async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    const saveChat = String(process.env.AI_SAVE_CHAT || "").trim() === "1";
-    if (!saveChat) {
-      return res.json({
-        success: true,
-        data: { messages: [] },
-      });
-    }
-
-    const chat = await AIChat.findOne({ sessionId, active: true });
-
-    if (!chat) {
-      return res.json({
-        success: true,
-        data: { messages: [] },
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        messages: chat.messages,
-        context: chat.context,
-        sessionId: chat.sessionId,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
 // Clear chat history
 exports.clearChat = async (req, res) => {
   try {
@@ -1104,26 +1066,4 @@ exports.clearChat = async (req, res) => {
       message: error.message,
     });
   }
-};
-
-
-// ============ DEBUG / CONFIG ============
-
-exports.getConfig = async (_req, res) => {
-  const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_TOKEN || "";
-  const hfModel = process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "";
-  const debug = String(process.env.AI_DEBUG || "").trim() === "1";
-  const forceProvider = String(process.env.AI_FORCE_PROVIDER || "").trim().toLowerCase() || null;
-
-  res.json({
-    success: true,
-    data: {
-      aiDebug: debug,
-      forceProvider,
-      hfModel: hfModel || null,
-      hfModelSet: !!hfModel,
-      hfTokenSet: !!hfToken,
-      hfTokenPrefix: hfToken ? String(hfToken).slice(0, 6) : null,
-    },
-  });
 };

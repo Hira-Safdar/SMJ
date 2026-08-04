@@ -657,6 +657,12 @@ export default function GatePassOUT({ highlightId = "" }) {
     const cleanBrand = toTitleCase(String(brand || "").trim());
     const cleanName = toTitleCase(String(name || "").trim());
     if (!cleanBrand || !cleanName) return { brand: cleanBrand, name: cleanName };
+    if (cleanName.length < 2 || cleanName.length > 50) {
+      return { brand: cleanBrand, name: cleanName };
+    }
+    if (cleanBrand.length > 80) {
+      return { brand: cleanBrand, name: cleanName };
+    }
     const exists = (productCatalog || []).some(
       (p) => normalizeText(p.brand) === normalizeText(cleanBrand) && normalizeText(p.name) === normalizeText(cleanName)
     );

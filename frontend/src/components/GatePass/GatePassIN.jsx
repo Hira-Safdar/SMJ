@@ -504,6 +504,12 @@ export default function GatePassIN({ highlightId = "" }) {
     const cleanBrand = toTitleCase(String(brand || "").trim());
     const cleanName = toTitleCase(String(name || "").trim());
     if (!cleanBrand || !cleanName) return { brand: cleanBrand, name: cleanName };
+    if (cleanName.length < 2 || cleanName.length > 50) {
+      return { brand: cleanBrand, name: cleanName };
+    }
+    if (cleanBrand.length > 80) {
+      return { brand: cleanBrand, name: cleanName };
+    }
     const exists = (productCatalog || []).some(
       (p) => normalizeText(p.brand) === normalizeText(cleanBrand) && normalizeText(p.name) === normalizeText(cleanName)
     );
@@ -571,7 +577,7 @@ export default function GatePassIN({ highlightId = "" }) {
   const validateBrandValue = (value) => {
     const v = String(value || "").trim();
     if (!v) return "Company Name is required";
-    if (v.length > 100) return "Company Name must be 100 characters or less";
+    if (v.length > 80) return "Company Name must be 80 characters or less";
     return "";
   };
 
@@ -580,7 +586,7 @@ export default function GatePassIN({ highlightId = "" }) {
       modal?.value === OTHER_OPTION ? modal?.valueOther || "" : modal?.value || ""
     ).trim();
 
-  const sanitizeBrandText = (value, max = 100) =>
+  const sanitizeBrandText = (value, max = 80) =>
     String(value || "")
       .replace(/[^a-zA-Z0-9\s.,&()\-]/g, "")
       .slice(0, max);
@@ -601,6 +607,8 @@ export default function GatePassIN({ highlightId = "" }) {
     const errors = {};
     const name = String(row.name || "").trim();
     if (!name) errors.name = "Product name is required";
+    else if (name.length < 2) errors.name = "Product name must be at least 2 characters";
+    else if (name.length > 50) errors.name = "Product name must not exceed 50 characters";
     if (!String(row.bagKg || "").trim()) errors.bagKg = "Required";
     if (!String(row.tonKg || "").trim()) errors.tonKg = "Required";
     if (!String(row.pricePerKg || "").trim()) errors.pricePerKg = "Required";
@@ -1018,7 +1026,7 @@ export default function GatePassIN({ highlightId = "" }) {
             }}
             onKeyDown={(e) => handleBrandKeyDown(e, idx, filteredBrands)}
             onChange={(e) => {
-              const next = sanitizeBrandText(e.target.value, 100);
+              const next = sanitizeBrandText(e.target.value, 80);
               setItems((prev) => {
                 const updated = [...prev];
                 updated[idx] = { ...updated[idx], brand: next, productName: "" };
@@ -2205,7 +2213,7 @@ export default function GatePassIN({ highlightId = "" }) {
                       value={brandModal.valueOther || ""}
                       onChange={(e) =>
                         setBrandModal((prev) => {
-                          const next = sanitizeBrandText(e.target.value, 100);
+                          const next = sanitizeBrandText(e.target.value, 80);
                           const match = findSimilarBrand(next);
                           if (match) {
                             return {
