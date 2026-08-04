@@ -276,12 +276,7 @@ export default function GatePassIN({ highlightId = "" }) {
 
   // Format truck input
   const formatTruckInput = (raw) => {
-    let s = raw.toUpperCase();
-    s = s.replace(/[^A-Z0-9]/g, "");
-    const letters = (s.match(/^[A-Z]*/)[0] || "").slice(0, 4);
-    const digits = s.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 4);
-    if (!digits) return letters;
-    return `${letters}-${digits}`;
+    return String(raw || "").slice(0, 20);
   };
 
   // Format contact input: 03XX-XXXXXXX
@@ -1815,7 +1810,7 @@ export default function GatePassIN({ highlightId = "" }) {
               name="truckNo"
               value={form.truckNo}
               onChange={handleChange}
-              placeholder="ABCD-1234"
+              placeholder="Enter truck number"
               className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
                 errors.truckNo ? "border-red-500" : "border-gray-300"
               }`}
