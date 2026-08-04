@@ -201,7 +201,7 @@ export default function GatePassIN({ highlightId = "" }) {
     const fullBags = Math.floor(gross / bagW);
     const looseKg = +(gross - fullBags * bagW).toFixed(2);
     const netKg = +Math.max(gross - fullBags * emptyPerBag, 0).toFixed(2);
-    const bagsLabel = fullBags > 0 ? `${fullBags} bag${fullBags > 1 ? "s" : ""}` : "";
+    const bagsLabel = fullBags > 0 ? `${fullBags} bags` : "";
     const looseLabel = looseKg > 0 ? `${fmtNum(looseKg)}kg` : "";
     const bagsDisplay = [bagsLabel, looseLabel].filter(Boolean).join(" ") || "";
     return { netKg, fullBags, looseKg, bagsDisplay };
