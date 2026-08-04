@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { X, ChevronLeft, ChevronRight, Sparkles, MousePointerClick } from "lucide-react";
 
 const STEPS = [
@@ -344,143 +344,202 @@ const STEPS = [
 
 export default function GuidedTour() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [active, setActive] = useState(false);
   const [step, setStep] = useState(0);
   const [spot, setSpot] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const tooltipRef = useRef(null);
   const actionRef = useRef(null);
+  const measureTimer = useRef(null);
 
   const current = STEPS[step] || null;
+  const total = STEPS.length;
+
+  const clearMeasure = useCallback(() => {
+    if (measureTimer.current) {
+      clearTimeout(measureTimer.current);
+      measureTimer.current = null;
+    }
+  }, []);
 
   const stop = useCallback(() => {
+    clearMeasure();
     setActive(false);
     setStep(0);
     setSpot(null);
     try { localStorage.removeItem("smj-tour"); } catch (_err) { void _err; }
-  }, []);
+  }, [clearMeasure]);
+
+  // Shared transition: cancel in-flight measurement and drop the stale highlight
+  // immediately so the UI never shows the previous step's spotlight/tooltip.
+  const goTo = useCallback((next) => {
+    clearMeasure();
+    setSpot(null);
+    setStep(Math.max(0, Math.min(next, STEPS.length - 1)));
+  }, [clearMeasure]);
 
   const goNext = useCallback(() => {
-    if (step < STEPS.length - 1) setStep((s) => s + 1);
-    else stop();
-  }, [step, stop]);
+    if (step >= total - 1) { stop(); return; }
+    goTo(step + 1);
+  }, [step, total, stop, goTo]);
 
   const goPrev = useCallback(() => {
-    if (step > 0) setStep((s) => s - 1);
-  }, [step]);
+    if (step <= 0) return;
+    goTo(step - 1);
+  }, [step, goTo]);
 
   useEffect(() => {
     const onStart = () => {
+      clearMeasure();
       setActive(true);
       setStep(0);
+      setSpot(null);
       try { localStorage.setItem("smj-tour", "1"); } catch (_err) { void _err; }
     };
     window.addEventListener("smj-start-tour", onStart);
     return () => window.removeEventListener("smj-start-tour", onStart);
-  }, []);
+  }, [clearMeasure]);
 
+  // Navigate to the step's route. Uses replace so the tour never pollutes
+  // browser history (pressing browser Back shouldn't replay the tour).
+  // Compares only the params the target route actually sets, so pages that
+  // normalize their own query string (e.g. adding tab) don't cause re-nav loops.
   useEffect(() => {
     if (!active || !current) return;
-    const loc = window.location.pathname + window.location.search;
-    const targetLoc = current.route || "/";
-    if (loc !== targetLoc) {
-      navigate(targetLoc);
+    const target = current.route || "/";
+    const qIndex = target.indexOf("?");
+    const targetPath = qIndex === -1 ? target : target.slice(0, qIndex);
+    if (location.pathname !== targetPath) {
+      navigate(target, { replace: true });
+      return;
     }
-  }, [active, step, current, navigate]);
+    const want = new URLSearchParams(qIndex === -1 ? "" : target.slice(qIndex + 1));
+    const have = new URLSearchParams(location.search);
+    let dirty = false;
+    for (const [k, v] of want) {
+      if (have.get(k) !== v) { dirty = true; break; }
+    }
+    if (dirty) navigate(target, { replace: true });
+  }, [active, step, current, location.pathname, location.search, navigate]);
 
-  // Auto-scroll the target into view when it is off-screen, then spotlight it.
+  // Measure + spotlight the target, retrying patiently. Pages that fetch data
+  // before rendering the highlighted element (reports, ledger, etc.) can take
+  // a while, so we keep retrying instead of giving up after a short window.
   useEffect(() => {
     if (!active || !current) { setSpot(null); return; }
+    clearMeasure();
     let cancelled = false;
-    let retryCount = 0;
+    let attempts = 0;
+
     const measure = () => {
       if (cancelled) return;
       const el = document.querySelector(current.target);
       if (!el) {
-        if (retryCount < 30) {
-          retryCount += 1;
-          setTimeout(measure, 300);
-        }
+        attempts += 1;
+        if (attempts <= 150) measureTimer.current = setTimeout(measure, 250);
         return;
       }
       const r = el.getBoundingClientRect();
       const cw = window.innerWidth;
       const ch = window.innerHeight;
       const fullyInView =
-        r.top >= 0 && r.bottom <= ch && r.left >= 0 && r.right <= cw;
+        r.width > 0 && r.height > 0 &&
+        r.top >= -20 && r.bottom <= ch + 20 &&
+        r.left >= -20 && r.right <= cw + 20;
       if (!fullyInView) {
-        const el2 = el.closest("[data-tour-scroll]") || el;
-        if (typeof el2.scrollIntoView === "function") {
-          el2.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+        const scrollTarget = el.closest("[data-tour-scroll]") || el;
+        if (typeof scrollTarget.scrollIntoView === "function") {
+          scrollTarget.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
         }
-        setTimeout(measure, 450);
+        attempts += 1;
+        if (attempts <= 150) measureTimer.current = setTimeout(measure, 350);
         return;
       }
-      setSpot({
-        top: r.top - 6,
-        left: r.left - 6,
-        width: r.width + 12,
-        height: r.height + 12,
-      });
-    };
-    measure();
-    return () => { cancelled = true; };
-  }, [active, step, current]);
-
-  useEffect(() => {
-    if (!active || !spot) return;
-    const onResize = () => {
-      const el = document.querySelector(current?.target);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
       setSpot({ top: r.top - 6, left: r.left - 6, width: r.width + 12, height: r.height + 12 });
     };
-    window.addEventListener("resize", onResize);
-    window.addEventListener("scroll", onResize, true);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onResize, true);
-    };
-  }, [active, spot, current]);
 
+    measureTimer.current = setTimeout(measure, 80);
+    return () => { cancelled = true; clearMeasure(); };
+  }, [active, step, current, clearMeasure]);
+
+  // Keep the spotlight glued to the element while the user scrolls / resizes.
   useEffect(() => {
-    if (!active || !spot || !tooltipRef.current) return;
-    const tr = tooltipRef.current.getBoundingClientRect();
-    const pad = 12;
-    const cw = window.innerWidth;
-    const ch = window.innerHeight;
+    if (!active) return;
+    const refresh = () => {
+      if (!current) return;
+      const el = document.querySelector(current.target);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      setSpot({ top: r.top - 6, left: r.left - 6, width: r.width + 12, height: r.height + 12 });
+    };
+    window.addEventListener("resize", refresh);
+    window.addEventListener("scroll", refresh, true);
+    return () => {
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("scroll", refresh, true);
+    };
+  }, [active, current]);
 
-    let top, left;
-    const pos = current?.placement || "bottom";
-
-    if (pos === "bottom") {
-      top = spot.top + spot.height + pad;
-      left = spot.left + spot.width / 2 - tr.width / 2;
-    } else if (pos === "right") {
-      top = spot.top + spot.height / 2 - tr.height / 2;
-      left = spot.left + spot.width + pad;
-    } else if (pos === "top") {
-      top = spot.top - tr.height - pad;
-      left = spot.left + spot.width / 2 - tr.width / 2;
-    } else {
-      top = spot.top + spot.height / 2 - tr.height / 2;
-      left = spot.left - tr.width - pad;
-    }
-
-    if (left < pad) left = pad;
-    if (left + tr.width > cw - pad) left = cw - tr.width - pad;
-    if (top < pad) top = pad;
-    if (top + tr.height > ch - pad) top = ch - tr.height - pad;
-
-    setTooltipPos({ top, left });
+  // Position the tooltip relative to the spotlight; until the target is found
+  // (navigation/data loading), keep it visible near the top-center so the
+  // tour controls are always reachable.
+  useEffect(() => {
+    if (!active) return;
+    const compute = () => {
+      const cw = window.innerWidth;
+      const ch = window.innerHeight;
+      const pad = 12;
+      const tr = tooltipRef.current ? tooltipRef.current.getBoundingClientRect() : null;
+      const tw = tr ? tr.width : 320;
+      const th = tr ? tr.height : 240;
+      let top, left;
+      if (spot) {
+        const pos = current?.placement || "bottom";
+        if (pos === "bottom") {
+          top = spot.top + spot.height + pad;
+          left = spot.left + spot.width / 2 - tw / 2;
+        } else if (pos === "right") {
+          top = spot.top + spot.height / 2 - th / 2;
+          left = spot.left + spot.width + pad;
+        } else if (pos === "top") {
+          top = spot.top - th - pad;
+          left = spot.left + spot.width / 2 - tw / 2;
+        } else {
+          top = spot.top + spot.height / 2 - th / 2;
+          left = spot.left - tw - pad;
+        }
+      } else {
+        top = 72;
+        left = (cw - tw) / 2;
+      }
+      if (left < pad) left = pad;
+      if (left + tw > cw - pad) left = cw - tw - pad;
+      if (top < pad) top = pad;
+      if (top + th > ch - pad) top = ch - th - pad;
+      setTooltipPos({ top, left });
+    };
+    const t = setTimeout(compute, 20);
+    window.addEventListener("resize", compute);
+    return () => { clearTimeout(t); window.removeEventListener("resize", compute); };
   }, [active, spot, current]);
 
+  // Keyboard navigation. Ignore keys while the user is typing in a form field.
+  // Enter only advances when a button does not already own the key press,
+  // otherwise a focused Next button would double-advance (skip a step).
   useEffect(() => {
     if (!active) return;
     const onKey = (e) => {
-      if (e.key === "Escape") stop();
-      if (e.key === "ArrowRight" || e.key === "Enter") goNext();
-      if (e.key === "ArrowLeft") goPrev();
+      const tag = (e.target && e.target.tagName) || "";
+      const isFormField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable);
+      if (isFormField) return;
+      if (e.key === "Escape") { e.preventDefault(); stop(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); goNext(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); goPrev(); }
+      else if (e.key === "Enter") {
+        if (tag !== "BUTTON") { e.preventDefault(); goNext(); }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -502,8 +561,6 @@ export default function GuidedTour() {
   }, [active, step, current, goNext]);
 
   if (!active) return null;
-
-  const total = STEPS.length;
 
   return (
     <div className="fixed inset-0 z-[9999]">

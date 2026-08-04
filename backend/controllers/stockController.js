@@ -24,6 +24,39 @@ function normalizeProductName(productTypeId, productTypeName) {
   return productTypeName || "";
 }
 
+// Classify a stock ledger entry into a human-readable source: which gate pass,
+// production group (PG-...) or production batch (PB-...) drove the movement.
+function buildLedgerSource(l, delta) {
+  const remarks = String(l.remarks || "");
+  let sourceType = "Ledger";
+  let refNo = "-";
+  if (l.gatePassId) {
+    sourceType = "Gate Pass";
+    refNo = l.gatePassNo || "-";
+  } else {
+    const groupMatch = remarks.match(/\bPG-\d{8}-\d{6}\b/i);
+    const batchMatch = remarks.match(/\bPB-\d{8}-\d{6}\b/i);
+    if (groupMatch) {
+      sourceType = "Production Group";
+      refNo = groupMatch[0].toUpperCase();
+    } else if (batchMatch) {
+      sourceType = "Production Batch";
+      refNo = batchMatch[0].toUpperCase();
+    } else if (/production|paddy/i.test(remarks)) {
+      sourceType = "Production";
+    }
+  }
+  return {
+    sourceType,
+    refNo,
+    date: l.date,
+    dateTime: l.updatedAt || l.createdAt,
+    qtyKg: delta,
+    direction: l.type,
+    remarks,
+  };
+}
+
 exports.getCurrentStock = async (req, res) => {
   try {
     const map = new Map();
@@ -113,14 +146,7 @@ exports.getCurrentStock = async (req, res) => {
         "Unprocessed Paddy",
         delta,
         dateTime,
-        {
-          sourceType: l.gatePassId ? "Gate Pass" : "Production",
-          refNo: l.gatePassNo || "-",
-          date: l.date,
-          dateTime,
-          qtyKg: delta,
-          direction: l.type,
-        }
+        buildLedgerSource(l, delta)
       );
     }
 
@@ -143,14 +169,7 @@ exports.getCurrentStock = async (req, res) => {
         l.productTypeName || "",
         delta,
         dateTime,
-        {
-          sourceType: l.gatePassId ? "Gate Pass" : "Ledger",
-          refNo: l.gatePassNo || "-",
-          date: l.date,
-          dateTime,
-          qtyKg: delta,
-          direction: l.type,
-        }
+        buildLedgerSource(l, delta)
       );
     }
 

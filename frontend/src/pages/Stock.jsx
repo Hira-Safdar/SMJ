@@ -1,7 +1,7 @@
 // src/pages/Stock.jsx
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import api from "../services/api";
-import { Package, Factory, Filter } from "lucide-react";
+import { Package, Factory, Filter, Info, X } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../components/ui/DataTable";
 import {
@@ -47,6 +47,25 @@ const isRawRow = (row) => {
 const companyOf = (row) =>
   String(row?.companyName || row?.brandName || "").trim() || "Mill Own Stock";
 
+const fmtDate = (d) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  return isNaN(dt) ? "" : dt.toLocaleDateString();
+};
+
+const sourceBadgeClass = (type) => {
+  switch (type) {
+    case "Gate Pass":
+      return "bg-sky-50 text-sky-700";
+    case "Purchase":
+      return "bg-amber-50 text-amber-700";
+    case "Sale":
+      return "bg-rose-50 text-rose-700";
+    default:
+      return "bg-emerald-50 text-emerald-700";
+  }
+};
+
 export default function Stock() {
   const [activeTab, setActiveTab] = useState("RAW");
   const [rows, setRows] = useState([]);
@@ -54,6 +73,7 @@ export default function Stock() {
 
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [productFilter, setProductFilter] = useState("ALL");
+  const [infoRow, setInfoRow] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -140,9 +160,13 @@ export default function Stock() {
       const kg = Number(r.balanceKg || 0);
       const existing =
         map.get(product) ||
-        { product, totalKg: 0, companyMap: {}, lastUpdated: null };
+        { product, totalKg: 0, companyMap: {}, sourcesByCompany: {}, lastUpdated: null };
       existing.totalKg += kg;
       existing.companyMap[comp] = (existing.companyMap[comp] || 0) + kg;
+      existing.sourcesByCompany[comp] = [
+        ...(existing.sourcesByCompany[comp] || []),
+        ...(r.sources || []),
+      ];
       const lu = r.lastUpdated ? new Date(r.lastUpdated) : null;
       if (lu && (!existing.lastUpdated || lu > new Date(existing.lastUpdated))) {
         existing.lastUpdated = lu.toISOString();
@@ -197,7 +221,28 @@ export default function Stock() {
   // COLUMNS — product first, then one column per company, then total
   // ------------------------------------------------------------------
   const pivotColumns = useMemo(() => {
-    const cols = [{ key: "product", label: "Product" }];
+    const cols = [
+      {
+        key: "_info",
+        label: "",
+        align: "center",
+        sortable: false,
+        render: (_v, row) => (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setInfoRow(row);
+            }}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-700 hover:bg-emerald-50"
+            title="View stock source details"
+          >
+            <Info size={16} />
+          </button>
+        ),
+      },
+      { key: "product", label: "Product" },
+    ];
     (activeCompanies || []).forEach((c) => {
       cols.push({
         key: `cmp_${c}`,
@@ -369,6 +414,85 @@ export default function Stock() {
           </div>
         </div>
       </div>
+
+      {/* SOURCE DETAILS MODAL */}
+      {infoRow && (
+        <div
+          className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setInfoRow(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{infoRow.product}</h3>
+                <p className="text-xs text-gray-500">
+                  {activeTab === "RAW" ? "Raw Inventory" : "Production Inventory"} · Total{" "}
+                  {Math.round(Number(infoRow.totalKg || 0)).toLocaleString()} kg
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInfoRow(null)}
+                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {Object.entries(infoRow.sourcesByCompany || {}).length === 0 ? (
+              <div className="text-center py-10 text-gray-400 text-sm">
+                No source details available for this product.
+              </div>
+            ) : (
+              Object.entries(infoRow.sourcesByCompany || {})
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([comp, sources]) => (
+                  <div key={comp} className="mb-4 border border-gray-100 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
+                      <span className="text-sm font-semibold text-gray-800">{comp}</span>
+                      <span className="text-xs text-gray-500">
+                        {Math.round(Number(infoRow.companyMap?.[comp] || 0)).toLocaleString()} kg
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-gray-50">
+                      {sources.map((s, i) => (
+                        <li key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${sourceBadgeClass(
+                                s.sourceType
+                              )}`}
+                            >
+                              {s.sourceType}
+                            </span>
+                            {s.refNo && s.refNo !== "-" && (
+                              <span className="text-xs font-mono text-gray-600">{s.refNo}</span>
+                            )}
+                            <span className="text-xs text-gray-400">{fmtDate(s.date)}</span>
+                          </div>
+                          <span
+                            className={`text-xs font-semibold ${
+                              s.direction === "OUT" ? "text-red-600" : "text-emerald-600"
+                            }`}
+                          >
+                            {s.direction === "OUT" ? "▼" : "▲"}{" "}
+                            {Math.abs(Number(s.qtyKg || 0)).toLocaleString()} kg
+                          </span>
+                          {s.remarks && (
+                            <div className="w-full text-[11px] text-gray-400 italic">{s.remarks}</div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
