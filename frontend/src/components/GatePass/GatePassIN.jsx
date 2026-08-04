@@ -188,11 +188,11 @@ export default function GatePassIN({ highlightId = "" }) {
 
   // Correct IN formula:
   // 1. Full bags first: Math.floor(gross / bagWeightEach)
-  // 2. Net = gross - (fullBags * emptyBagWeightPerBag)
+  // 2. Net = gross - totalWeightOfEmptyBags (directly entered by user)
   // 3. Leftover weight = gross - (fullBags * bagWeightEach)
   const computeItemWeights = ({ weightAtSmjKg, emptyBagWeightKg, bagWeightEachKg }) => {
     const gross = Number(weightAtSmjKg || 0);
-    const emptyPerBag = Number(emptyBagWeightKg || 0);
+    const totalEmptyWeight = Number(emptyBagWeightKg || 0);
     const bagW = Number(bagWeightEachKg || 0);
     if (gross <= 0) return { netKg: 0, fullBags: 0, looseKg: 0, bagsDisplay: "" };
     if (bagW <= 0) {
@@ -200,7 +200,7 @@ export default function GatePassIN({ highlightId = "" }) {
     }
     const fullBags = Math.floor(gross / bagW);
     const looseKg = +(gross - fullBags * bagW).toFixed(2);
-    const netKg = +Math.max(gross - fullBags * emptyPerBag, 0).toFixed(2);
+    const netKg = +Math.max(gross - totalEmptyWeight, 0).toFixed(2);
     const bagsLabel = fullBags > 0 ? `${fullBags} bags` : "";
     const looseLabel = looseKg > 0 ? `${fmtNum(looseKg)}kg` : "";
     const bagsDisplay = [bagsLabel, looseLabel].filter(Boolean).join(" ") || "";
@@ -889,7 +889,7 @@ export default function GatePassIN({ highlightId = "" }) {
       row[field] = value;
     }
 
-    // Calculations: net = gross − (full bags × empty bag weight per bag)
+    // Calculations: net = gross − total weight of empty bags
     const { netKg, bagsDisplay } = computeItemWeights(row);
     row.netWeightKg = netKg ? fmtNum(netKg) : "";
     row.netWeightManDisplay = netKg ? formatKgToMan(netKg) : "";
@@ -1417,7 +1417,7 @@ export default function GatePassIN({ highlightId = "" }) {
     );
     const itemsTableHtml = `
       <table>
-        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Wt on Arrival</th><th style="text-align:right;">Wt at SMJ</th><th style="text-align:right;">Empty Bag Wt</th><th style="text-align:right;">Bag Wt Each</th><th style="text-align:right;">Net (kg)</th><th style="text-align:right;">Net (man/kg)</th><th style="text-align:right;">Bags</th></tr></thead>
+        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Wt on Arrival</th><th style="text-align:right;">Wt at SMJ</th><th style="text-align:right;">Total Empty Bags</th><th style="text-align:right;">Bag Wt Each</th><th style="text-align:right;">Net (kg)</th><th style="text-align:right;">Net (man/kg)</th><th style="text-align:right;">Bags</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
         <tfoot>
           <tr style="background:#f0fdf4;font-weight:700;">
@@ -1547,7 +1547,7 @@ export default function GatePassIN({ highlightId = "" }) {
     },
     {
       key: "emptyBagWeightKg",
-      label: "Empty Bag Wt (kg)",
+      label: "Empty Bags Wt (kg)",
       render: (_val, row) => itemListText(row, (it) => fmtNum(it.emptyBagWeightKg)),
     },
     {
@@ -1625,7 +1625,7 @@ export default function GatePassIN({ highlightId = "" }) {
     { key: "productName", label: "Product" },
     { key: "weightOnArrival", label: "Weight on Arrival (kg)" },
     { key: "weightAtSmjKg", label: "Weight at SMJ (kg)" },
-    { key: "emptyBagWeightKg", label: "Empty Bag (kg)" },
+    { key: "emptyBagWeightKg", label: "Empty Bags (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
     { key: "bagWeightEachKg", label: "Bag Weight Each (kg)" },
     { key: "bagCount", label: "Bags" },
