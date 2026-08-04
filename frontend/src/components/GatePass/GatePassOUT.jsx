@@ -166,6 +166,12 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Validation functions
   const validateTruckNo = (v) => {
+    const value = String(v || "").trim().toUpperCase();
+    if (!value) return ""; // Optional for OUT
+    if (value.length < 6) return "Truck number too short.";
+    if (value.length > 12) return "Truck number too long.";
+    if (!/^[A-Z]{2,4}-\d{3,4}$/.test(value))
+      return "Format: ABC-123 or AB-1234";
     return "";
   };
 
@@ -276,7 +282,7 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Format truck input
   const formatTruckInput = (raw) => {
-    return String(raw || "").slice(0, 20);
+    return String(raw || "").toUpperCase().slice(0, 12);
   };
 
   // Format contact input
