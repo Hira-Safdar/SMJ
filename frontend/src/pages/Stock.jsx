@@ -449,46 +449,78 @@ export default function Stock() {
             ) : (
               Object.entries(infoRow.sourcesByCompany || {})
                 .sort(([a], [b]) => a.localeCompare(b))
-                .map(([comp, sources]) => (
-                  <div key={comp} className="mb-4 border border-gray-100 rounded-lg overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50">
-                      <span className="text-sm font-semibold text-gray-800">{comp}</span>
-                      <span className="text-xs text-gray-500">
-                        {Math.round(Number(infoRow.companyMap?.[comp] || 0)).toLocaleString()} kg
-                      </span>
-                    </div>
-                    <ul className="divide-y divide-gray-50">
-                      {sources.map((s, i) => (
-                        <li key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${sourceBadgeClass(
-                                s.sourceType
-                              )}`}
-                            >
-                              {s.sourceType}
-                            </span>
-                            {s.refNo && s.refNo !== "-" && (
-                              <span className="text-xs font-mono text-gray-600">{s.refNo}</span>
-                            )}
-                            <span className="text-xs text-gray-400">{fmtDate(s.date)}</span>
-                          </div>
-                          <span
-                            className={`text-xs font-semibold ${
-                              s.direction === "OUT" ? "text-red-600" : "text-emerald-600"
-                            }`}
-                          >
-                            {s.direction === "OUT" ? "▼" : "▲"}{" "}
-                            {Math.abs(Number(s.qtyKg || 0)).toLocaleString()} kg
+                .map(([comp, sources]) => {
+                  const inTotal = sources
+                    .filter((s) => s.direction !== "OUT")
+                    .reduce((a, s) => a + (Number(s.qtyKg) > 0 ? Number(s.qtyKg) : 0), 0);
+                  const outTotal = sources
+                    .filter((s) => s.direction === "OUT")
+                    .reduce((a, s) => a + Math.abs(Number(s.qtyKg) || 0), 0);
+                  return (
+                    <div key={comp} className="mb-4 border border-gray-100 rounded-lg overflow-hidden">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-gray-50">
+                        <span className="text-sm font-semibold text-gray-800">{comp}</span>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            +{Math.round(inTotal).toLocaleString()} kg in
                           </span>
-                          {s.remarks && (
-                            <div className="w-full text-[11px] text-gray-400 italic">{s.remarks}</div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))
+                          <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                            −{Math.round(outTotal).toLocaleString()} kg out
+                          </span>
+                          <span className="text-gray-500">
+                            Balance {Math.round(Number(infoRow.companyMap?.[comp] || 0)).toLocaleString()} kg
+                          </span>
+                        </div>
+                      </div>
+                      <ul className="divide-y divide-gray-50">
+                        {sources.map((s, i) => {
+                          const isOut = s.direction === "OUT";
+                          const qty = Math.abs(Number(s.qtyKg || 0));
+                          return (
+                            <li key={i} className="px-4 py-2.5 flex items-center gap-3">
+                              <span
+                                className={`w-14 shrink-0 text-center text-[10px] font-bold tracking-wide rounded-md py-1 ${
+                                  isOut
+                                    ? "bg-red-50 text-red-600 border border-red-100"
+                                    : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                                }`}
+                              >
+                                {isOut ? "OUT" : "IN"}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${sourceBadgeClass(
+                                      s.sourceType
+                                    )}`}
+                                  >
+                                    {s.sourceType}
+                                  </span>
+                                  {s.refNo && s.refNo !== "-" && (
+                                    <span className="text-xs font-mono text-gray-600">{s.refNo}</span>
+                                  )}
+                                  <span className="text-xs text-gray-400">{fmtDate(s.date)}</span>
+                                </div>
+                                {s.remarks && (
+                                  <div className="text-[11px] text-gray-400 truncate mt-0.5">{s.remarks}</div>
+                                )}
+                              </div>
+                              <span
+                                className={`shrink-0 text-sm font-semibold tabular-nums ${
+                                  isOut ? "text-red-600" : "text-emerald-600"
+                                }`}
+                              >
+                                {isOut ? "−" : "+"}{qty.toLocaleString()} kg
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })
             )}
           </div>
         </div>
