@@ -1821,7 +1821,7 @@ export default function GatePassIN({ highlightId = "" }) {
           </div>
 
           {/* Sender Name */}
-          <div id="field-senderName">
+          <div id="field-senderName" data-tour="gatepass-in-sender">
             <label className="block text-sm font-medium mb-1">
               Sender Name <span className="text-red-500">*</span>
             </label>
@@ -1831,7 +1831,7 @@ export default function GatePassIN({ highlightId = "" }) {
         </div>
 
         {/* Items */}
-        <div className="border-t pt-4" id="field-items">
+        <div className="border-t pt-4" id="field-items" data-tour="gatepass-in-items">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
             Products
           </h3>
@@ -2051,6 +2051,7 @@ export default function GatePassIN({ highlightId = "" }) {
             <div className="flex justify-end">
               <button
                 type="button"
+                data-tour="gatepass-in-add-row"
                 onClick={() => setItems((prev) => [...(prev || []), emptyItem()])}
                 className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
               >
@@ -2064,6 +2065,7 @@ export default function GatePassIN({ highlightId = "" }) {
           <div className="flex items-center justify-end gap-3">
             <button
               type="submit"
+              data-tour="gatepass-in-submit"
               className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
             >
               {editingId ? "Update Gate Pass" : "Generate Gate Pass"}

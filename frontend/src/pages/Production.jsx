@@ -948,7 +948,7 @@ export default function Production() {
               </div>
 
               {/* Batches */}
-              <div>
+              <div data-tour="production-batch-actions">
                 <div className="text-sm font-semibold text-gray-700 mb-2">Batches (daily runs)</div>
                 <div className="border rounded-lg overflow-x-auto">
                   <table className="w-full text-[11px]">
@@ -1041,6 +1041,7 @@ export default function Production() {
                   {selectedGroup.status === "READY" && (
                     <button
                       type="button"
+                      data-tour="production-add-output"
                       onClick={() => { setOutputFormOpen((v) => !v); setFieldErrors({}); }}
                       className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
                     >
@@ -1275,6 +1276,7 @@ export default function Production() {
                   </p>
                   <button
                     type="button"
+                    data-tour="production-finalize"
                     onClick={() => setConfirmState({ type: "FINALIZE_GROUP", group: selectedGroup })}
                     disabled={working}
                     className="px-3 py-1.5 rounded text-xs bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"

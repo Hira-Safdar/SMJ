@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Sparkles, MousePointerClick } from "lucide-react";
 
 const STEPS = [
   // ===== DASHBOARD =====
@@ -8,7 +8,7 @@ const STEPS = [
     route: "/",
     target: "[data-tour='dashboard-title']",
     title: "Dashboard",
-    desc: "Your business at a glance. This is the home screen where you'll land after login.",
+    desc: "Your business at a glance. This is the home screen you'll land on after login. Scroll down to see everything, then come back here.",
     placement: "bottom",
   },
   {
@@ -36,38 +36,96 @@ const STEPS = [
     route: "/",
     target: "[data-tour='sidebar']",
     title: "Navigation Sidebar",
-    desc: "Switch between all modules from here. Expandable sections group related pages. Your current page is highlighted.",
+    desc: "Switch between all modules from here. Expandable sections group related pages. Your current page is highlighted. We'll visit every module now.",
     placement: "right",
   },
 
-  // ===== GATE PASS =====
+  // ===== GATE PASS INWARD =====
   {
     route: "/gatepass?tab=IN",
     target: "[data-tour='gatepass-in']",
     title: "Gate Pass Inward",
-    desc: "Record incoming vehicles. Enter date, truck number, sender company, and the products with their weights.",
+    desc: "Record incoming vehicles (paddy/goods arriving). Start with Date and Truck Number, then the Sender Company below.",
     placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=IN",
+    target: "[data-tour='gatepass-in-sender']",
+    title: "Sender Company",
+    desc: "Type the company the goods came from. Start typing and it will suggest existing companies; type a new name and press List to save it.",
+    placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=IN",
+    target: "[data-tour='gatepass-in-items']",
+    title: "Products & Weights",
+    desc: "Each incoming item goes on its own row: pick the product, enter bags, gross weight, and the total empty bag weight. Net weight is calculated automatically.",
+    placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=IN",
+    target: "[data-tour='gatepass-in-add-row']",
+    title: "Add Product Row",
+    desc: "Click '+ Add' to add another product line for this gate pass.",
+    placement: "top",
+  },
+  {
+    route: "/gatepass?tab=IN",
+    target: "[data-tour='gatepass-in-submit']",
+    title: "Generate Gate Pass",
+    desc: "When the form is complete, click 'Generate Gate Pass' to save it. It will appear in the records table below.",
+    placement: "top",
   },
   {
     route: "/gatepass?tab=IN",
     target: "[data-tour='gatepass-in-records']",
     title: "Inward Records & Filters",
-    desc: "Below the form you'll find all saved IN gate passes. Use the filters (date range, sender, company, product) and search to find specific entries. Export to PDF or Excel, print, or delete records.",
+    desc: "All saved IN gate passes live here. Use the Filters button (top-right of the table) for date range, sender, company and product. Export, print, or delete records too.",
     placement: "bottom",
   },
+
+  // ===== GATE PASS OUTWARD =====
   {
     route: "/gatepass?tab=OUT",
     target: "[data-tour='gatepass-out']",
     title: "Gate Pass Outward",
-    desc: "Record outgoing deliveries. Enter date, customer (Send To), truck number, then add product rows with bag count, weights, rate and price.",
+    desc: "Record outgoing deliveries. Enter date, customer (Send To), and truck number, then add product rows below.",
     placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=OUT",
+    target: "[data-tour='gatepass-out-customer']",
+    title: "Customer (Send To)",
+    desc: "Pick the customer company the goods are going to. Type a new name to add a new customer on the spot.",
+    placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=OUT",
+    target: "[data-tour='gatepass-out-items']",
+    title: "Products, Bags & Pricing",
+    desc: "Each outgoing item: product, bags, weight, rate per bag and total price. Net weight subtracts the empty bags automatically.",
+    placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=OUT",
+    target: "[data-tour='gatepass-out-add-row']",
+    title: "Add Product Row",
+    desc: "Click '+ Add' to add another outgoing product row.",
+    placement: "top",
   },
   {
     route: "/gatepass?tab=OUT",
     target: "[data-tour='gatepass-out-payment']",
     title: "Payment Status",
-    desc: "Mark the sale as Paid, Unpaid, or Partial. Amount paid and remaining balance are tracked here and flow into the Dashboard's Pending Payments.",
+    desc: "Mark the sale as Paid, Unpaid, or Partial. Enter the amount paid; the remaining balance is tracked here and shows on the Dashboard's Pending Payments.",
     placement: "bottom",
+  },
+  {
+    route: "/gatepass?tab=OUT",
+    target: "[data-tour='gatepass-out-submit']",
+    title: "Generate Gate Pass",
+    desc: "Click 'Generate Gate Pass' to save the outward entry. It appears in the records table below.",
+    placement: "top",
   },
   {
     route: "/gatepass?tab=OUT",
@@ -82,21 +140,21 @@ const STEPS = [
     route: "/stock",
     target: "[data-tour='stock-tabs']",
     title: "Stock Module Tabs",
-    desc: "Switch between Raw Inventory (grains/paddy in) and Production Inventory (finished rice products).",
+    desc: "Two stock views: Raw Inventory (grains/paddy in) and Production Inventory (finished rice products).",
     placement: "bottom",
   },
   {
     route: "/stock",
     target: "[data-tour='stock-filters']",
     title: "Stock Filters & Totals",
-    desc: "Filter stock by company (and product in Production view). The summary line shows total companies, products and combined kg.",
+    desc: "Filter stock by company (and by product in the Production view). The summary line shows total companies, products and combined kg.",
     placement: "bottom",
   },
   {
     route: "/stock",
     target: "[data-tour='stock-table']",
     title: "Stock Table",
-    desc: "Product-wise stock totals. Click column headers to sort, use search to jump to a product. Export and print are available.",
+    desc: "Product-wise stock totals for each company. Click column headers to sort, use search to jump to a product, and export or print the view.",
     placement: "bottom",
   },
 
@@ -112,15 +170,36 @@ const STEPS = [
     route: "/production",
     target: "[data-tour='production-create-batch']",
     title: "Create a Batch",
-    desc: "Pick a date and paddy source company to start a new batch. Enter the paddy weight to begin processing.",
+    desc: "Pick a date and paddy source company, enter the paddy weight, then click '+ New Batch' to start processing.",
+    placement: "bottom",
+  },
+  {
+    route: "/production",
+    target: "[data-tour='production-batch-actions']",
+    title: "Batch Actions",
+    desc: "Each batch has Edit, Complete, Reopen, and Delete. 'Complete' marks a source's paddy as fully processed.",
     placement: "bottom",
   },
   {
     route: "/production",
     target: "[data-tour='production-output']",
     title: "Products & Output",
-    desc: "Once a source's batches are complete (Ready), add production output here — rice, broken, husk, bran — with bag weights and empty bag weight to get net output.",
+    desc: "Once a source's batches are Ready, add production output here — rice, broken, husk, bran — with bag weights and empty bag weight to get net output.",
     placement: "bottom",
+  },
+  {
+    route: "/production",
+    target: "[data-tour='production-add-output']",
+    title: "Add Output Button",
+    desc: "Click '+ Add Output' to open the output form for the selected source.",
+    placement: "bottom",
+  },
+  {
+    route: "/production",
+    target: "[data-tour='production-finalize']",
+    title: "Finalize Group",
+    desc: "After entering all output, click 'Finalize Group' to lock the production run and move it to Done.",
+    placement: "top",
   },
 
   // ===== ACCOUNTING & FINANCE =====
@@ -128,63 +207,70 @@ const STEPS = [
     route: "/accounting-finance?tab=coa",
     target: "[data-tour='coa-table']",
     title: "Chart of Accounts",
-    desc: "Your account list (Expense, Income, Accounts Payable). Use checkboxes to select rows, then Edit, Activate, or Deactivate accounts.",
+    desc: "Your account list (Expense, Income, Accounts Payable). Tick the checkboxes to select rows, then Edit, Activate, or Deactivate accounts.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=coa",
     target: "[data-tour='coa-toolbar']",
     title: "Account Tools",
-    desc: "'Set Sub-Type' applies a label to selected accounts in one go. 'New Account' opens the create form for a fresh account.",
+    desc: "Use Filters to narrow accounts. 'Set Sub-Type' labels selected accounts in one go. 'New Account' opens the create form.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=journal-entry",
     target: "[data-tour='daybook']",
     title: "Daybook Entries",
-    desc: "Daily bookkeeping. Record cash in hand, pick the account, enter amount, choose Debit or Credit, add a short description and save.",
+    desc: "Daily bookkeeping. Pick the account, enter amount, choose Debit or Credit, add a short description and save.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=journal-entry",
     target: "[data-tour='daybook-form']",
     title: "Daybook Form",
-    desc: "Cash in hand shows the running cash balance. Enter the amount, select the account, choose debit/credit, and describe the transaction before saving.",
+    desc: "Cash in hand shows the running balance. Enter the amount, select the account, choose debit/credit, describe the transaction and click Save.",
     placement: "bottom",
+  },
+  {
+    route: "/accounting-finance?tab=journal-entry",
+    target: "[data-tour='daybook-save']",
+    title: "Save Entry",
+    desc: "Click 'Save' to post the entry. The entry lands in the table below and flows into your Journal, Ledger, and financial statements.",
+    placement: "top",
   },
   {
     route: "/accounting-finance?tab=journal-report",
     target: "[data-tour='journal-report']",
     title: "Journal",
-    desc: "Build and generate formal journal reports from your daybook entries. Choose a range (all, day, particular, month, year, custom) and generate.",
+    desc: "Build formal journal reports from your daybook entries. Choose a range (all, day, particular, month, year, custom) and Generate.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=ledger",
     target: "[data-tour='ledger']",
     title: "Ledger",
-    desc: "Account-wise statement of debits and credits with running balance. Pick the account and date range, then generate.",
+    desc: "Account-wise statement of debits and credits with running balance. Pick the account and date range, then Generate.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=trial",
     target: "[data-tour='trial']",
     title: "Trial Balance",
-    desc: "Summarizes all ledger balances for a period — the standard check that debits equal credits.",
+    desc: "Summarizes all ledger balances for a period — the standard check that debits equal credits. Pick a range and Generate.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=pl",
     target: "[data-tour='pl']",
     title: "Profit & Loss",
-    desc: "See income vs expenses for a period and your resulting profit or loss.",
+    desc: "See income vs expenses for a period and your resulting profit or loss. Pick a range and Generate.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=balance",
     target: "[data-tour='balance']",
     title: "Balance Sheet",
-    desc: "Snapshot of assets, liabilities and equity at a point in time.",
+    desc: "Snapshot of assets, liabilities and equity at a point in time. Pick a date and Generate.",
     placement: "bottom",
   },
 
@@ -193,7 +279,7 @@ const STEPS = [
     route: "/reports?tab=gatepass",
     target: "[data-tour='report-tabs']",
     title: "Reports",
-    desc: "Central reporting hub. Switch between Gate Pass, Stock, Production Summary, and Accounting reports.",
+    desc: "Central reporting hub. Switch between Gate Pass, Stock, Production Summary, and Accounting & Finance reports.",
     placement: "bottom",
   },
   {
@@ -217,6 +303,13 @@ const STEPS = [
     desc: "Batch-wise production summary — paddy in, rice/broken/husk/bran output, totals and status. Export and print available.",
     placement: "bottom",
   },
+  {
+    route: "/reports?tab=acc-reports",
+    target: "[data-tour='acc-reports']",
+    title: "Accounting & Finance Reports",
+    desc: "Your generated Journal, Ledger, Trial Balance, Profit & Loss and Balance Sheet reports, ready to download as PDF or delete.",
+    placement: "bottom",
+  },
 
   // ===== SYSTEM SETTINGS =====
   {
@@ -230,7 +323,7 @@ const STEPS = [
     route: "/masterdata?tab=system",
     target: "[data-tour='settings-general']",
     title: "General Settings",
-    desc: "Company name, address, phone, email, logo, and SMTP email configuration (for password/OTP emails). Save your changes here.",
+    desc: "Company name, address, phone, email, logo, and SMTP email configuration (for password/OTP emails). Save your changes at the bottom.",
     placement: "bottom",
   },
   {
@@ -256,6 +349,7 @@ export default function GuidedTour() {
   const [spot, setSpot] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const tooltipRef = useRef(null);
+  const actionRef = useRef(null);
 
   const current = STEPS[step] || null;
 
@@ -294,19 +388,43 @@ export default function GuidedTour() {
     }
   }, [active, step, current, navigate]);
 
+  // Auto-scroll the target into view when it is off-screen, then spotlight it.
   useEffect(() => {
     if (!active || !current) { setSpot(null); return; }
-    const find = () => {
+    let cancelled = false;
+    let retryCount = 0;
+    const measure = () => {
+      if (cancelled) return;
       const el = document.querySelector(current.target);
-      if (!el) return false;
+      if (!el) {
+        if (retryCount < 30) {
+          retryCount += 1;
+          setTimeout(measure, 300);
+        }
+        return;
+      }
       const r = el.getBoundingClientRect();
-      setSpot({ top: r.top - 6, left: r.left - 6, width: r.width + 12, height: r.height + 12 });
-      return true;
+      const cw = window.innerWidth;
+      const ch = window.innerHeight;
+      const fullyInView =
+        r.top >= 0 && r.bottom <= ch && r.left >= 0 && r.right <= cw;
+      if (!fullyInView) {
+        const el2 = el.closest("[data-tour-scroll]") || el;
+        if (typeof el2.scrollIntoView === "function") {
+          el2.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+        }
+        setTimeout(measure, 450);
+        return;
+      }
+      setSpot({
+        top: r.top - 6,
+        left: r.left - 6,
+        width: r.width + 12,
+        height: r.height + 12,
+      });
     };
-    if (!find()) {
-      const t = setTimeout(find, 300);
-      return () => clearTimeout(t);
-    }
+    measure();
+    return () => { cancelled = true; };
   }, [active, step, current]);
 
   useEffect(() => {
@@ -355,7 +473,7 @@ export default function GuidedTour() {
     if (top + tr.height > ch - pad) top = ch - tr.height - pad;
 
     setTooltipPos({ top, left });
-  }, [spot, current]);
+  }, [active, spot, current]);
 
   useEffect(() => {
     if (!active) return;
@@ -367,6 +485,21 @@ export default function GuidedTour() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, stop, goNext, goPrev]);
+
+  // Support "action" steps: highlight a button and continue when the user clicks it.
+  useEffect(() => {
+    if (!active || !current?.action) { actionRef.current = null; return; }
+    const el = document.querySelector(current.action);
+    if (!el) return;
+    actionRef.current = el;
+    const onClick = (e) => {
+      e.stopPropagation();
+      actionRef.current = null;
+      goNext();
+    };
+    el.addEventListener("click", onClick);
+    return () => el.removeEventListener("click", onClick);
+  }, [active, step, current, goNext]);
 
   if (!active) return null;
 
@@ -410,6 +543,13 @@ export default function GuidedTour() {
             <X size={14} />
           </button>
         </div>
+
+        {current?.action && (
+          <div className="mb-2 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <MousePointerClick size={15} className="text-emerald-700 shrink-0 mt-0.5" />
+            <div className="text-xs font-medium text-emerald-800">{current.actionHint || "Click the highlighted button to continue."}</div>
+          </div>
+        )}
 
         <p className="text-xs text-gray-600 leading-relaxed mb-3">{current?.desc}</p>
 

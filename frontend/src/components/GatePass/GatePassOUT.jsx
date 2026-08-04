@@ -1701,7 +1701,7 @@ export default function GatePassOUT({ highlightId = "" }) {
             />
             {renderFieldError(errors.date)}
           </div>
-          <div id="field-customer">
+          <div id="field-customer" data-tour="gatepass-out-customer">
             <label className="block text-sm font-medium mb-1">
               Company Name (Send To) <span className="text-red-500">*</span>
             </label>
@@ -1726,7 +1726,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         </div>
 
         {/* Items */}
-        <div className="border-t pt-4" id="field-items">
+        <div className="border-t pt-4" id="field-items" data-tour="gatepass-out-items">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Products</h3>
           <div className="mb-2">
             {submitAttempted ? renderFieldError(errors.items) : renderFieldError("")}
@@ -1905,6 +1905,7 @@ export default function GatePassOUT({ highlightId = "" }) {
             <div className="flex justify-end">
               <button
                 type="button"
+                data-tour="gatepass-out-add-row"
                 onClick={addRow}
                 className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
               >
@@ -1974,6 +1975,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         <div className="flex items-center justify-end gap-3">
           <button
             type="submit"
+            data-tour="gatepass-out-submit"
             className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
           >
             {editingId ? "Update Gate Pass" : "Generate Gate Pass"}

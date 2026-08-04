@@ -395,17 +395,6 @@ export default function SystemSettings() {
   const handleSaveGeneral = async () => {
     const nextEmail = String(settings.email || "").trim();
     const previousEmail = String(savedGeneralEmailRef.current || "").trim();
-    const shouldSyncMailIdentity = nextEmail && nextEmail !== previousEmail;
-    const nextSmtpUser =
-      shouldSyncMailIdentity &&
-      (!String(settings.smtpUser || "").trim() || String(settings.smtpUser || "").trim() === previousEmail)
-        ? nextEmail
-        : settings.smtpUser || "";
-    const nextMailFrom =
-      shouldSyncMailIdentity &&
-      (!String(settings.mailFrom || "").trim() || String(settings.mailFrom || "").trim() === previousEmail)
-        ? nextEmail
-        : settings.mailFrom || "";
 
     const payload = {
       companyName: settings.companyName || "",
@@ -413,12 +402,12 @@ export default function SystemSettings() {
       address: settings.address || "",
       phone: settings.phone || "",
       email: nextEmail,
-      smtpHost: settings.smtpHost || "",
-      smtpPort: Number(settings.smtpPort || 587),
-      smtpUser: nextSmtpUser,
+      smtpHost: String(settings.smtpHost || "").trim() || "smtp.gmail.com",
+      smtpPort: Number(settings.smtpPort) || 587,
+      smtpUser: nextEmail,
       smtpPass: settings.smtpPass || "",
-      smtpSecure: !!settings.smtpSecure,
-      mailFrom: nextMailFrom,
+      smtpSecure: false,
+      mailFrom: nextEmail,
       defaultCurrency: settings.defaultCurrency || "",
       logoUrl: settings.logoUrl || "",
     };
@@ -428,8 +417,11 @@ export default function SystemSettings() {
     setSettings((prev) => ({
       ...prev,
       email: nextEmail,
-      smtpUser: nextSmtpUser,
-      mailFrom: nextMailFrom,
+      smtpHost: payload.smtpHost,
+      smtpPort: payload.smtpPort,
+      smtpUser: nextEmail,
+      smtpSecure: false,
+      mailFrom: nextEmail,
     }));
     savedGeneralEmailRef.current = nextEmail;
 
@@ -1283,8 +1275,9 @@ export default function SystemSettings() {
                           handleChange("smtpHost", "smtp.gmail.com");
                           handleChange("smtpPort", 587);
                           handleChange("smtpUser", settings.email || "");
+                          handleChange("mailFrom", settings.email || "");
                           handleChange("smtpSecure", false);
-                          toast.success("Gmail SMTP settings applied. Enter your App Password below.");
+                          toast.success("Gmail SMTP applied. Enter your App Password below.");
                         }}
                         className="text-xs text-emerald-700 font-medium border border-emerald-300 rounded-lg px-2.5 py-1 bg-white hover:bg-emerald-100"
                       >
@@ -1293,31 +1286,16 @@ export default function SystemSettings() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-600 mb-1">SMTP Host</label>
+                        <label className="block text-xs text-gray-600 mb-1">Email (auto)</label>
                         <input
-                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                          value={settings.smtpHost || ""}
-                          onChange={(e) => handleChange("smtpHost", e.target.value)}
-                          placeholder="smtp.gmail.com"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-600 mb-1">Port</label>
-                        <input
-                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                          value={settings.smtpPort || 587}
-                          onChange={(e) => handleChange("smtpPort", Number(e.target.value) || 587)}
-                          placeholder="587"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-600 mb-1">SMTP User</label>
-                        <input
-                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                          value={settings.smtpUser || ""}
-                          onChange={(e) => handleChange("smtpUser", e.target.value)}
+                          className="w-full rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-gray-500"
+                          value={settings.email || ""}
+                          readOnly
                           placeholder="your-email@gmail.com"
                         />
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          Uses the email above. Host smtp.gmail.com, port 587.
+                        </p>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-600 mb-1">App Password</label>
@@ -1330,15 +1308,6 @@ export default function SystemSettings() {
                         />
                       </div>
                     </div>
-                    <label className="flex items-center gap-2 text-xs text-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={!!settings.smtpSecure}
-                        onChange={(e) => handleChange("smtpSecure", e.target.checked)}
-                        className="rounded"
-                      />
-                      Use SSL (port 465)
-                    </label>
                     <p className="text-[11px] text-gray-500 leading-relaxed">
                       For Gmail: go to <span className="font-medium">myaccount.google.com → Security → App passwords</span>, generate a 16-character password and paste it here. Host will be <span className="font-medium">smtp.gmail.com</span>, port <span className="font-medium">587</span>.
                     </p>

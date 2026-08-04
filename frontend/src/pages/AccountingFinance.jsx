@@ -6900,6 +6900,7 @@ export default function AccountingFinance() {
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
+                  data-tour="daybook-save"
                   onClick={() => saveVoucher({ andNew: false, autoPrint: false })}
                   disabled={loading}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"

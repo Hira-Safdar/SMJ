@@ -3009,7 +3009,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
           </div>
         )}
         {activeTab === "acc-reports" ? (
-          <div className="space-y-4">
+          <div className="space-y-4" data-tour="acc-reports">
             <div className="space-y-3">
               <div className="text-sm font-semibold text-gray-900">Generated Journals</div>
               <div className="rounded-xl border border-gray-200 overflow-x-auto">
