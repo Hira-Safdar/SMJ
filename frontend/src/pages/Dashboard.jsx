@@ -230,7 +230,7 @@ export default function Dashboard() {
       </div>
 
       {/* Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div data-tour="dashboard-kpis" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {cards.map((c, i) => (
           <div
             key={i}
@@ -317,7 +317,7 @@ export default function Dashboard() {
 
       {/* Recent Activities + Graph */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-white rounded-lg shadow-sm p-4">
+        <div data-tour="dashboard-activities" className="lg:col-span-2 bg-white rounded-lg shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-lg font-semibold text-emerald-700">
               Recent Activities
@@ -379,7 +379,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="lg:col-span-1 bg-white rounded-lg shadow-sm p-4">
+        <div data-tour="dashboard-stock-summary" className="lg:col-span-1 bg-white rounded-lg shadow-sm p-4">
           <h4 className="font-semibold text-emerald-700 mb-4">Stock Summary</h4>
           <div className="grid grid-cols-1 gap-4">
             {renderStockCard("Raw Inventory", rawDonut, stockSummary.rawKg, RAW_COLORS)}

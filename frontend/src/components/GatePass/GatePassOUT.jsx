@@ -1914,7 +1914,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         </div>
 
         {/* Payment (UI only) */}
-        <div className="border-t pt-4">
+        <div className="border-t pt-4" data-tour="gatepass-out-payment">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
             Payment Status
           </h3>
@@ -2020,6 +2020,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         </div>
       </form>
 
+      <div data-tour="gatepass-out-records">
       <GatePassFilter
         rows={rows}
         senderKeys={["customer"]}
@@ -2041,18 +2042,8 @@ export default function GatePassOUT({ highlightId = "" }) {
         exportColumns={exportColumns}
         exportData={exportData}
         reportContextLines={reportLines}
-        deleteAll={{
-          description: "This will permanently delete ALL Gate Pass OUT records from the database.",
-          onConfirm: async () => {
-            const outRows = rows || [];
-            await Promise.all(outRows.map((row) => api.delete(`/gatepasses/${row._id}`)));
-            const deleted = outRows.length;
-            toast.success(`Deleted ${deleted} Gate Pass OUT records`);
-            fetchRows();
-            window.dispatchEvent(new Event("stock:refresh"));
-          },
-        }}
       />
+      </div>
     </div>
   );
 }

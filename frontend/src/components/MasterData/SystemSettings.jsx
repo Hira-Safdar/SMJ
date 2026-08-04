@@ -1224,6 +1224,7 @@ export default function SystemSettings() {
       <div className="p-4 rounded-lg">
         {/* GENERAL TAB */}
         {activeTab === "general" && (
+          <div data-tour="settings-general">
           <div className="space-y-4">
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
               <div ref={pinSectionRef} className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
@@ -1410,11 +1411,12 @@ export default function SystemSettings() {
               </button>
             </div>
           </div>
+          </div>
         )}
 
         {/* STOCK & ADMIN TAB */}
         {activeTab === "stock" && (
-          <div className="space-y-4 w-full max-w-none">
+          <div className="space-y-4 w-full max-w-none" data-tour="settings-admin">
             <div className="grid grid-cols-1 gap-4">
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
                 <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700">Master PIN (4 digits)</label>
@@ -1864,7 +1866,7 @@ export default function SystemSettings() {
 
        {/* ABOUT TAB */}
        {activeTab === "about" && (
-         <div className="space-y-6">
+         <div className="space-y-6" data-tour="settings-about">
            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
              <div className="flex items-center gap-3 mb-4">
                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">

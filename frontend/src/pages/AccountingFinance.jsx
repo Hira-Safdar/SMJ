@@ -5083,7 +5083,7 @@ export default function AccountingFinance() {
       )}
 
       {activeTab === "journal-report" && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-tour="journal-report">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -5509,7 +5509,7 @@ export default function AccountingFinance() {
         </div>
       )}
       {activeTab === "ledger" && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-tour="ledger">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -5836,7 +5836,7 @@ export default function AccountingFinance() {
       )}
 
       {activeTab === "trial" && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-tour="trial">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -6066,7 +6066,7 @@ export default function AccountingFinance() {
       )}
 
       {activeTab === "pl" && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-tour="pl">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -6268,7 +6268,7 @@ export default function AccountingFinance() {
       )}
 
       {activeTab === "balance" && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-tour="balance">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-2 min-w-0">
@@ -6527,7 +6527,7 @@ export default function AccountingFinance() {
               onSelectionChange={setSelectedAccounts}
               selectionResetSignal={clearSelectionSignal}
               toolbarActions={
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2" data-tour="coa-toolbar">
                   <button
                     type="button"
                     onClick={openSubTypeDialog}
@@ -6719,7 +6719,7 @@ export default function AccountingFinance() {
               </div>
             )}
 
-            <div className="space-y-4">
+            <div className="space-y-4" data-tour="daybook-form">
               {(entries || []).slice(0, 1).map((e) => {
                 const v = submitAttempted ? validation.errorsByEntry.get(e.entryId) : null;
                 const fieldErr = v?.fields || {};

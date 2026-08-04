@@ -3343,7 +3343,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                   loading ? (
                     <div className="text-sm text-gray-500">Loading stock reports...</div>
                   ) : (
-                    <div className="space-y-6">
+                    <div className="space-y-6" data-tour="stock-reports">
                       <DataTable
                         title="Stock Snapshot"
                         columns={stockColumns}
@@ -3377,7 +3377,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                     </div>
                   )
                 ) : activeTab === "gatepass" ? (
-                  <div className="space-y-4">
+                  <div className="space-y-4" data-tour="gatepass-reports">
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                       <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
                         <div className="flex items-center gap-2">
@@ -3744,6 +3744,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                 ) : (
                   <DataTable
                     title={title}
+                    data-tour="report-data-table"
                     columns={columns}
                     data={rows}
                     idKey="id"

@@ -2090,6 +2090,7 @@ export default function GatePassIN({ highlightId = "" }) {
         </div>
       </form>
 
+      <div data-tour="gatepass-in-records">
       <GatePassFilter
         rows={rows}
         senderKeys={["supplier", "senderName"]}
@@ -2111,20 +2112,8 @@ export default function GatePassIN({ highlightId = "" }) {
         exportColumns={exportColumns}
         exportData={exportData}
         reportContextLines={reportLines}
-        deleteAll={{
-          description: "This will permanently delete ALL Gate Pass IN records from the database.",
-          onConfirm: async (adminPin) => {
-            const res = await api.post("/admin/purge", {
-              adminPin,
-              key: "gatePasses",
-              filter: { type: "IN" },
-            });
-            const deleted = res?.data?.data?.deletedCount ?? 0;
-            toast.success(`Deleted ${deleted} Gate Pass IN records`);
-            fetchRows();
-          },
-        }}
       />
+      </div>
 
       <AddOptionModal
         open={brandModal.open}

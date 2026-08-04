@@ -250,7 +250,7 @@ export default function Stock() {
   return (
     <div className="space-y-6 w-full">
       {/* SUB-TABS (gatepass-style) */}
-      <div className="border-b border-emerald-200">
+      <div className="border-b border-emerald-200" data-tour="stock-tabs">
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => {
             const isActive = activeTab === t.value;
@@ -274,7 +274,7 @@ export default function Stock() {
       </div>
 
       {/* TOOLBAR */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-tour="stock-filters">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
             <Filter size={14} />

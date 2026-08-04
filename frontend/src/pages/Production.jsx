@@ -713,7 +713,7 @@ export default function Production() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
         {/* LEFT: groups + batches */}
         <div className="bg-white rounded-xl shadow border flex flex-col min-h-[500px]">
-          <div className="p-3 border-b flex items-center justify-between gap-2 flex-wrap">
+          <div className="p-3 border-b flex items-center justify-between gap-2 flex-wrap" data-tour="production-tabs">
             <div className="text-sm font-semibold text-gray-700">Paddy Sources / Batches</div>
             <div className="flex gap-3 text-xs">
               {[
@@ -737,7 +737,7 @@ export default function Production() {
           </div>
 
           {/* Quick create: Date first, then paddy resource */}
-          <div className="p-3 border-b bg-gray-50 grid grid-cols-12 gap-2 text-xs items-end">
+          <div className="p-3 border-b bg-gray-50 grid grid-cols-12 gap-2 text-xs items-end" data-tour="production-create-batch">
             <div className="col-span-3">
               <label className="block text-[10px] text-gray-500 mb-0.5">Date</label>
               <input
@@ -1035,7 +1035,7 @@ export default function Production() {
               </div>
 
               {/* Products */}
-              <div>
+              <div data-tour="production-output">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-sm font-semibold text-gray-700">Products</div>
                   {selectedGroup.status === "READY" && (

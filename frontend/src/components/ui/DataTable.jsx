@@ -358,14 +358,7 @@ export default function DataTable({
   const showBulkDeleteOnRight = hasBulkDelete && bulkDeleteAlign === "right";
   const showBulkDeleteOnLeft = hasBulkDelete && !showBulkDeleteOnRight;
 
-  const showToolbar =
-    showSearch ||
-    showFilters ||
-    showExport ||
-    showPrint ||
-    toolbarActions ||
-    hasBulkDelete ||
-    (deleteAll && typeof deleteAll.onConfirm === "function");
+  const showToolbar = showSearch || showFilters || toolbarActions || hasBulkDelete;
 
   return (
     <div className="space-y-3">
@@ -376,11 +369,43 @@ export default function DataTable({
             <div className="text-xs text-gray-500">Records: {filteredData.length}</div>
           )}
         </div>
-        {hasActiveFilters && (
-          <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-            Filters Applied
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {hasActiveFilters && (
+            <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Filters Applied
+            </div>
+          )}
+          {showExport && (
+            <>
+              <button
+                type="button"
+                onClick={exportExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                title="Export Excel (Ctrl+Shift+E)"
+              >
+                <Download size={16} /> Export Excel
+              </button>
+              <button
+                type="button"
+                onClick={exportPdf}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                title="Export PDF"
+              >
+                <FileText size={16} /> Export PDF
+              </button>
+            </>
+          )}
+          {showPrint && (
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              title="Print (Ctrl+P)"
+            >
+              <Printer size={16} /> Print
+            </button>
+          )}
+        </div>
       </div>
       {/* Toolbar: search, filters, export, print */}
       {showToolbar && (
@@ -440,7 +465,7 @@ export default function DataTable({
               <X size={16} /> Clear
             </button>
           )}
-          {(showExport || showPrint || toolbarActions || showBulkDeleteOnRight || (deleteAll && typeof deleteAll.onConfirm === "function")) && (
+          {(toolbarActions || showBulkDeleteOnRight) && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               {toolbarActions}
               {showBulkDeleteOnRight && (
@@ -460,48 +485,6 @@ export default function DataTable({
                   title="Delete selected records"
                 >
                   <Trash2 size={16} /> {bulkDelete?.label || "Delete Selected"} ({selectedRows.length})
-                </button>
-              )}
-              {deleteAll && typeof deleteAll.onConfirm === "function" && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDeleteAllDialog({ open: true, pin: "", pinError: "", confirming: false, mode: "all" })
-                  }
-                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 text-sm text-red-700 hover:bg-red-50"
-                  title="Delete all records"
-                >
-                  <Trash2 size={16} /> Delete All
-                </button>
-              )}
-              {showExport && (
-                <>
-                  <button
-                    type="button"
-                    onClick={exportExcel}
-                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                    title="Export Excel (Ctrl+Shift+E)"
-                  >
-                    <Download size={16} /> Export Excel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={exportPdf}
-                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                    title="Export PDF"
-                  >
-                    <FileText size={16} /> Export PDF
-                  </button>
-                </>
-              )}
-              {showPrint && (
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                  title="Print (Ctrl+P)"
-                >
-                  <Printer size={16} /> Print
                 </button>
               )}
             </div>
