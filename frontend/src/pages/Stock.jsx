@@ -322,8 +322,9 @@ export default function Stock() {
       {/* TABLE + DONUT */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-8 bg-white rounded-lg shadow p-4">
-          <DataTable
-            title={activeTab === "RAW" ? "Raw Inventory" : "Production Inventory"}
+           <DataTable
+             data-tour="stock-table"
+             title={activeTab === "RAW" ? "Raw Inventory" : "Production Inventory"}
             columns={pivotColumns}
             data={loading ? [] : visibleTableData}
             idKey="__rowId"

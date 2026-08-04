@@ -150,7 +150,7 @@ export default function Sidebar({
             </div>
 
             {/* MENU */}
-            <nav className="px-2 py-4 space-y-1 overflow-y-auto no-scrollbar flex-1 min-h-0 scroll-smooth">
+            <nav data-tour="sidebar" className="px-2 py-4 space-y-1 overflow-y-auto no-scrollbar flex-1 min-h-0 scroll-smooth">
               {MENU.map((m) => {
                 const currentRoute = location.pathname + location.search;
                 const childCount = Array.isArray(m.children) ? m.children.length : 0;

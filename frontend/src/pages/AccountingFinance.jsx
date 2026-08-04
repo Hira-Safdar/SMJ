@@ -6472,6 +6472,7 @@ export default function AccountingFinance() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <DataTable
+              data-tour="coa-table"
               title="Chart of Accounts"
               columns={[
                 { key: "name", label: "Account Name" },
@@ -6709,7 +6710,7 @@ export default function AccountingFinance() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-gray-900">Daybook Entries</div>
+              <div data-tour="daybook" className="text-sm font-semibold text-gray-900">Daybook Entries</div>
             </div>
 
             {editingVoucherNo && (

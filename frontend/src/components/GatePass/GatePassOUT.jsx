@@ -132,7 +132,6 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Validation regex
   const nameRegex = /^[A-Za-z\s]+$/;
-  const truckRegex = /^[A-Z]{4}-\d{4}$/;
   const contactRegex = /^03\d{2}-\d{7}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -166,8 +165,6 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   // Validation functions
   const validateTruckNo = (v) => {
-    if (!v) return "";
-    if (!/^[A-Z]{2,4}-\d{3,4}$/.test(String(v || "").trim())) return "Format: ABC-123 or ABCD-1234";
     return "";
   };
 
@@ -1681,9 +1678,10 @@ export default function GatePassOUT({ highlightId = "" }) {
       </AddOptionModal>
 
       {/* Form */}
-      <form
-        id="gatepass-out-form"
-        onSubmit={handleSubmit}
+<form
+  id="gatepass-out-form"
+  data-tour="gatepass-out"
+  onSubmit={handleSubmit}
         className="bg-white rounded-xl shadow p-4 space-y-4"
       >
         <h2 className="text-lg font-semibold text-emerald-700">
@@ -1745,9 +1743,10 @@ export default function GatePassOUT({ highlightId = "" }) {
                     <button
                       type="button"
                       onClick={() => removeRow(idx)}
-                      className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
+                      className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                      title="Remove product"
                     >
-                      Remove
+                      <X size={14} />
                     </button>
                   )}
                 </div>

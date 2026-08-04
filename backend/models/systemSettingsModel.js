@@ -64,7 +64,7 @@ const systemSettingsSchema = new mongoose.Schema(
     otpExpiresAt: { type: Date, default: null },
     // Account login (basic)
     loginUsername: { type: String, default: "" },
-    loginPassword: { type: String, default: "" },
+    loginPassword: { type: String, default: "0000" },
     // Stock status thresholds (kg): 0 = out of stock; <= extremeLow = Extreme Low; <= low = Low; > low = Okay.
     stockStatusExtremeLowKg: { type: Number, default: 300, min: 0 },
     stockStatusLowKg: { type: Number, default: 500, min: 0 },

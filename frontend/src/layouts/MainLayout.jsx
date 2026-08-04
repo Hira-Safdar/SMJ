@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast, Toaster } from "react-hot-toast";
 import { Building2, CheckCircle2, Leaf, LockKeyhole, Mail, ShieldCheck, Sprout, Wheat } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import GuidedTour from "../components/GuidedTour";
 import api from "../services/api";
 import Pin4Input from "../components/Pin4Input";
 
@@ -474,6 +475,7 @@ export default function MainLayout({ children }) {
   return (
     <div className="min-h-screen bg-gray-50 overflow-hidden">
       <Toaster position="top-center" />
+      <GuidedTour />
       {!authLocked && (
         <>
       {/* Sidebar */}
@@ -753,7 +755,23 @@ export default function MainLayout({ children }) {
 
             {forgotDialog.error && (
               <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {forgotDialog.error}
+                {forgotDialog.error.includes("Email provider not configured") ? (
+                  <div className="space-y-1">
+                    <p>Email is not configured for sending OTPs.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetForgotDialog();
+                        navigate("/masterdata?tab=system");
+                      }}
+                      className="font-semibold underline hover:text-rose-900"
+                    >
+                      Configure SMTP Settings →
+                    </button>
+                  </div>
+                ) : (
+                  forgotDialog.error
+                )}
               </div>
             )}
 

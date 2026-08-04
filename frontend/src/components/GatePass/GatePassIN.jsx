@@ -84,7 +84,6 @@ export default function GatePassIN({ highlightId = "" }) {
   // Validation regex
   const nameRegex = /^[A-Za-z\s]+$/;
   const companyNameRegex = /^[A-Za-z0-9\s.,&()\-]+$/;
-  const truckRegex = /^[A-Z]{2,4}-\d{3,4}$/;
   const contactRegex = /^03\d{2}-\d{7}$/; // 03XX-XXXXXXX
 
   const setFieldError = (field, msg) =>
@@ -117,10 +116,7 @@ export default function GatePassIN({ highlightId = "" }) {
 
   // Validation functions
   const validateTruckNo = (v) => {
-    if (!v) return "Truck number is required.";
-    if (v.length < 6) return "Truck number too short.";
-    if (v.length > 12) return "Truck number too long.";
-    if (!truckRegex.test(v)) return "Format: ABC-123 or AB-1234";
+    if (!v || !v.trim()) return "Truck number is required.";
     return "";
   };
 
@@ -1782,9 +1778,10 @@ export default function GatePassIN({ highlightId = "" }) {
 
 
       {/* Form */}
-      <form
-        id="gatepass-in-form"
-        onSubmit={handleSubmit}
+<form
+  id="gatepass-in-form"
+  data-tour="gatepass-in"
+  onSubmit={handleSubmit}
         className="bg-white rounded-xl shadow p-4 space-y-4"
       >
         <h2 className="text-lg font-semibold text-emerald-700">
@@ -1851,9 +1848,10 @@ export default function GatePassIN({ highlightId = "" }) {
                     <button
                       type="button"
                       onClick={() => setItems((prev) => prev.filter((_x, i) => i !== idx))}
-                      className="px-3 py-1 rounded-lg border border-rose-200 text-rose-700 text-xs hover:bg-rose-50"
+                      className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                      title="Remove product"
                     >
-                      <Trash2 size={14} />
+                      <X size={14} />
                     </button>
                   )}
                 </div>

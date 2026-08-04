@@ -2987,7 +2987,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
 
       <div className="bg-white rounded-lg shadow-sm p-4">
         {!embedded && visibleTabs.length > 0 && (
-          <div className="mb-4 flex flex-wrap gap-2 border-b border-gray-200 pb-4">
+           <div data-tour="report-tabs" className="mb-4 flex flex-wrap gap-2 border-b border-gray-200 pb-4">
             {visibleTabs.map((tab) => (
               <button
                 key={tab.key}

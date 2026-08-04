@@ -531,7 +531,6 @@ exports.saveSettings = async (req, res) => {
     delete payload.newAdminPin;
 
     const needsPin =
-      payload.additionalStockSettingsEnabled !== undefined ||
       payload.stockStatusExtremeLowKg !== undefined ||
       payload.stockStatusLowKg !== undefined ||
       newAdminPin !== null;
@@ -587,13 +586,21 @@ exports.uploadLogo = async (req, res) => {
     const uploadsDir = path.join(__dirname, "../uploads");
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
-    const savedPath = req.file.path;
     const host = req.get("host");
     const protocol = req.protocol;
     const publicUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
 
-    const all = await SystemSettings.find({}).sort({ createdAt: 1 }).select("_id");
+    const all = await SystemSettings.find({}).sort({ createdAt: 1 }).select("_id logoUrl");
     const primary = all[0] || null;
+
+    if (primary && primary.logoUrl) {
+      const oldFilename = primary.logoUrl.split("/uploads/").pop();
+      if (oldFilename && oldFilename !== req.file.filename) {
+        const oldPath = path.join(uploadsDir, oldFilename);
+        try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch {}
+      }
+    }
+
     if (all.length > 1) {
       const duplicateIds = all.slice(1).map((d) => d._id);
       await SystemSettings.deleteMany({ _id: { $in: duplicateIds } });

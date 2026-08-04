@@ -28,6 +28,10 @@ import {
   CheckCircle2,
   Filter,
   Mail,
+  X,
+  Info,
+  Home,
+  Sprout,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -95,20 +99,16 @@ export default function SystemSettings() {
     logoUrl: "",
     defaultBagWeightKg: 65,
     adminPin: "0000",
-    additionalStockSettingsEnabled: false,
     loginPassword: "",
     backupAutomationEnabled: false,
     backupScheduleTime: "02:00",
   });
 
   const [activeTab, setActiveTab] = useState("general");
-  const [additionalSettingPinDialog, setAdditionalSettingPinDialog] = useState({
-    open: false,
-    pin: "",
-    newValue: false,
-  });
   const [loading, setLoading] = useState(false);
   const [logoFile, setLogoFile] = useState(null);
+  const [pinInfoDismissed, setPinInfoDismissed] = useState(false);
+  const [showSmtpSection, setShowSmtpSection] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
   const [backupMeta, setBackupMeta] = useState({
     automationEnabled: false,
@@ -139,7 +139,6 @@ export default function SystemSettings() {
   const [showNewPin, setShowNewPin] = useState(false);
   const [showConfirmPin, setShowConfirmPin] = useState(false);
   const [pinError, setPinError] = useState("");
-  const [additionalPinError, setAdditionalPinError] = useState("");
   const [otpDialog, setOtpDialog] = useState({
     open: false,
     sent: false,
@@ -339,12 +338,11 @@ export default function SystemSettings() {
   useEffect(() => {
     const onEsc = () => {
       if (otpDialog.open) resetOtpDialog();
-      if (additionalSettingPinDialog.open) setAdditionalSettingPinDialog({ open: false, pin: "", newValue: false });
       if (emailPasswordDialog.open) setEmailPasswordDialog({ open: false, password: "", saving: false, error: "", email: "" });
     };
     window.addEventListener("smj-esc", onEsc);
     return () => window.removeEventListener("smj-esc", onEsc);
-  }, [otpDialog.open, additionalSettingPinDialog.open, emailPasswordDialog.open, otpResendIn]);
+  }, [otpDialog.open, emailPasswordDialog.open, otpResendIn]);
 
   const handleChange = (k, v) => {
     setSettings((s) => ({ ...s, [k]: v }));
@@ -1173,7 +1171,7 @@ export default function SystemSettings() {
   return (
     <div className="space-y-4">
       {/* Tabs */}
-      <div className="border-b border-emerald-200">
+      <div data-tour="settings-tabs" className="border-b border-emerald-200">
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setActiveTab("general")}
@@ -1208,6 +1206,17 @@ export default function SystemSettings() {
           <DatabaseBackup size={16} />
           Backup & Restore
         </button>
+        <button
+          onClick={() => setActiveTab("about")}
+          className={`flex items-center gap-2 px-4 py-2 text-sm rounded-t-lg border-b-2 transition ${
+            activeTab === "about"
+              ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
+              : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
+          }`}
+        >
+          <Info size={16} />
+          About
+        </button>
       </div>
       </div>
 
@@ -1225,24 +1234,6 @@ export default function SystemSettings() {
                       className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       value={settings.companyName || ""}
                       onChange={(e) => handleChange("companyName", e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700 mb-2">Short Name</label>
-                    <input
-                      className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                      value={settings.shortName || ""}
-                      onChange={(e) => handleChange("shortName", e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700 mb-2">Default Currency</label>
-                    <input
-                      className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                      value={settings.defaultCurrency || ""}
-                      onChange={(e) => handleChange("defaultCurrency", e.target.value)}
                     />
                   </div>
 
@@ -1271,8 +1262,87 @@ export default function SystemSettings() {
                       value={settings.email || ""}
                       onChange={(e) => handleChange("email", e.target.value)}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowSmtpSection((s) => !s)}
+                      className="mt-1.5 text-xs text-emerald-600 hover:underline"
+                    >
+                      {showSmtpSection ? "Hide SMTP settings" : "Configure SMTP for email →"}
+                    </button>
                   </div>
                 </div>
+
+                {showSmtpSection && (
+                  <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">SMTP Settings</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleChange("smtpHost", "smtp.gmail.com");
+                          handleChange("smtpPort", 587);
+                          handleChange("smtpUser", settings.email || "");
+                          handleChange("smtpSecure", false);
+                          toast.success("Gmail SMTP settings applied. Enter your App Password below.");
+                        }}
+                        className="text-xs text-emerald-700 font-medium border border-emerald-300 rounded-lg px-2.5 py-1 bg-white hover:bg-emerald-100"
+                      >
+                        Connect Google Account
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">SMTP Host</label>
+                        <input
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          value={settings.smtpHost || ""}
+                          onChange={(e) => handleChange("smtpHost", e.target.value)}
+                          placeholder="smtp.gmail.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Port</label>
+                        <input
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          value={settings.smtpPort || 587}
+                          onChange={(e) => handleChange("smtpPort", Number(e.target.value) || 587)}
+                          placeholder="587"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">SMTP User</label>
+                        <input
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          value={settings.smtpUser || ""}
+                          onChange={(e) => handleChange("smtpUser", e.target.value)}
+                          placeholder="your-email@gmail.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">App Password</label>
+                        <input
+                          type="password"
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          value={settings.smtpPass || ""}
+                          onChange={(e) => handleChange("smtpPass", e.target.value)}
+                          placeholder="16-character app password"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={!!settings.smtpSecure}
+                        onChange={(e) => handleChange("smtpSecure", e.target.checked)}
+                        className="rounded"
+                      />
+                      Use SSL (port 465)
+                    </label>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      For Gmail: go to <span className="font-medium">myaccount.google.com → Security → App passwords</span>, generate a 16-character password and paste it here. Host will be <span className="font-medium">smtp.gmail.com</span>, port <span className="font-medium">587</span>.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
@@ -1291,25 +1361,40 @@ export default function SystemSettings() {
                   )}
                 </div>
                 <div className="mt-4 space-y-3">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoSelect}
-                    className="w-full text-xs text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-3 file:py-2 file:text-emerald-800 file:font-medium"
-                  />
+                  <div className="flex items-center gap-2">
+                    <label className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-800 cursor-pointer hover:bg-emerald-200 transition-colors">
+                      Choose
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoSelect}
+                        className="sr-only"
+                      />
+                    </label>
+                    {logoFile ? (
+                      <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-700">
+                        <span className="truncate">{logoFile.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setLogoFile(null)}
+                          className="shrink-0 p-0.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                          title="Clear selection"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">No file chosen</span>
+                    )}
+                  </div>
                   <button
                     className="w-full rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white flex items-center justify-center gap-2 hover:bg-emerald-700 disabled:opacity-60"
                     onClick={uploadLogo}
                     type="button"
-                    disabled={loading}
+                    disabled={loading || !logoFile}
                   >
                     <UploadCloud size={15} /> Upload Logo
                   </button>
-                  {logoFile && (
-                    <div className="text-xs text-gray-500">
-                      Selected file: <span className="font-medium text-gray-700">{logoFile.name}</span>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1330,46 +1415,24 @@ export default function SystemSettings() {
         {/* STOCK & ADMIN TAB */}
         {activeTab === "stock" && (
           <div className="space-y-4 w-full max-w-none">
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-4">
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 space-y-4">
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
-                  <div className="text-sm font-semibold text-emerald-900">Protected Options</div>
-                  <p className="mt-1 text-sm text-emerald-800">
-                    Turn on extra stock controls for Production and Stock pages.
-                  </p>
-                  <label className="mt-3 flex items-start gap-3 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={!!(settings.additionalStockSettingsEnabled ?? false)}
-                      onChange={() =>
-                        setAdditionalSettingPinDialog({
-                          open: true,
-                          pin: "",
-                          newValue: !settings.additionalStockSettingsEnabled,
-                        })
-                      }
-                    />
-                    <span>Show additional stock options in Production & Stock pages</span>
-                  </label>
-                </div>
-
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4">
-                  <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Current Status</div>
-                  <div className="mt-2 text-sm font-semibold text-gray-900">
-                    {settings.additionalStockSettingsEnabled ? "Additional settings are enabled" : "Additional settings are disabled"}
-                  </div>
-                  <div className="mt-1 text-sm text-gray-500">
-                    These options stay protected and require the admin PIN when changed.
-                  </div>
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 gap-4">
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
                 <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700">Master PIN (4 digits)</label>
-                <p className="mt-1 text-sm text-gray-500">
-                  The same PIN is used for login and protected stock settings.
-                </p>
+                {!pinInfoDismissed && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+                    <span className="text-xs text-emerald-800 leading-relaxed">
+                      This PIN is used for login, delete confirmations, and all protected actions.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPinInfoDismissed(true)}
+                      className="shrink-0 p-0.5 rounded text-emerald-600 hover:text-red-600 hover:bg-red-50"
+                      title="Dismiss"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
                 <div className="mt-4 grid grid-cols-1 gap-3">
                 <Pin4Input
                   value={currentPin}
@@ -1431,77 +1494,6 @@ export default function SystemSettings() {
                 </div>
               </div>
             </div>
-            {additionalSettingPinDialog.open && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-4 w-full max-w-sm shadow-xl">
-                  <h3 className="text-sm font-semibold text-gray-800 mb-2">Admin PIN required</h3>
-                  <p className="text-xs text-gray-600 mb-3">
-                    Enter admin PIN to {additionalSettingPinDialog.newValue ? "enable" : "disable"} additional stock settings.
-                  </p>
-                  <Pin4Input
-                    value={additionalSettingPinDialog.pin}
-                    onChange={(v) =>
-                      setAdditionalSettingPinDialog((p) => ({
-                        ...p,
-                        pin: v.slice(0, 4),
-                      }))
-                    }
-                    className="mb-4"
-                    error={!!additionalPinError}
-                  />
-                  {additionalPinError && (
-                    <div className="text-xs text-red-600 mb-3">{additionalPinError}</div>
-                  )}
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAdditionalSettingPinDialog({ open: false, pin: "", newValue: false });
-                        setAdditionalPinError("");
-                      }}
-                      className="px-3 py-1.5 rounded border border-gray-300 text-sm"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!additionalSettingPinDialog.pin) return;
-                        setLoading(true);
-                        try {
-                          await api.put("/settings", {
-                            ...settings,
-                            additionalStockSettingsEnabled: additionalSettingPinDialog.newValue,
-                            adminPin: additionalSettingPinDialog.pin,
-                          });
-                          handleChange("additionalStockSettingsEnabled", additionalSettingPinDialog.newValue);
-                          setAdditionalSettingPinDialog({ open: false, pin: "", newValue: false });
-                          setAdditionalPinError("");
-                          toast.success(
-                            additionalSettingPinDialog.newValue
-                              ? "Additional settings enabled"
-                              : "Additional settings disabled"
-                          );
-                        } catch (err) {
-                          if (err.response?.status === 403) {
-                            setAdditionalPinError("PIN is incorrect");
-                            toast.error("PIN is incorrect");
-                          } else {
-                            toast.error("Error updating setting");
-                          }
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      disabled={additionalSettingPinDialog.pin.length !== 4 || loading}
-                      className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm disabled:opacity-50"
-                    >
-                      Confirm
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
             <div className="pt-2 w-full flex justify-end">
               <button
                 onClick={handleSaveStock}
@@ -1866,9 +1858,90 @@ export default function SystemSettings() {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
+           </div>
+         </div>
+       )}
+
+       {/* ABOUT TAB */}
+       {activeTab === "about" && (
+         <div className="space-y-6">
+           <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
+             <div className="flex items-center gap-3 mb-4">
+               <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                 <Sprout size={20} className="text-emerald-700" />
+               </div>
+               <div>
+                 <div className="text-lg font-bold text-gray-900">SMJ Rice Mill</div>
+                 <div className="text-xs text-gray-500">Production & Business Management System</div>
+               </div>
+             </div>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                 <div className="text-xs text-gray-500 uppercase tracking-wide">Version</div>
+                 <div className="font-semibold text-gray-900 mt-1">1.0.0</div>
+               </div>
+               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                 <div className="text-xs text-gray-500 uppercase tracking-wide">License</div>
+                 <div className="font-semibold text-gray-900 mt-1">Proprietary</div>
+               </div>
+               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                 <div className="text-xs text-gray-500 uppercase tracking-wide">Support</div>
+                 <div className="font-semibold text-gray-900 mt-1">info@smjrice.pk</div>
+               </div>
+               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                 <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
+                 <div className="font-semibold text-gray-900 mt-1">7 Active</div>
+               </div>
+             </div>
+           </div>
+
+           <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
+             <div className="text-sm font-semibold text-gray-900 mb-1">Modules & Features</div>
+             <p className="text-xs text-gray-500 mb-4">An overview of what each module can do.</p>
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+               {[
+                 { name: "Dashboard", icon: <Home size={16} />, features: ["Real-time KPIs", "Quick navigation", "Activity summary"] },
+                 { name: "Gate Pass", icon: <Truck size={16} />, features: ["Inward / Outward entries", "Truck & driver info", "Product weight tracking", "Freight charges"] },
+                 { name: "Stock", icon: <Warehouse size={16} />, features: ["Raw & production inventory", "Column sorting", "Filters & search", "Excel / PDF export"] },
+                 { name: "Production", icon: <Factory size={16} />, features: ["Batch creation", "Input / output tracking", "Yield calculation", "Date-wise history"] },
+                 { name: "Accounting", icon: <Calculator size={16} />, features: ["Chart of Accounts", "Daybook entries", "Journal, Ledger, Trial Balance", "Profit & Loss, Balance Sheet"] },
+                 { name: "Reports", icon: <ReceiptText size={16} />, features: ["Gate Pass reports", "Stock reports", "Production summary", "Accounting reports"] },
+               ].map((mod) => (
+                 <div key={mod.name} className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+                   <div className="flex items-center gap-2 mb-2">
+                     <div className="w-6 h-6 rounded bg-emerald-200 flex items-center justify-center text-emerald-800">{mod.icon}</div>
+                     <span className="text-sm font-semibold text-emerald-900">{mod.name}</span>
+                   </div>
+                   <ul className="space-y-1">
+                     {mod.features.map((f) => (
+                       <li key={f} className="text-xs text-gray-600 flex items-start gap-1.5">
+                         <CheckCircle2 size={12} className="text-emerald-500 mt-0.5 shrink-0" />
+                         {f}
+                       </li>
+                     ))}
+                   </ul>
+                 </div>
+               ))}
+             </div>
+           </div>
+
+           <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-sky-50 shadow-sm p-6">
+             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+               <div>
+                 <div className="text-sm font-semibold text-gray-900">Interactive Tutorial</div>
+                 <p className="text-xs text-gray-500 mt-1">Take a guided tour through every module. Learn key features like table sorting, filters, exports, and more.</p>
+               </div>
+               <button
+                 type="button"
+                 onClick={() => window.dispatchEvent(new Event("smj-start-tour"))}
+                 className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+               >
+                 <Sparkles size={16} /> Start Tutorial
+               </button>
+             </div>
+           </div>
+         </div>
+       )}
       </div>
 
       <ConfirmDialog
