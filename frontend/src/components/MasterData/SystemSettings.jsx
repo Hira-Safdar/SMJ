@@ -1883,14 +1883,6 @@ export default function SystemSettings() {
                  <div className="font-semibold text-gray-900 mt-1">1.0.0</div>
                </div>
                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                 <div className="text-xs text-gray-500 uppercase tracking-wide">License</div>
-                 <div className="font-semibold text-gray-900 mt-1">Proprietary</div>
-               </div>
-               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                 <div className="text-xs text-gray-500 uppercase tracking-wide">Support</div>
-                 <div className="font-semibold text-gray-900 mt-1">info@smjrice.pk</div>
-               </div>
-               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
                  <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
                  <div className="font-semibold text-gray-900 mt-1">7 Active</div>
                </div>

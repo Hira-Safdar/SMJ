@@ -27,6 +27,8 @@ import {
 import api from "../services/api";
 import DataTable from "../components/ui/DataTable";
 import Combobox from "../components/ui/Combobox";
+import CoaFilter, { applyCoaFilters, coaFilterSummary } from "../components/Accounting/CoaFilter";
+import { FilterToggleButton } from "../components/ui/CollapsibleFilter";
 import Reports from "./Reports";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -796,6 +798,8 @@ export default function AccountingFinance() {
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [clearSelectionSignal, setClearSelectionSignal] = useState(0);
   const [subTypeDialog, setSubTypeDialog] = useState({ open: false, subType: "", error: "", saving: false });
+  const [coaFilterCriteria, setCoaFilterCriteria] = useState({});
+  const [coaFilterOpen, setCoaFilterOpen] = useState(false);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -851,6 +855,13 @@ export default function AccountingFinance() {
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [accounts]);
+
+  const filteredAccounts = useMemo(
+    () => applyCoaFilters(accounts, coaFilterCriteria),
+    [accounts, coaFilterCriteria]
+  );
+
+  const coaReportLines = useMemo(() => coaFilterSummary(coaFilterCriteria), [coaFilterCriteria]);
 
   const totals = useMemo(() => {
     const totalDebit = round2(entryTotals.reduce((s, t) => s + n0(t.totalDebit), 0));
@@ -6479,7 +6490,6 @@ export default function AccountingFinance() {
                 {
                   key: "type",
                   label: "Type",
-                  filterOptions: ["EXPENSE", "INCOME", "ACCOUNT_PAYABLE"],
                   render: (_v, row) => getManualAccountTypeLabel(row),
                 },
                 {
@@ -6522,12 +6532,21 @@ export default function AccountingFinance() {
                   ),
                 },
               ]}
-              data={accounts}
+              data={filteredAccounts}
               selectable
               onSelectionChange={setSelectedAccounts}
               selectionResetSignal={clearSelectionSignal}
+              showSearch={false}
+              showFilters={false}
+              reportContextLines={coaReportLines}
+              toolbarActionsInHeader
               toolbarActions={
                 <div className="flex flex-wrap gap-2" data-tour="coa-toolbar">
+                  <FilterToggleButton
+                    open={coaFilterOpen}
+                    onToggle={() => setCoaFilterOpen((o) => !o)}
+                    title="Filters"
+                  />
                   <button
                     type="button"
                     onClick={openSubTypeDialog}
@@ -6545,6 +6564,11 @@ export default function AccountingFinance() {
                     <Plus size={16} /> New Account
                   </button>
                 </div>
+              }
+              belowHeader={
+                coaFilterOpen ? (
+                  <CoaFilter rows={accounts} onChange={setCoaFilterCriteria} />
+                ) : null
               }
               showPrint={false}
             />

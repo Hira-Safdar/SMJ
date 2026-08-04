@@ -4,6 +4,7 @@ import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
 import AddOptionModal from "../ui/AddOptionModal";
+import { FilterToggleButton } from "../ui/CollapsibleFilter";
 import GatePassFilter, { applyGatePassFilters, gatePassFilterSummary } from "./GatePassFilter";
 
 const UNITS = ["kg", "ton", "bags", "pcs", "mounds"];
@@ -60,6 +61,7 @@ export default function GatePassIN({ highlightId = "" }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterCriteria, setFilterCriteria] = useState({});
+  const [filterOpen, setFilterOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [brandModal, setBrandModal] = useState(createBrandModalState);
@@ -2091,13 +2093,6 @@ export default function GatePassIN({ highlightId = "" }) {
       </form>
 
       <div data-tour="gatepass-in-records">
-      <GatePassFilter
-        rows={rows}
-        senderKeys={["supplier", "senderName"]}
-        senderLabel="Sender Company"
-        onChange={setFilterCriteria}
-      />
-
       <DataTable
         title="Gate Pass IN"
         columns={tableColumns}
@@ -2109,6 +2104,24 @@ export default function GatePassIN({ highlightId = "" }) {
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
         showSearch={false}
         showFilters={false}
+        toolbarActionsInHeader
+        toolbarActions={
+          <FilterToggleButton
+            open={filterOpen}
+            onToggle={() => setFilterOpen((o) => !o)}
+            title="Filters"
+          />
+        }
+        belowHeader={
+          filterOpen ? (
+            <GatePassFilter
+              rows={rows}
+              senderKeys={["supplier", "senderName"]}
+              senderLabel="Sender Company"
+              onChange={setFilterCriteria}
+            />
+          ) : null
+        }
         exportColumns={exportColumns}
         exportData={exportData}
         reportContextLines={reportLines}

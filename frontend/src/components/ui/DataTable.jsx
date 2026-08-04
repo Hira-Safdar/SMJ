@@ -39,6 +39,8 @@ export default function DataTable({
   enableKeyboard = true,
   onRowAction,
   toolbarActions,
+  toolbarActionsInHeader = false,
+  belowHeader,
   deleteAll,
   bulkDelete,
   bulkDeleteAlign = "left",
@@ -358,7 +360,7 @@ export default function DataTable({
   const showBulkDeleteOnRight = hasBulkDelete && bulkDeleteAlign === "right";
   const showBulkDeleteOnLeft = hasBulkDelete && !showBulkDeleteOnRight;
 
-  const showToolbar = showSearch || showFilters || toolbarActions || hasBulkDelete;
+  const showToolbar = showSearch || showFilters || (toolbarActions && !toolbarActionsInHeader) || hasBulkDelete;
 
   return (
     <div className="space-y-3">
@@ -370,6 +372,9 @@ export default function DataTable({
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {toolbarActionsInHeader && toolbarActions && (
+            <div className="flex flex-wrap gap-2">{toolbarActions}</div>
+          )}
           {hasActiveFilters && (
             <div className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
               Filters Applied
@@ -465,9 +470,9 @@ export default function DataTable({
               <X size={16} /> Clear
             </button>
           )}
-          {(toolbarActions || showBulkDeleteOnRight) && (
+          {((toolbarActions && !toolbarActionsInHeader) || showBulkDeleteOnRight) && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
-              {toolbarActions}
+              {!toolbarActionsInHeader && toolbarActions}
               {showBulkDeleteOnRight && (
                 <button
                   type="button"
@@ -491,6 +496,8 @@ export default function DataTable({
           )}
         </div>
       )}
+
+      {belowHeader}
 
       {deleteAllDialog.open && (
         <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-4">

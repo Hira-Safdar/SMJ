@@ -4,6 +4,7 @@ import { toast } from "react-hot-toast";
 import api from "../../services/api";
 import DataTable from "../ui/DataTable";
 import AddOptionModal from "../ui/AddOptionModal";
+import { FilterToggleButton } from "../ui/CollapsibleFilter";
 import GatePassFilter, { applyGatePassFilters, gatePassFilterSummary } from "./GatePassFilter";
 
 const OTHER_OPTION = "__OTHER__";
@@ -114,6 +115,7 @@ export default function GatePassOUT({ highlightId = "" }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterCriteria, setFilterCriteria] = useState({});
+  const [filterOpen, setFilterOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -2021,13 +2023,6 @@ export default function GatePassOUT({ highlightId = "" }) {
       </form>
 
       <div data-tour="gatepass-out-records">
-      <GatePassFilter
-        rows={rows}
-        senderKeys={["customer"]}
-        senderLabel="Company (Send To)"
-        onChange={setFilterCriteria}
-      />
-
       <DataTable
         title="Gate Pass OUT"
         columns={tableColumns}
@@ -2039,6 +2034,24 @@ export default function GatePassOUT({ highlightId = "" }) {
         emptyMessage={loading ? "Loading..." : "No gate passes found."}
         showSearch={false}
         showFilters={false}
+        toolbarActionsInHeader
+        toolbarActions={
+          <FilterToggleButton
+            open={filterOpen}
+            onToggle={() => setFilterOpen((o) => !o)}
+            title="Filters"
+          />
+        }
+        belowHeader={
+          filterOpen ? (
+            <GatePassFilter
+              rows={rows}
+              senderKeys={["customer"]}
+              senderLabel="Company (Send To)"
+              onChange={setFilterCriteria}
+            />
+          ) : null
+        }
         exportColumns={exportColumns}
         exportData={exportData}
         reportContextLines={reportLines}
