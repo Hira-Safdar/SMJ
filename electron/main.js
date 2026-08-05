@@ -137,13 +137,60 @@ function createWindow() {
     fullLog(`[Window] LOAD FAILED: code=${errorCode}, desc=${errorDescription}`);
   });
 
-  mainWindow.webContents.on("did-finish-load", () => {
-    fullLog("[Window] Page finished loading");
-  });
+  // Capture all network requests the renderer actually makes
+  try {
+    mainWindow.webContents.session.webRequest.onCompleted(
+      { urls: ["*://localhost:*/*", "*://127.0.0.1:*/*"] },
+      (details) => {
+        const h = details.responseHeaders || {};
+        const ct = h["Content-Type"]?.[0] || h["content-type"]?.[0] || "?";
+        fullLog(`[Net] ${details.statusCode} ${details.method} ${details.url} -> ${ct}`);
+      }
+    );
+  } catch (err) {
+    fullLog(`[Net] Failed to attach webRequest logger: ${err.message}`);
+  }
 
   // Log renderer console messages
-  mainWindow.webContents.on("console-message", (event) => {
-    fullLog(`[Renderer] ${event.message}`);
+  mainWindow.webContents.on("console-message", (event, level, message, line, sourceId) => {
+    fullLog(`[Renderer] [${level}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    fullLog("[Window] Page finished loading");
+
+    // Install error capture + report page state now and again after a delay
+    const diag = `
+      (function () {
+        if (!window.__smjDiag) {
+          window.__smjDiag = { errors: [], unhandled: [] };
+          window.addEventListener('error', function (e) {
+            window.__smjDiag.errors.push(String(e.message || e.error || e));
+          });
+          window.addEventListener('unhandledrejection', function (e) {
+            window.__smjDiag.unhandled.push(String(e.reason && e.reason.message ? e.reason.message : e.reason));
+          });
+        }
+        return JSON.stringify({
+          title: document.title,
+          bodyChildren: document.body ? document.body.children.length : -1,
+          hasRoot: !!document.getElementById('root'),
+          rootChildren: document.getElementById('root') ? document.getElementById('root').children.length : -1,
+          htmlLength: document.documentElement.outerHTML.length,
+          url: window.location.href,
+          errors: window.__smjDiag.errors,
+          unhandled: window.__smjDiag.unhandled
+        });
+      })()
+    `;
+    const runDiag = () =>
+      mainWindow.webContents
+        .executeJavaScript(diag)
+        .then((result) => fullLog(`[Window] Page diagnostic: ${result}`))
+        .catch((err) => fullLog(`[Window] Page diagnostic failed: ${err.message}`));
+
+    runDiag();
+    setTimeout(runDiag, 8000);
   });
 
   mainWindow.once("ready-to-show", () => {

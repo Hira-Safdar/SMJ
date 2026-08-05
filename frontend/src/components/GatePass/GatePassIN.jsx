@@ -193,20 +193,20 @@ export default function GatePassIN({ highlightId = "" }) {
   };
 
   // Correct IN formula:
-  // 1. Full bags first: Math.floor(gross / bagWeightEach)
-  // 2. Net = gross - totalWeightOfEmptyBags (directly entered by user)
-  // 3. Leftover weight = gross - (fullBags * bagWeightEach)
+  // 1. Net = Weight at SMJ (gross) − total weight of empty bags
+  // 2. Full bags are counted on NET weight: Math.floor(net / bagWeightEach)
+  // 3. Leftover weight = net − (fullBags * bagWeightEach)
   const computeItemWeights = ({ weightAtSmjKg, emptyBagWeightKg, bagWeightEachKg }) => {
     const gross = Number(weightAtSmjKg || 0);
     const totalEmptyWeight = Number(emptyBagWeightKg || 0);
     const bagW = Number(bagWeightEachKg || 0);
     if (gross <= 0) return { netKg: 0, fullBags: 0, looseKg: 0, bagsDisplay: "" };
-    if (bagW <= 0) {
-      return { netKg: gross, fullBags: 0, looseKg: gross, bagsDisplay: `${fmtNum(gross)}kg` };
-    }
-    const fullBags = Math.floor(gross / bagW);
-    const looseKg = +(gross - fullBags * bagW).toFixed(2);
     const netKg = +Math.max(gross - totalEmptyWeight, 0).toFixed(2);
+    if (bagW <= 0) {
+      return { netKg, fullBags: 0, looseKg: netKg, bagsDisplay: netKg > 0 ? `${fmtNum(netKg)}kg` : "" };
+    }
+    const fullBags = Math.floor(netKg / bagW);
+    const looseKg = +(netKg - fullBags * bagW).toFixed(2);
     const bagsLabel = fullBags > 0 ? `${fullBags} bags` : "";
     const looseLabel = looseKg > 0 ? `${fmtNum(looseKg)}kg` : "";
     const bagsDisplay = [bagsLabel, looseLabel].filter(Boolean).join(" ") || "";
@@ -875,6 +875,8 @@ export default function GatePassIN({ highlightId = "" }) {
       };
       row[field] = cleanDec(value);
     } else if (field === "weightOnArrival") {
+      row[field] = cleanInt(value, 8);
+    } else if (field === "bagsOnArrival") {
       row[field] = cleanInt(value, 8);
     } else if (field === "weightAtSmjKg") {
       row[field] = cleanInt(value, 8);

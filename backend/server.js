@@ -108,6 +108,20 @@ app.use(
         return callback(null, true);
       }
 
+      // Allow any localhost / 127.0.0.1 origin (Electron desktop app uses a
+      // dynamic port, and local dev servers). Browsers only send an Origin
+      // header on CORS (crossorigin) requests, which is why asset fetches
+      // from the packaged app used to be rejected.
+      let originHost = "";
+      try {
+        originHost = new URL(origin).hostname;
+      } catch (_e) {
+        /* ignore malformed origins */
+      }
+      if (originHost === "localhost" || originHost === "127.0.0.1") {
+        return callback(null, true);
+      }
+
       if (/^https:\/\/smj-91v8-[a-z0-9-]+-hira-safdars-projects\.vercel\.app$/i.test(origin)) {
         return callback(null, true);
       }
@@ -289,9 +303,20 @@ server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
     serverLog(`[FATAL] Port ${PORT} is already in use! Another process is occupying it.`);
     console.error(`[FATAL] Port ${PORT} is already in use!`);
+    // Inside Electron we must NOT process.exit(), otherwise the whole app dies.
+    // Let the Electron main process time out its health check and show an error dialog.
+    if (process.versions.electron) {
+      serverLog("[Server] Running inside Electron; keeping process alive for graceful error handling.");
+      return;
+    }
+    process.exit(1);
   } else {
     serverLog(`[FATAL] Server error: ${err.message}`);
     console.error(`[FATAL] Server error: ${err.message}`);
+    if (process.versions.electron) {
+      serverLog("[Server] Running inside Electron; keeping process alive for graceful error handling.");
+      return;
+    }
+    process.exit(1);
   }
-  process.exit(1);
 });
