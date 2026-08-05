@@ -124,6 +124,9 @@ export default function GatePassOUT({ highlightId = "" }) {
   const [openBrandDropdown, setOpenBrandDropdown] = useState(null);
   const [activeBrandIdx, setActiveBrandIdx] = useState(-1);
   const brandOptionRefs = useRef({});
+  const [openCustomerDropdown, setOpenCustomerDropdown] = useState(false);
+  const [activeCustomerIdx, setActiveCustomerIdx] = useState(-1);
+  const customerOptionRefs = useRef({});
 
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({
@@ -724,49 +727,135 @@ export default function GatePassOUT({ highlightId = "" }) {
       .replace(/[^A-Za-z0-9\s.,&()\-]/g, "")
       .replace(/\s+/g, " ");
 
-  const renderCustomerDropdown = () => {
-    const errorMessage = errors.customer;
-    const options = (customerOptions || [])
+  const getFilteredCustomers = (selectedLabel = "") =>
+    (customerOptions || [])
       .map((c) => String(c?.name || "").trim())
       .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
+      .sort((a, b) => a.localeCompare(b))
+      .filter(
+        (name) =>
+          !selectedLabel ||
+          normalizeText(name).includes(normalizeText(selectedLabel))
+      );
 
+  const handleCustomerKeyDown = (e, list) => {
+    if (!openCustomerDropdown) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveCustomerIdx(0);
+        setOpenCustomerDropdown(true);
+      }
+      return;
+    }
+    const count = list.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveCustomerIdx((p) => (count ? (p < 0 ? 0 : (p + 1) % count) : -1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveCustomerIdx((p) => (count ? (p <= 0 ? count - 1 : p - 1) : -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeCustomerIdx >= 0 && list[activeCustomerIdx]) {
+        const name = list[activeCustomerIdx];
+        setForm((prev) => ({
+          ...prev,
+          customer: name,
+          customerInput: name,
+          customerMode: "list",
+        }));
+        clearFieldError("customer");
+        setOpenCustomerDropdown(false);
+      }
+    } else if (e.key === "Escape") {
+      setOpenCustomerDropdown(false);
+    }
+  };
+
+  const renderCustomerDropdown = () => {
+    const errorMessage = errors.customer;
     const inputValue = String(getCustomerDisplayName(form) || "").trim();
-
+    const filteredCustomers = getFilteredCustomers(inputValue);
     return (
-      <div>
-        <input
-          list="gatepass-out-customer-options"
-          value={inputValue}
-          onChange={(e) => {
-            const nextValue = sanitizeCustomerName(e.target.value);
-            setForm((prev) => ({
-              ...prev,
-              customer: nextValue,
-              customerInput: nextValue,
-              customerMode: nextValue ? "input" : "list",
-            }));
-            validateField("customer", nextValue);
-          }}
-          onBlur={async () => {
-            const name = String(getCustomerDisplayName(form) || "").trim();
-            if (!name) return;
-            const savedName = await ensureCustomerOption(name);
-            if (savedName) {
-              setForm((prev) => ({ ...prev, customer: savedName }));
-              clearFieldError("customer");
-            }
-          }}
-          placeholder="Type or select company name"
-          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
-          }`}
-        />
-        <datalist id="gatepass-out-customer-options">
-          {options.map((name, idx) => (
-            <option key={`${name}-${idx}`} value={name} />
-          ))}
-        </datalist>
+      <div className="relative">
+        <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
+            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
+          }`}>
+          <input
+            value={inputValue}
+            onFocus={() => {
+              setActiveCustomerIdx(-1);
+              setOpenCustomerDropdown(true);
+            }}
+            onKeyDown={(e) => handleCustomerKeyDown(e, filteredCustomers)}
+            onChange={(e) => {
+              const nextValue = sanitizeCustomerName(e.target.value);
+              setForm((prev) => ({
+                ...prev,
+                customer: nextValue,
+                customerInput: nextValue,
+                customerMode: nextValue ? "input" : "list",
+              }));
+              validateField("customer", nextValue);
+              setActiveCustomerIdx(-1);
+              setOpenCustomerDropdown(true);
+            }}
+            onBlur={async () => {
+              const name = String(getCustomerDisplayName(form) || "").trim();
+              if (!name) return;
+              const savedName = await ensureCustomerOption(name);
+              if (savedName) {
+                setForm((prev) => ({ ...prev, customer: savedName }));
+                clearFieldError("customer");
+              }
+              setTimeout(() => setOpenCustomerDropdown(false), 120);
+            }}
+            placeholder="Type or select company name"
+            className="flex-1 bg-transparent outline-none"
+          />
+          <ChevronDown size={16} className="text-gray-400" />
+        </div>
+        {openCustomerDropdown ? (
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+            {filteredCustomers.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-gray-400">No matching companies</div>
+            ) : (
+              filteredCustomers.map((name, optionIdx) => {
+                return (
+                  <div
+                    key={`${name}-${optionIdx}`}
+                    className="flex items-center gap-2 border-t border-gray-100 px-3 py-2"
+                  >
+                    <button
+                      type="button"
+                      onMouseDown={() => {
+                        setForm((prev) => ({
+                          ...prev,
+                          customer: name,
+                          customerInput: name,
+                          customerMode: "list",
+                        }));
+                        clearFieldError("customer");
+                        setOpenCustomerDropdown(false);
+                      }}
+                      onMouseEnter={() => setActiveCustomerIdx(optionIdx)}
+                      ref={(el) => {
+                        customerOptionRefs.current[optionIdx] = el;
+                      }}
+                      className={`flex-1 text-left text-sm ${
+                        activeCustomerIdx === optionIdx
+                          ? "text-emerald-700 bg-emerald-50 font-medium"
+                          : "text-gray-700 hover:text-emerald-700"
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -833,6 +922,14 @@ export default function GatePassOUT({ highlightId = "" }) {
       el.scrollIntoView({ block: "nearest" });
     }
   }, [activeBrandIdx]);
+
+  useEffect(() => {
+    if (activeCustomerIdx < 0) return;
+    const el = customerOptionRefs.current?.[activeCustomerIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeCustomerIdx]);
 
   const getFilteredBrands = (selectedLabel = "") =>
     Array.from(
