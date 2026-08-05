@@ -1,6 +1,7 @@
 // backend/controllers/systemSettingsController.js
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const SystemSettings = require("../models/systemSettingsModel");
@@ -816,6 +817,94 @@ exports.clearBackupHistory = async (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message || "Failed to clear backup history." });
+  }
+};
+
+// Lists folder contents so the browser UI can show a native-style folder
+// picker without typing paths. Empty path returns the drive roots (Windows).
+exports.browseBackupFolder = async (req, res) => {
+  try {
+    const requested = String(req.query?.path || "").trim();
+    if (!requested) {
+      const dirs = [];
+      if (process.platform === "win32") {
+        for (let i = 65; i <= 90; i += 1) {
+          const drive = `${String.fromCharCode(i)}:\\`;
+          if (fs.existsSync(drive)) dirs.push(drive);
+        }
+      } else {
+        dirs.push("/");
+      }
+      const home = os.homedir();
+      const quickAccess = [
+        { label: "Desktop", path: path.join(home, "Desktop") },
+        { label: "Documents", path: path.join(home, "Documents") },
+        { label: "Downloads", path: path.join(home, "Downloads") },
+        { label: "Pictures", path: path.join(home, "Pictures") },
+        { label: "Music", path: path.join(home, "Music") },
+        { label: "Videos", path: path.join(home, "Videos") },
+      ].filter((q) => fs.existsSync(q.path));
+      return res.json({
+        success: true,
+        data: { path: "", parent: null, isDriveRoot: true, dirs, quickAccess },
+      });
+    }
+
+    const targetPath = path.resolve(requested);
+    const root = path.parse(targetPath).root;
+    const stats = fs.statSync(targetPath);
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ success: false, message: "Selected path is not a folder." });
+    }
+    const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+    const dirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(targetPath, e.name))
+      .sort((a, b) => a.localeCompare(b));
+
+    let parent = null;
+    if (targetPath !== root) parent = path.dirname(targetPath);
+
+    return res.json({
+      success: true,
+      data: { path: targetPath, parent, isDriveRoot: false, dirs },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: `Could not open this folder. ${err.message || ""}`,
+    });
+  }
+};
+
+exports.createBackupFolder = async (req, res) => {
+  try {
+    const parentPath = String(req.body?.path || "").trim();
+    const name = String(req.body?.name || "").trim();
+    if (!parentPath) {
+      return res.status(400).json({ success: false, message: "Parent folder is required." });
+    }
+    if (!name) {
+      return res.status(400).json({ success: false, message: "Folder name is required." });
+    }
+    if (!/^[A-Za-z0-9 _().\-]+$/.test(name)) {
+      return res.status(400).json({ success: false, message: "Folder name contains invalid characters." });
+    }
+    const targetPath = path.join(path.resolve(parentPath), name);
+    const root = path.parse(targetPath).root;
+    if (targetPath === root) {
+      return res.status(400).json({ success: false, message: "Cannot create a folder at the drive root." });
+    }
+    if (fs.existsSync(targetPath)) {
+      return res.status(400).json({ success: false, message: "A folder with this name already exists." });
+    }
+    fs.mkdirSync(targetPath, { recursive: false });
+    return res.json({ success: true, data: { path: targetPath } });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: `Could not create the folder. ${err.message || ""}`,
+    });
   }
 };
 

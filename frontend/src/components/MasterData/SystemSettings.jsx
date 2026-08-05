@@ -34,6 +34,9 @@ import {
   Play,
   HardDrive,
   FolderOpen,
+  FolderPlus,
+  ArrowUp,
+  Loader2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -181,6 +184,17 @@ export default function SystemSettings() {
     confirmLabel: "OK",
     onConfirm: null,
   });
+  const [folderBrowser, setFolderBrowser] = useState({
+    open: false,
+    path: "",
+    parent: null,
+    dirs: [],
+    quickAccess: [],
+    loading: false,
+    error: "",
+    resolve: null,
+  });
+  const [newFolderName, setNewFolderName] = useState("");
   const restoreLocalFileInputRef = useRef(null);
   const savedGeneralEmailRef = useRef("");
   const pinSectionRef = useRef(null);
@@ -801,6 +815,14 @@ export default function SystemSettings() {
   };
 
   const runFullBackup = async () => {
+    const picked = await chooseBackupFolder();
+    if (picked) {
+      setSettings((prev) => ({ ...prev, backupLocalFolderPath: picked }));
+      await api.put("/settings", {
+        backupStorageMode: "local",
+        backupLocalFolderPath: picked,
+      });
+    }
     updateGlobalProgress({
       scope: "all",
       label: "Preparing full system backup...",
@@ -813,7 +835,9 @@ export default function SystemSettings() {
       const res = await api.post("/settings/backup/run");
       showBackupToast({
         title: "Backup completed",
-        detail: res.data?.message || "Full system backup completed.",
+        detail: res.data?.data?.localPath
+          ? `Saved to: ${res.data.data.localPath}`
+          : res.data?.message || "Full system backup completed.",
         tone: "success",
       });
       await loadBackupModules({ silent: true });
@@ -844,16 +868,90 @@ export default function SystemSettings() {
     }
   };
 
-  const pickBackupFolder = async () => {
-    if (typeof window === "undefined" || !window.electronAPI?.pickBackupFolder) return;
+  const browseFolders = async (path) => {
+    setFolderBrowser((prev) => ({ ...prev, loading: true, error: "" }));
     try {
-      const folder = await window.electronAPI.pickBackupFolder();
-      if (folder) {
-        setSettings((prev) => ({ ...prev, backupLocalFolderPath: folder }));
-        toast.success("Backup folder selected");
+      const res = await api.get("/settings/backup/folder/browse", {
+        params: { path: path || "" },
+      });
+      const data = res.data?.data || {};
+      setFolderBrowser((prev) => ({
+        ...prev,
+        path: data.path || "",
+        parent: data.parent || null,
+        dirs: data.dirs || [],
+        quickAccess: Array.isArray(data.quickAccess) ? data.quickAccess : [],
+        loading: false,
+      }));
+    } catch (err) {
+      setFolderBrowser((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.response?.data?.message || "Could not browse folders.",
+      }));
+    }
+  };
+
+  const openFolderBrowser = () => {
+    setFolderBrowser((prev) => ({ ...prev, open: true }));
+    browseFolders("");
+  };
+
+  const closeFolderBrowser = () => {
+    const resolve = folderBrowser.resolve;
+    setFolderBrowser((prev) => ({ ...prev, open: false, resolve: null }));
+    if (resolve) resolve(null);
+  };
+
+  const confirmFolderSelection = () => {
+    const folder = folderBrowser.path;
+    const resolve = folderBrowser.resolve;
+    if (!folder) return;
+    setFolderBrowser((prev) => ({ ...prev, open: false, resolve: null }));
+    if (resolve) resolve(folder);
+  };
+
+  const createNewBackupFolder = async () => {
+    const parentPath = folderBrowser.path;
+    const name = String(newFolderName || "").trim();
+    if (!parentPath) {
+      setFolderBrowser((prev) => ({ ...prev, error: "Open a folder first, then create a new one inside it." }));
+      return;
+    }
+    if (!name) {
+      setFolderBrowser((prev) => ({ ...prev, error: "Enter a folder name." }));
+      return;
+    }
+    try {
+      await api.post("/settings/backup/folder/create", { path: parentPath, name });
+      setNewFolderName("");
+      await browseFolders(parentPath);
+    } catch (err) {
+      setFolderBrowser((prev) => ({
+        ...prev,
+        error: err?.response?.data?.message || "Could not create the folder.",
+      }));
+    }
+  };
+
+  const chooseBackupFolder = () =>
+    new Promise((resolve) => {
+      if (typeof window !== "undefined" && window.electronAPI?.pickBackupFolder) {
+        window.electronAPI
+          .pickBackupFolder()
+          .then((folder) => resolve(folder || null))
+          .catch(() => resolve(null));
+      } else {
+        setFolderBrowser((prev) => ({ ...prev, resolve }));
+        openFolderBrowser();
       }
-    } catch (_) {
-      toast.error("Could not open the folder picker.");
+    });
+
+  const handleChooseBackupFolder = async () => {
+    const folder = await chooseBackupFolder();
+    if (folder) {
+      setSettings((prev) => ({ ...prev, backupLocalFolderPath: folder }));
+      toast.success("Backup folder selected");
     }
   };
 
@@ -1490,45 +1588,44 @@ export default function SystemSettings() {
                   <label className="block text-xs font-medium text-emerald-800 mb-1">
                     Backup Folder
                   </label>
-                  {typeof window !== "undefined" && window.electronAPI?.pickBackupFolder ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleChooseBackupFolder}
+                        disabled={backupBusy}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        <FolderOpen size={15} /> Choose Folder
+                      </button>
+                      {settings.backupLocalFolderPath ? (
                         <button
                           type="button"
-                          onClick={pickBackupFolder}
-                          disabled={backupBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                          onClick={() => setSettings((prev) => ({ ...prev, backupLocalFolderPath: "" }))}
+                          className="text-xs font-medium text-gray-500 hover:text-rose-600"
                         >
-                          <FolderOpen size={15} /> Choose Folder
+                          Reset to default
                         </button>
-                        {settings.backupLocalFolderPath ? (
-                          <button
-                            type="button"
-                            onClick={() => setSettings((prev) => ({ ...prev, backupLocalFolderPath: "" }))}
-                            className="text-xs font-medium text-gray-500 hover:text-rose-600"
-                          >
-                            Reset to default
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900 break-all">
-                        {settings.backupLocalFolderPath ||
-                          "Default folder (inside the app's backups directory)"}
-                      </div>
-                      <p className="text-[11px] text-gray-400">
-                        Pick the folder from the dialog — no typing needed, so there are no typos.
-                      </p>
+                      ) : null}
                     </div>
-                  ) : (
-                    <input
-                      value={settings.backupLocalFolderPath || ""}
-                      onChange={(e) =>
-                        setSettings((prev) => ({ ...prev, backupLocalFolderPath: e.target.value }))
-                      }
-                      placeholder="Leave empty to use the app's default backups folder"
-                      className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                    />
-                  )}
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900 break-all">
+                      {settings.backupLocalFolderPath ||
+                        "Default folder (inside the app's backups directory)"}
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      Pick the folder from the dialog — no typing needed, so there are no typos.
+                    </p>
+                    {typeof window !== "undefined" && !window.electronAPI?.pickBackupFolder && (
+                      <input
+                        value={settings.backupLocalFolderPath || ""}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, backupLocalFolderPath: e.target.value }))
+                        }
+                        placeholder="Or type a full path (leave empty to use the app's default backups folder)"
+                        className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                      />
+                    )}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -1958,6 +2055,130 @@ export default function SystemSettings() {
                 className="rounded-lg border border-rose-600 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
               >
                 {restoreDialog.busy ? "Restoring..." : "Restore Now"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {folderBrowser.open && (
+        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 border border-emerald-100 flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold text-gray-900">Choose Backup Folder</div>
+              <button
+                type="button"
+                onClick={closeFolderBrowser}
+                className="rounded-lg p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-gray-600">
+              Select the folder where backup files will be saved.
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <div className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 break-all min-h-[38px]">
+                {folderBrowser.path || "My Computer (select a drive)"}
+              </div>
+              {folderBrowser.parent && (
+                <button
+                  type="button"
+                  onClick={() => browseFolders(folderBrowser.parent)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <ArrowUp size={15} /> Up
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 flex-1 min-h-0 overflow-y-auto rounded-lg border border-gray-200">
+              {!folderBrowser.path && folderBrowser.quickAccess?.length > 0 && (
+                <div className="border-b border-gray-100 p-2">
+                  <div className="px-1 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+                    Quick Access
+                  </div>
+                  <div className="space-y-0.5">
+                    {folderBrowser.quickAccess.map((q) => (
+                      <button
+                        key={q.path}
+                        type="button"
+                        onClick={() => browseFolders(q.path)}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-gray-700 hover:bg-emerald-50"
+                      >
+                        <FolderOpen size={14} className="text-amber-500" />
+                        <span className="truncate">{q.label}</span>
+                        <span className="ml-auto text-[11px] text-gray-400 truncate">{q.path}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {folderBrowser.loading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">
+                  <Loader2 size={16} className="animate-spin" /> Loading folders...
+                </div>
+              ) : folderBrowser.dirs.length === 0 && !folderBrowser.path ? (
+                <div className="py-10 text-center text-sm text-gray-400">No drives found.</div>
+              ) : folderBrowser.dirs.length === 0 ? (
+                <div className="py-10 text-center text-sm text-gray-400">No subfolders found.</div>
+              ) : (
+                folderBrowser.dirs.map((d) => {
+                  const isRoot = d.length === 3 && d.endsWith(":\\");
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => browseFolders(d)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-emerald-50"
+                    >
+                      <HardDrive size={15} className={isRoot ? "text-emerald-600" : "text-amber-500"} />
+                      <span className="truncate">{d}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {folderBrowser.error && (
+              <div className="mt-2 text-xs text-rose-600">{folderBrowser.error}</div>
+            )}
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") createNewBackupFolder();
+                }}
+                placeholder="New folder name"
+                className="flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+              />
+              <button
+                type="button"
+                onClick={createNewBackupFolder}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50"
+              >
+                <FolderPlus size={15} /> Create
+              </button>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeFolderBrowser}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmFolderSelection}
+                disabled={!folderBrowser.path}
+                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                Select This Folder
               </button>
             </div>
           </div>

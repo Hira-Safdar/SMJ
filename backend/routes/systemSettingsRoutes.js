@@ -18,6 +18,8 @@ const {
   pauseBackup,
   resumeBackup,
   cancelBackup,
+  browseBackupFolder,
+  createBackupFolder,
   sendEmailOtp,
   verifyEmailOtp,
   resetPinWithOtp,
@@ -70,6 +72,8 @@ router.get("/backup/status", getBackupStatus);
 router.post("/backup/pause", pauseBackup);
 router.post("/backup/resume", resumeBackup);
 router.post("/backup/cancel", cancelBackup);
+router.get("/backup/folder/browse", browseBackupFolder);
+router.post("/backup/folder/create", createBackupFolder);
 
 // Download/export endpoints (kept for compatibility)
 router.get("/backup", exportBackup); // download backup JSON
