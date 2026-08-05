@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import toast from "react-hot-toast";
-import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw } from "lucide-react";
+import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw, Pause, Play } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -47,6 +47,13 @@ export default function Dashboard() {
     production: [],
     raw: [],
   });
+  const [backupStatus, setBackupStatus] = useState({
+    running: false,
+    paused: false,
+    phase: "idle",
+    percent: 0,
+    label: "",
+  });
   // fetch live dashboard data
 
   const fetchDashboardData = async () => {
@@ -82,6 +89,37 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await api.get("/settings/backup/status");
+        const data = res.data?.data || {};
+        setBackupStatus({
+          running: !!data.running,
+          paused: !!data.paused,
+          phase: data.phase || "idle",
+          percent: Math.round(Number(data.percent || 0)),
+          label: data.label || "",
+        });
+      } catch {
+        /* backend down / polling best-effort */
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const handlePauseResume = async () => {
+    try {
+      const action = backupStatus.paused ? "resume" : "pause";
+      await api.post(`/settings/backup/${action}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not update backup progress");
+    }
+  };
+
 
   const cards = [
     {
@@ -215,8 +253,47 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* calendar badge */}
+        {/* backup progress pill + calendar badge */}
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          {backupStatus.running && (
+            <div
+              className="flex items-center gap-3 rounded-lg px-3 py-2 border border-emerald-300 bg-emerald-50 shadow-sm w-full md:w-auto"
+              title={backupStatus.label || "Backup in progress"}
+            >
+              <DatabaseBackup size={16} className="text-emerald-700 shrink-0" />
+              <div className="flex-1 min-w-[120px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wide">
+                    {backupStatus.phase === "restore" ? "Restoring" : "Backup"}
+                  </span>
+                  <span className="text-[11px] font-medium text-emerald-700">
+                    {backupStatus.percent}%
+                    {backupStatus.paused ? " · Paused" : ""}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-emerald-200/70 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      backupStatus.phase === "error"
+                        ? "bg-rose-500"
+                        : backupStatus.phase === "done"
+                        ? "bg-emerald-500"
+                        : "bg-gradient-to-r from-emerald-500 to-sky-500"
+                    }`}
+                    style={{ width: `${backupStatus.percent}%` }}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handlePauseResume}
+                title={backupStatus.paused ? "Resume backup" : "Pause backup"}
+                className="rounded-md border border-emerald-300 bg-white p-1.5 text-emerald-700 hover:bg-emerald-100 shrink-0"
+              >
+                {backupStatus.paused ? <Play size={14} /> : <Pause size={14} />}
+              </button>
+            </div>
+          )}
           <div className="rounded-lg px-4 py-2 bg-gradient-to-r from-emerald-200 to-teal-100 shadow-sm w-full md:w-auto">
             <DatePicker
               selected={date}

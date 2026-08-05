@@ -172,7 +172,7 @@ const getDashboardStats = async (req, res) => {
       ProductionBatch.find({ status: "COMPLETED" })
         .sort({ updatedAt: -1 })
         .limit(RECENT_LIMIT)
-        .select("batchNo paddyWeightKg updatedAt")
+        .select("batchNo paddyWeightKg sourceCompanyName updatedAt")
         .lean(),
       StockLedger.find({
         type: "IN",
@@ -187,18 +187,27 @@ const getDashboardStats = async (req, res) => {
     const activityRows = [];
     recentGatePasses.forEach((gp) => {
       const items = Array.isArray(gp.items) ? gp.items : [];
-      const sumKg = items.reduce(
-        (sum, it) => sum + toKg(Number(it.quantity || 0), it.unit),
+      const totalKg = items.reduce(
+        (sum, it) => sum + toKg(Number(it.quantity || it.netWeightKg || 0), it.unit),
         0
       );
-      const title =
-        gp.type === "IN" ? "Inward Entry - Raw Paddy" : "Outward Entry";
+      const detailParts = [];
+      items.forEach((it) => {
+        const brand = String(it.brand || it.brandName || "").trim();
+        const product = String(it.customItemName || it.itemType || "").trim() || "Item";
+        const kg = toKg(Number(it.quantity || it.netWeightKg || 0), it.unit);
+        const label = brand ? `${brand} ${product}` : product;
+        if (kg > 0) detailParts.push(`${label} ${kg.toFixed(0)} kg`);
+      });
       const party =
         gp.type === "IN" ? gp.supplier || "SMJ Own" : gp.customer || "Customer";
       activityRows.push({
         type: "GATE_PASS",
-        title,
-        meta: `${party} · ${items.length || 0} items · ${sumKg.toFixed(0)} kg`,
+        title: gp.type === "IN" ? "Inward Entry" : "Outward Entry",
+        meta:
+          detailParts.length > 0
+            ? `${party} · ${detailParts.slice(0, 3).join(", ")}${detailParts.length > 3 ? " ..." : ""}`
+            : `${party} · ${items.length || 0} items · ${totalKg.toFixed(0)} kg`,
         amount: gp.totalAmount || 0,
         createdAt: gp.createdAt,
       });
@@ -218,7 +227,7 @@ const getDashboardStats = async (req, res) => {
       activityRows.push({
         type: "PRODUCTION",
         title: "Production Complete",
-        meta: `${b.batchNo} · ${Number(b.paddyWeightKg || 0).toFixed(0)} kg paddy`,
+        meta: `${b.batchNo} · ${b.sourceCompanyName || "-"} · ${Number(b.paddyWeightKg || 0).toFixed(0)} kg paddy`,
         amount: 0,
         createdAt: b.updatedAt,
       });

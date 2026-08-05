@@ -21,6 +21,8 @@ const AccountingFilterTemplate = require("../models/accountingFilterTemplateMode
 const AccountingGeneratedJournal = require("../models/accountingGeneratedJournalModel");
 const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
+const backupService = require("../services/backupService");
+const googleDriveService = require("../services/googleDriveService");
 
 const COLLECTIONS = [
   { key: "customers", model: Customer },
@@ -257,7 +259,19 @@ const dropSettingsDropdownArrays = (settings) => {
   return clone;
 };
 
-const buildBackupPayload = async ({ moduleKey = "", includeMeta = true, includeDropdowns = true } = {}) => {
+// Records the user "deleted" from the frontend are soft-deleted in the database
+// (e.g. accounts set to isActive:false) so that older journal entries keep
+// working. They must NOT be included in backups and must NOT be resurrected by
+// a restore. Collections without these flags are unaffected (missing fields
+// are not equal to false/true).
+const isSoftDeleted = (doc) => {
+  if (!doc || typeof doc !== "object") return false;
+  if (doc.deleted === true) return true;
+  if (doc.isActive === false) return true;
+  return false;
+};
+
+const buildBackupPayload = async ({ moduleKey = "", includeMeta = true, includeDropdowns = true, onProgress = null } = {}) => {
   const now = new Date();
   const selectedModule = moduleKey ? getModuleByKey(moduleKey) : null;
   if (moduleKey && !selectedModule) {
@@ -279,19 +293,29 @@ const buildBackupPayload = async ({ moduleKey = "", includeMeta = true, includeD
   };
 
   if (!selectedModule || selectedModule.collections.includes("settings")) {
+    if (onProgress) onProgress({ percent: 4, label: "Collecting system settings..." });
     const settings = await getSingletonSettings();
     payload.settings = includeDropdowns ? settings : dropSettingsDropdownArrays(settings);
   }
 
   payload.includeDropdowns = !!includeDropdowns;
 
+  const total = targetCollectionKeys.length;
+  let processed = 0;
   for (const collectionKey of targetCollectionKeys) {
     const collection = getCollectionByKey(collectionKey);
     if (!collection) continue;
     try {
-      payload[collection.key] = await collection.model.find({}).lean();
+      payload[collection.key] = (await collection.model.find({}).lean()).filter(
+        (doc) => !isSoftDeleted(doc)
+      );
     } catch (_) {
       payload[collection.key] = [];
+    }
+    processed += 1;
+    if (onProgress) {
+      const percent = 8 + Math.round((processed / Math.max(total, 1)) * 58);
+      onProgress({ percent, label: `Collecting ${collection.key} data... ${percent}%` });
     }
   }
 
@@ -309,41 +333,116 @@ const buildBackupPayload = async ({ moduleKey = "", includeMeta = true, includeD
   return payload;
 };
 
-const restoreCollections = async (data, collectionKeys) => {
+const PROTECTED_SETTINGS_KEYS = new Set([
+  "adminPin",
+  "loginPassword",
+  "otpCodeHash",
+  "otpExpiresAt",
+  "gdriveRefreshToken",
+  "gdriveOAuthState",
+  "gdriveAccountEmail",
+  "gdriveFolderId",
+  "gdriveLastBackupAt",
+  "backupHistory",
+  "backupLastBackupAt",
+  "backupLastRestoreAt",
+  "backupScheduleLastRunAt",
+]);
+
+const mergeSettingsPayload = async (backupSettings) => {
+  const existing = await getSingletonSettings();
+  const target = existing || (await SystemSettings.create({}));
+  if (!backupSettings || typeof backupSettings !== "object" || Array.isArray(backupSettings)) return;
+  const merged = { ...target.toObject() };
+  Object.entries(backupSettings).forEach(([key, value]) => {
+    if (key === "_id" || key === "__v" || PROTECTED_SETTINGS_KEYS.has(key)) return;
+    if (Array.isArray(value)) {
+      const current = Array.isArray(merged[key]) ? merged[key] : [];
+      const seen = new Set(current.map((v) => String(v || "").trim().toLowerCase()));
+      value.forEach((v) => {
+        const norm = String(v || "").trim().toLowerCase();
+        if (norm && !seen.has(norm)) {
+          seen.add(norm);
+          current.push(v);
+        }
+      });
+      merged[key] = current;
+      return;
+    }
+    merged[key] = value;
+  });
+  Object.assign(target, merged);
+  await target.save();
+};
+
+const restoreCollections = async (data, collectionKeys, mode = "replace") => {
+  const isMerge = String(mode || "").trim().toLowerCase() === "merge";
+
   if (collectionKeys.includes("settings")) {
-    await SystemSettings.deleteMany({});
-    if (data.settings) {
-      await SystemSettings.create(data.settings);
+    if (isMerge) {
+      await mergeSettingsPayload(data.settings);
+    } else {
+      await SystemSettings.deleteMany({});
+      if (data.settings) {
+        await SystemSettings.create(data.settings);
+      }
     }
   }
 
   const ordered = collectionKeys.filter((key) => key !== "settings");
 
-  for (const key of [...ordered].reverse()) {
-    const collection = getCollectionByKey(key);
-    if (!collection) continue;
-    try {
-      await collection.model.deleteMany({});
-    } catch (e) {
-      console.error(`restore clear ${collection.key} error:`, e);
+  if (!isMerge) {
+    for (const key of [...ordered].reverse()) {
+      const collection = getCollectionByKey(key);
+      if (!collection) continue;
+      try {
+        await collection.model.deleteMany({});
+      } catch (e) {
+        console.error(`restore clear ${collection.key} error:`, e);
+      }
     }
   }
 
+  const counts = {};
   for (const key of ordered) {
     const collection = getCollectionByKey(key);
     if (!collection) continue;
-    const rows = Array.isArray(data[collection.key]) ? data[collection.key] : [];
+    const rows = (Array.isArray(data[collection.key]) ? data[collection.key] : []).filter(
+      (row) => !isSoftDeleted(row)
+    );
     if (!rows.length) continue;
+
+    let rowsToInsert = rows;
+    let insertedCount = 0;
+    if (isMerge) {
+      const existingDocs = await collection.model.find({}).select("_id").lean();
+      const existingIds = new Set(existingDocs.map((doc) => String(doc._id || "")));
+      rowsToInsert = rows.filter((row) => {
+        const idKey = row?._id != null ? String(row._id) : row?.id != null ? String(row.id) : "";
+        return idKey && !existingIds.has(idKey);
+      });
+    }
+
+    if (!rowsToInsert.length) {
+      counts[key] = 0;
+      continue;
+    }
     try {
-      await collection.model.insertMany(rows, { ordered: false });
+      const inserted = await collection.model.insertMany(rowsToInsert, { ordered: false });
+      insertedCount = Array.isArray(inserted) ? inserted.length : rowsToInsert.length;
     } catch (e) {
       console.error(`restore insert ${collection.key} error:`, e);
+      insertedCount = 0;
     }
+    counts[key] = insertedCount;
   }
 
   return collectionKeys.map((key) => ({
     key,
-    count: key === "settings" ? countSettingsEntries(data.settings) : Array.isArray(data[key]) ? data[key].length : 0,
+    count:
+      key === "settings"
+        ? countSettingsEntries(data.settings)
+        : Number(counts[key] || 0),
   }));
 };
 
@@ -365,7 +464,10 @@ const resolveModuleCollectionStats = async (module) => {
 
     const collection = getCollectionByKey(key);
     if (!collection) continue;
-    const count = await collection.model.countDocuments({});
+    const count = await collection.model.countDocuments({
+      isActive: { $ne: false },
+      deleted: { $ne: true },
+    });
     totalRecords += count;
     const latestRow = await collection.model.findOne({}).sort({ updatedAt: -1, createdAt: -1 }).select("updatedAt createdAt").lean();
     const updatedAt = latestRow?.updatedAt || latestRow?.createdAt || null;
@@ -397,6 +499,7 @@ const appendBackupHistory = async ({
   fileName = "",
   recordCount = 0,
   status = "SUCCESS",
+  message = "",
 }) => {
   const settings = await SystemSettings.findOne({}).sort({ createdAt: 1 });
   const target = settings || (await SystemSettings.create({}));
@@ -410,6 +513,7 @@ const appendBackupHistory = async ({
     fileName,
     recordCount,
     status,
+    message,
     createdAt: new Date(),
   });
   target.backupHistory = history.slice(0, 25);
@@ -447,12 +551,18 @@ const runScheduledBackupIfDue = async () => {
     });
     if (!claim?.modifiedCount) return;
 
-    const payload = await buildBackupPayload();
-    const fileName = `smj-scheduled-backup-${nowParts.dateKey.replace(/-/g, "")}-${scheduleTime.replace(":", "")}.json`;
-    writeBackupSnapshotToDisk({ payload, fileName });
-    const recordCount = countPayloadRecords(payload);
+    // Skip silently if a manual/restore job is already using the engine.
+    if (backupService.getProgress().running) return;
 
-    await SystemSettings.updateOne(
+    const result = await backupService.runFullBackup({
+      trigger: "AUTO",
+      settings,
+      countRecords: countPayloadRecords,
+      buildPayload: () => buildBackupPayload({ includeDropdowns: true }),
+      gdriveService: googleDriveService,
+    });
+
+    await SystemSettings.findOneAndUpdate(
       { _id: settings._id },
       { $set: { backupLastBackupAt: new Date() } }
     );
@@ -461,10 +571,11 @@ const runScheduledBackupIfDue = async () => {
       action: "BACKUP",
       trigger: "AUTO",
       scope: "full",
-      moduleName: "Scheduled Daily Backup",
-      fileName,
-      recordCount,
+      moduleName: "Full System",
+      fileName: result.fileName,
+      recordCount: result.recordCount,
       status: "SUCCESS",
+      message: result.message,
     });
   } catch (err) {
     console.error("scheduled backup error:", err);
@@ -472,10 +583,11 @@ const runScheduledBackupIfDue = async () => {
       action: "BACKUP",
       trigger: "AUTO",
       scope: "full",
-      moduleName: "Scheduled Daily Backup",
+      moduleName: "Full System",
       fileName: "",
       recordCount: 0,
       status: "FAILED",
+      message: String(err?.message || "Scheduled backup failed."),
     }).catch(() => {});
   } finally {
     backupSchedulerBusy = false;
@@ -674,6 +786,18 @@ exports.getBackupModules = async (_req, res) => {
         lastScheduledRunAt: settings?.backupScheduleLastRunAt || null,
         history: Array.isArray(settings?.backupHistory) ? settings.backupHistory : [],
         modules,
+        storageMode: settings?.backupStorageMode || "auto",
+        localFolderPath: settings?.backupLocalFolderPath || "",
+        drive: {
+          configured: Boolean(
+            String(settings?.gdriveClientId || process.env.GDRIVE_CLIENT_ID || "").trim() &&
+              String(settings?.gdriveClientSecret || process.env.GDRIVE_CLIENT_SECRET || "").trim()
+          ),
+          connected: Boolean(String(settings?.gdriveRefreshToken || "").trim()),
+          accountEmail: String(settings?.gdriveAccountEmail || "").trim(),
+          folderId: String(settings?.gdriveFolderId || "").trim(),
+          lastDriveBackupAt: settings?.gdriveLastBackupAt || null,
+        },
       },
     });
   } catch (err) {
@@ -776,7 +900,9 @@ exports.exportModuleBackup = async (req, res) => {
 };
 
 /**
- * Restore backup from JSON file
+ * Restore backup from JSON file. `mode` (query or form field) controls
+ * conflict handling: "replace" wipes current data, "merge" keeps existing
+ * records and only adds backup rows that don't already exist.
  */
 exports.restoreBackup = async (req, res) => {
   let filePath = "";
@@ -791,8 +917,22 @@ exports.restoreBackup = async (req, res) => {
     const data = JSON.parse(raw);
     validateBackupPayload(data);
 
-    const restoredCollections = await restoreCollections(data, ["settings", ...COLLECTIONS.map((c) => c.key)]);
+    const mode =
+      String(req.body?.mode || req.query?.mode || "replace").trim().toLowerCase() === "merge"
+        ? "merge"
+        : "replace";
+
+    backupService.beginRestore({ percent: 5, label: "Uploaded. Restoring data..." });
+    const restoredCollections = await restoreCollections(
+      data,
+      ["settings", ...COLLECTIONS.map((c) => c.key)],
+      mode
+    );
     const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const message =
+      mode === "merge"
+        ? `Backup merged with existing data (${restoredCount} records added).`
+        : `Backup restored successfully (${restoredCount} records).`;
     await SystemSettings.findOneAndUpdate(
       {},
       { $set: { backupLastRestoreAt: new Date() } },
@@ -806,20 +946,243 @@ exports.restoreBackup = async (req, res) => {
       fileName: String(req.file?.originalname || req.file?.filename || "restore.json"),
       recordCount: restoredCount,
       status: "SUCCESS",
+      message,
     });
+    backupService.endRestore({ success: true, message });
 
     cleanupFile(filePath);
 
     res.json({
       success: true,
-      message: "Backup restored successfully",
+      message,
       data: {
         backupVersion: data.backupVersion || null,
+        mode,
         restoredCollections,
       },
     });
   } catch (err) {
+    backupService.endRestore({ success: false, message: err.message });
     cleanupFile(filePath);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Full backup control (progress + pause/resume/cancel) ──────────────
+exports.runFullBackup = async (req, res) => {
+  try {
+    const settings = await getSingletonSettings();
+    const result = await backupService.runFullBackup({
+      trigger: "MANUAL",
+      settings,
+      countRecords: countPayloadRecords,
+      buildPayload: () => buildBackupPayload({ includeDropdowns: true }),
+      gdriveService: googleDriveService,
+    });
+    const set = { backupLastBackupAt: new Date() };
+    if (result.gdrive?.id) set.gdriveLastBackupAt = new Date();
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: set },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "BACKUP",
+      trigger: "MANUAL",
+      scope: "full",
+      moduleName: "Full System",
+      fileName: result.fileName,
+      recordCount: result.recordCount,
+      status: "SUCCESS",
+      message: result.message,
+    });
+    res.json({ success: true, message: result.message, data: result });
+  } catch (err) {
+    await appendBackupHistory({
+      action: "BACKUP",
+      trigger: "MANUAL",
+      scope: "full",
+      moduleName: "Full System",
+      fileName: "",
+      recordCount: 0,
+      status: "FAILED",
+      message: String(err?.message || "Backup failed."),
+    }).catch(() => {});
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.getBackupStatus = (_req, res) => {
+  res.json({ success: true, data: backupService.getProgress() });
+};
+
+exports.pauseBackup = (_req, res) => {
+  try {
+    res.json({ success: true, data: backupService.pauseBackup() });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.resumeBackup = (_req, res) => {
+  try {
+    res.json({ success: true, data: backupService.resumeBackup() });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.cancelBackup = (_req, res) => {
+  try {
+    res.json({ success: true, data: backupService.cancelBackup() });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Google Drive backup endpoints ──────────────────────────────────────
+exports.getGdriveAuthUrl = async (req, res) => {
+  try {
+    const { authUrl, redirectUri } = await googleDriveService.startOAuth(req);
+    res.json({ success: true, data: { authUrl, redirectUri } });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.gdriveCallback = async (req, res) => {
+  const { code, state, error } = req.query || {};
+  if (error) {
+    return res.status(400).send(`Google Drive authorization failed: ${error}`);
+  }
+  if (!code) return res.status(400).send("Missing authorization code.");
+  try {
+    await googleDriveService.exchangeCode({ code, req, expectedState: state });
+    res.setHeader("Content-Type", "text/html");
+    res.send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Connected</title></head>` +
+        `<body style="margin:0;font-family:Arial,sans-serif;text-align:center;padding-top:80px;background:#f4f8f4">` +
+        `<div style="display:inline-block;background:#fff;padding:32px 40px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08)">` +
+        `<div style="font-size:40px">✅</div>` +
+        `<h2 style="color:#065f46;margin:12px 0 6px">Google Drive connected</h2>` +
+        `<p style="color:#4b5563;font-size:14px;margin:0">You can close this tab and return to SMJ.</p>` +
+        `</div></body></html>`
+    );
+  } catch (err) {
+    res.status(400).send(`Connection failed: ${err.message}`);
+  }
+};
+
+exports.connectGdriveWithCode = async (req, res) => {
+  try {
+    const code = String(req.body?.code || "").trim();
+    if (!code) {
+      return res.status(400).json({ success: false, message: "Missing authorization code." });
+    }
+    const result = await googleDriveService.exchangeCode({ code, req });
+    res.json({ success: true, message: "Google Drive connected.", data: result });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.disconnectGdrive = async (_req, res) => {
+  try {
+    const settings = await getSingletonSettings();
+    await googleDriveService.revokeAccess(settings);
+    await SystemSettings.findOneAndUpdate(
+      {},
+      {
+        $set: {
+          gdriveRefreshToken: "",
+          gdriveAccountEmail: "",
+          gdriveFolderId: "",
+          gdriveOAuthState: "",
+        },
+      },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    res.json({ success: true, message: "Google Drive disconnected." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.getGdriveStatus = async (_req, res) => {
+  try {
+    res.json({ success: true, data: await googleDriveService.getStatus() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.listGdriveFiles = async (_req, res) => {
+  try {
+    const files = await googleDriveService.listBackupFiles();
+    res.json({ success: true, data: { files } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.deleteGdriveFile = async (req, res) => {
+  try {
+    const fileId = String(req.body?.fileId || "").trim();
+    if (!fileId) return res.status(400).json({ success: false, message: "Missing file id." });
+    await googleDriveService.deleteBackupFile({ fileId });
+    res.json({ success: true, message: "Backup file deleted from Google Drive." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.restoreFromGdrive = async (req, res) => {
+  try {
+    const fileId = String(req.body?.fileId || "").trim();
+    const fileName = String(req.body?.fileName || "smj-backup-drive.json").trim();
+    const mode =
+      String(req.body?.mode || "replace").trim().toLowerCase() === "merge" ? "merge" : "replace";
+    if (!fileId) return res.status(400).json({ success: false, message: "Missing file id." });
+
+    const settings = await getSingletonSettings();
+    const raw = await googleDriveService.downloadBackupFile({ fileId, settings });
+    const data = JSON.parse(raw);
+    validateBackupPayload(data);
+
+    backupService.beginRestore({ percent: 10, label: "Backup downloaded. Restoring data..." });
+    const restoredCollections = await restoreCollections(
+      data,
+      ["settings", ...COLLECTIONS.map((c) => c.key)],
+      mode
+    );
+    const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const message =
+      mode === "merge"
+        ? `Backup merged with existing data (${restoredCount} records added).`
+        : `Backup restored successfully (${restoredCount} records).`;
+    await SystemSettings.findOneAndUpdate(
+      {},
+      { $set: { backupLastRestoreAt: new Date() } },
+      { new: true, upsert: true, sort: { createdAt: 1 } }
+    );
+    await appendBackupHistory({
+      action: "RESTORE",
+      trigger: "MANUAL",
+      scope: "full",
+      moduleName: "Full System (Google Drive)",
+      fileName,
+      recordCount: restoredCount,
+      status: "SUCCESS",
+      message,
+    });
+    backupService.endRestore({ success: true, message });
+    res.json({
+      success: true,
+      message,
+      data: { mode, restoredCollections, backupVersion: data.backupVersion || null },
+    });
+  } catch (err) {
+    backupService.endRestore({ success: false, message: err.message });
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -841,7 +1204,7 @@ exports.restoreModuleBackup = async (req, res) => {
     const data = JSON.parse(raw);
     validateBackupPayload(data);
 
-    const restoredCollections = await restoreCollections(data, module.collections);
+    const restoredCollections = await restoreCollections(data, module.collections, "replace");
     const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
     await SystemSettings.findOneAndUpdate(
       {},

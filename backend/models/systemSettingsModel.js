@@ -27,6 +27,7 @@ const backupHistoryEntrySchema = new mongoose.Schema(
       enum: ["SUCCESS", "FAILED"],
       default: "SUCCESS",
     },
+    message: { type: String, default: "" },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -81,6 +82,21 @@ const systemSettingsSchema = new mongoose.Schema(
     backupLastRestoreAt: { type: Date, default: null },
     backupScheduleLastRunAt: { type: Date, default: null },
     backupHistory: { type: [backupHistoryEntrySchema], default: [] },
+    // Backup storage
+    backupStorageMode: {
+      type: String,
+      enum: ["auto", "local", "gdrive"],
+      default: "auto",
+    },
+    backupLocalFolderPath: { type: String, default: "" },
+    // Google Drive
+    gdriveClientId: { type: String, default: "" },
+    gdriveClientSecret: { type: String, default: "" },
+    gdriveRefreshToken: { type: String, default: "" },
+    gdriveAccountEmail: { type: String, default: "" },
+    gdriveFolderId: { type: String, default: "" },
+    gdriveLastBackupAt: { type: Date, default: null },
+    gdriveOAuthState: { type: String, default: "" },
     // Accounting migration marker for idempotent historical journal rebuild
     accountingBackfillVersion: { type: Number, default: 0, min: 0 },
     accountingBackfillAt: { type: Date, default: null },

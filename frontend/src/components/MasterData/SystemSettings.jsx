@@ -1,11 +1,9 @@
 // src/components/MasterData/SystemSettings.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api, { toAbsoluteUrl } from "../../services/api";
-import JSZip from "jszip";
 import {
   UploadCloud,
   Save,
-  ArrowDownCircle,
   Eye,
   EyeOff,
   Settings2,
@@ -32,6 +30,12 @@ import {
   Info,
   Home,
   Sprout,
+  Pause,
+  Play,
+  HardDrive,
+  Cloud,
+  FolderOpen,
+  Trash2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -102,6 +106,10 @@ export default function SystemSettings() {
     loginPassword: "",
     backupAutomationEnabled: false,
     backupScheduleTime: "02:00",
+    backupStorageMode: "auto",
+    backupLocalFolderPath: "",
+    gdriveClientId: "",
+    gdriveClientSecret: "",
   });
 
   const [activeTab, setActiveTab] = useState("general");
@@ -109,7 +117,6 @@ export default function SystemSettings() {
   const [logoFile, setLogoFile] = useState(null);
   const [pinInfoDismissed, setPinInfoDismissed] = useState(false);
   const [showSmtpSection, setShowSmtpSection] = useState(false);
-  const [restoreFile, setRestoreFile] = useState(null);
   const [backupMeta, setBackupMeta] = useState({
     automationEnabled: false,
     scheduleTime: "02:00",
@@ -132,6 +139,33 @@ export default function SystemSettings() {
     label: "Backup system is idle.",
     percent: 0,
     phase: "idle",
+    paused: false,
+    running: false,
+  });
+  const [driveStatus, setDriveStatus] = useState({
+    configured: false,
+    connected: false,
+    accountEmail: "",
+    folderId: "",
+    lastDriveBackupAt: null,
+  });
+  const [driveFiles, setDriveFiles] = useState([]);
+  const [driveDialog, setDriveDialog] = useState({
+    open: false,
+    authUrl: "",
+    redirectUri: "",
+    code: "",
+    busy: false,
+    error: "",
+  });
+  const [restoreDialog, setRestoreDialog] = useState({
+    open: false,
+    source: "local",
+    conflict: "replace",
+    driveFile: "",
+    localFile: null,
+    busy: false,
+    error: "",
   });
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -167,12 +201,7 @@ export default function SystemSettings() {
     confirmLabel: "OK",
     onConfirm: null,
   });
-  const [backupChoiceDialog, setBackupChoiceDialog] = useState({
-    open: false,
-    action: "",
-  });
-  const fullRestoreInputRef = useRef(null);
-  const moduleRestoreInputRefs = useRef({});
+  const restoreLocalFileInputRef = useRef(null);
   const savedGeneralEmailRef = useRef("");
   const pinSectionRef = useRef(null);
   const newPinInputRef = useRef(null);
@@ -254,13 +283,15 @@ export default function SystemSettings() {
     );
   };
 
-  const updateGlobalProgress = ({ scope, label, percent, phase }) => {
-    setActiveBackupTask({
-      scope: scope || "",
-      label: label || "Backup system is idle.",
-      percent: Number(percent || 0),
-      phase: phase || "idle",
-    });
+  const updateGlobalProgress = ({ scope, label, percent, phase, paused, running }) => {
+    setActiveBackupTask((prev) => ({
+      scope: scope ?? prev.scope ?? "",
+      label: label ?? prev.label ?? "Backup system is idle.",
+      percent: percent != null ? Number(percent) : prev.percent ?? 0,
+      phase: phase ?? prev.phase ?? "idle",
+      paused: paused != null ? !!paused : prev.paused ?? false,
+      running: running != null ? !!running : prev.running ?? false,
+    }));
   };
 
   const loadBackupModules = async ({ silent = false } = {}) => {
@@ -277,10 +308,19 @@ export default function SystemSettings() {
         history: Array.isArray(data.history) ? data.history : [],
       });
       setBackupModules(Array.isArray(data.modules) ? data.modules : []);
+      setDriveStatus({
+        configured: !!data.drive?.configured,
+        connected: !!data.drive?.connected,
+        accountEmail: data.drive?.accountEmail || "",
+        folderId: data.drive?.folderId || "",
+        lastDriveBackupAt: data.drive?.lastDriveBackupAt || null,
+      });
       setSettings((prev) => ({
         ...prev,
         backupAutomationEnabled: !!data.automationEnabled,
         backupScheduleTime: data.scheduleTime || prev.backupScheduleTime || "02:00",
+        backupStorageMode: data.storageMode || prev.backupStorageMode || "auto",
+        backupLocalFolderPath: data.localFolderPath || prev.backupLocalFolderPath || "",
       }));
     } catch (err) {
       if (!silent) toast.error("Failed to load backup center");
@@ -334,6 +374,52 @@ export default function SystemSettings() {
       window.clearInterval(intervalId);
     };
   }, [settings.backupAutomationEnabled]);
+
+  const lastStatusPhaseRef = useRef("");
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await api.get("/settings/backup/status");
+        const s = res.data?.data || {};
+        const phase = s.phase || "idle";
+        setActiveBackupTask({
+          scope: s.scope || "",
+          label: s.label || "Backup system is idle.",
+          percent: Number(s.percent || 0),
+          phase,
+          paused: !!s.paused,
+          running: !!s.running,
+        });
+        if (cancelled) return;
+        if (phase === "done" && lastStatusPhaseRef.current !== "done") {
+          showBackupToast({
+            title: s.result?.success ? "Backup completed" : "Operation completed",
+            detail: s.result?.message || "Finished.",
+            tone: s.result?.success ? "success" : "default",
+          });
+          loadBackupModules({ silent: true });
+          loadDriveFiles({ silent: true });
+        } else if (phase === "error" && lastStatusPhaseRef.current !== "error") {
+          showBackupToast({
+            title: "Backup failed",
+            detail: s.result?.message || "Backup failed.",
+            tone: "error",
+          });
+          loadBackupModules({ silent: true });
+        }
+        lastStatusPhaseRef.current = phase;
+      } catch (_) {
+        /* ignore transient polling errors */
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     const onEsc = () => {
@@ -640,152 +726,207 @@ export default function SystemSettings() {
     }
   };
 
-  const downloadBackup = async ({ includeDropdowns = true } = {}) => {
-    updateModuleProgress("all", {
-      busy: true,
-      phase: "backup",
-      percent: 5,
-      message: "Preparing full system backup...",
-    });
+  const runFullBackup = async () => {
     updateGlobalProgress({
       scope: "all",
       label: "Preparing full system backup...",
-      percent: 5,
+      percent: 2,
       phase: "backup",
+      running: true,
     });
     showBackupToast({ title: "Backup started", detail: "Full system snapshot is being prepared." });
     try {
-      const res = await api.get("/settings/backup", {
-        params: { includeDropdowns },
-        responseType: "blob",
-        onDownloadProgress: (event) => {
-          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 60;
-          updateModuleProgress("all", {
-            busy: true,
-            phase: "backup",
-            percent,
-            message: `Downloading full backup... ${percent}%`,
-          });
-          updateGlobalProgress({
-            scope: "all",
-            label: `Downloading full backup... ${percent}%`,
-            percent,
-            phase: "backup",
-          });
-        },
+      const res = await api.post("/settings/backup/run");
+      showBackupToast({
+        title: "Backup completed",
+        detail: res.data?.message || "Full system backup completed.",
+        tone: "success",
       });
-      const filename = parseDownloadFilename(
-        res.headers["content-disposition"],
-        `smj-backup-all-${new Date().toISOString().slice(0, 10)}.json`
-      );
-      triggerBlobDownload(res.data, filename);
-      updateModuleProgress("all", {
-        busy: false,
-        phase: "done",
-        percent: 100,
-        message: "Full backup downloaded successfully.",
-      });
-      updateGlobalProgress({
-        scope: "all",
-        label: "Full backup downloaded successfully.",
-        percent: 100,
-        phase: "done",
-      });
-      showBackupToast({ title: "Backup completed", detail: "Full system backup file is ready.", tone: "success" });
       await loadBackupModules({ silent: true });
     } catch (err) {
-      updateModuleProgress("all", {
-        busy: false,
-        phase: "error",
-        percent: 0,
-        message: err?.response?.data?.message || "Full backup failed.",
-      });
       updateGlobalProgress({
         scope: "all",
         label: err?.response?.data?.message || "Full backup failed.",
         percent: 0,
         phase: "error",
       });
-      showBackupToast({ title: "Backup failed", detail: "Full system backup could not be created.", tone: "error" });
-      toast.error("Backup download failed");
+      showBackupToast({
+        title: "Backup failed",
+        detail: err?.response?.data?.message || "Full system backup could not be created.",
+        tone: "error",
+      });
     }
   };
 
-  const downloadModuleBackup = async (moduleKey, label, { suppressDownload = false, includeDropdowns = true } = {}) => {
-    updateModuleProgress(moduleKey, {
-      busy: true,
-      phase: "backup",
-      percent: 5,
-      message: `Preparing ${label} backup...`,
-    });
-    updateGlobalProgress({
-      scope: moduleKey,
-      label: `Preparing ${label} backup...`,
-      percent: 5,
-      phase: "backup",
-    });
-    showBackupToast({ title: `${label} backup started`, detail: "Live data snapshot is being generated." });
+  const handlePauseResume = async () => {
     try {
-      const res = await api.get(`/settings/backup/${moduleKey}`, {
-        params: { includeDropdowns },
-        responseType: "blob",
-        onDownloadProgress: (event) => {
-          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 60;
-          updateModuleProgress(moduleKey, {
-            busy: true,
-            phase: "backup",
-            percent,
-            message: `Downloading ${label}... ${percent}%`,
-          });
-          updateGlobalProgress({
-            scope: moduleKey,
-            label: `Downloading ${label}... ${percent}%`,
-            percent,
-            phase: "backup",
-          });
-        },
-      });
-      const filename = parseDownloadFilename(
-        res.headers["content-disposition"],
-        `smj-backup-${moduleKey}-${new Date().toISOString().slice(0, 10)}.json`
-      );
-      if (!suppressDownload) {
-        triggerBlobDownload(res.data, filename);
+      if (activeBackupTask.paused) {
+        await api.post("/settings/backup/resume");
+      } else {
+        await api.post("/settings/backup/pause");
       }
-      updateModuleProgress(moduleKey, {
-        busy: false,
-        phase: "done",
-        percent: 100,
-        message: `${label} backup downloaded.`,
-      });
-      updateGlobalProgress({
-        scope: moduleKey,
-        label: `${label} backup downloaded.`,
-        percent: 100,
-        phase: "done",
-      });
-      showBackupToast({ title: `${label} ready`, detail: "Backup file downloaded successfully.", tone: "success" });
-      await loadBackupModules({ silent: true });
-      return {
-        blob: res.data,
-        filename,
-      };
     } catch (err) {
-      updateModuleProgress(moduleKey, {
+      toast.error(err?.response?.data?.message || "Could not update backup state");
+    }
+  };
+
+  const saveBackupStorageSettings = async () => {
+    setBackupBusy(true);
+    try {
+      await api.put("/settings", {
+        backupStorageMode: settings.backupStorageMode || "auto",
+        backupLocalFolderPath: settings.backupLocalFolderPath || "",
+        gdriveClientId: settings.gdriveClientId || "",
+        gdriveClientSecret: settings.gdriveClientSecret || "",
+      });
+      window.dispatchEvent(new Event("smj-settings-updated"));
+      toast.success("Backup storage settings saved");
+      await loadBackupModules({ silent: true });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save backup storage settings");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const loadDriveFiles = async ({ silent = true } = {}) => {
+    try {
+      const res = await api.get("/settings/backup/gdrive/files");
+      setDriveFiles(Array.isArray(res.data?.data?.files) ? res.data.data.files : []);
+    } catch (err) {
+      if (!silent) toast.error(err?.response?.data?.message || "Failed to load Google Drive files");
+      setDriveFiles([]);
+    }
+  };
+
+  const openDriveDialog = async () => {
+    try {
+      const res = await api.get("/settings/backup/gdrive/auth-url");
+      const { authUrl, redirectUri } = res.data?.data || {};
+      setDriveDialog({ open: true, authUrl, redirectUri, code: "", busy: false, error: "" });
+      if (driveStatus.connected) loadDriveFiles({ silent: true });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not start Google Drive connection");
+    }
+  };
+
+  const submitDriveCode = async () => {
+    if (!String(driveDialog.code || "").trim()) {
+      setDriveDialog((prev) => ({ ...prev, error: "Paste the code shown by Google first." }));
+      return;
+    }
+    setDriveDialog((prev) => ({ ...prev, busy: true, error: "" }));
+    try {
+      await api.post("/settings/backup/gdrive/connect", { code: driveDialog.code });
+      toast.success("Google Drive connected");
+      setDriveDialog({ open: false, authUrl: "", redirectUri: "", code: "", busy: false, error: "" });
+      await loadBackupModules({ silent: true });
+      loadDriveFiles({ silent: true });
+    } catch (err) {
+      setDriveDialog((prev) => ({
+        ...prev,
         busy: false,
-        phase: "error",
-        percent: 0,
-        message: err?.response?.data?.message || `${label} backup failed.`,
+        error: err?.response?.data?.message || "Google Drive connection failed",
+      }));
+    }
+  };
+
+  const disconnectDrive = async () => {
+    setDriveDialog((prev) => ({ ...prev, busy: true, error: "" }));
+    try {
+      await api.post("/settings/backup/gdrive/disconnect");
+      toast.success("Google Drive disconnected");
+      setDriveDialog((prev) => ({ ...prev, busy: false }));
+      setDriveFiles([]);
+      await loadBackupModules({ silent: true });
+    } catch (err) {
+      setDriveDialog((prev) => ({
+        ...prev,
+        busy: false,
+        error: err?.response?.data?.message || "Failed to disconnect Google Drive",
+      }));
+    }
+  };
+
+  const deleteDriveFile = async (file) => {
+    const fileId = String(file?.id || "").trim();
+    if (!fileId) return;
+    setDialog({
+      open: true,
+      title: "Delete backup from Google Drive?",
+      message: `This removes "${file.name || "backup"}" from Google Drive. This cannot be undone.`,
+      variant: "warning",
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        try {
+          await api.post("/settings/backup/gdrive/delete", { fileId });
+          toast.success("Backup deleted from Google Drive");
+          loadDriveFiles({ silent: true });
+        } catch (err) {
+          toast.error(err?.response?.data?.message || "Failed to delete Google Drive backup");
+        }
+      },
+    });
+  };
+
+  const openRestoreDialog = () => {
+    setRestoreDialog({
+      open: true,
+      source: "local",
+      conflict: "replace",
+      driveFile: "",
+      localFile: null,
+      busy: false,
+      error: "",
+    });
+    if (driveStatus.connected) loadDriveFiles({ silent: true });
+  };
+
+  const confirmRestore = async () => {
+    const { source, conflict, driveFile, localFile } = restoreDialog;
+    if (source === "drive" && !driveFile) {
+      setRestoreDialog((prev) => ({ ...prev, error: "Select a backup from Google Drive." }));
+      return;
+    }
+    if (source === "local" && !localFile) {
+      setRestoreDialog((prev) => ({ ...prev, error: "Choose a backup JSON file." }));
+      return;
+    }
+    setRestoreDialog((prev) => ({ ...prev, busy: true, error: "" }));
+    try {
+      if (source === "drive") {
+        const chosen = driveFiles.find((f) => String(f.id) === String(driveFile));
+        const res = await api.post("/settings/backup/gdrive/restore", {
+          fileId: driveFile,
+          fileName: chosen?.name || "smj-backup-drive.json",
+          mode: conflict,
+        });
+        showBackupToast({ title: "Restore completed", detail: res.data?.message || "Restore finished.", tone: "success" });
+      } else {
+        const form = new FormData();
+        form.append("backup", localFile);
+        form.append("mode", conflict);
+        const res = await api.post("/settings/restore", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        showBackupToast({ title: "Restore completed", detail: res.data?.message || "Restore finished.", tone: "success" });
+      }
+      setRestoreDialog({ open: false, source: "local", conflict: "replace", driveFile: "", localFile: null, busy: false, error: "" });
+      await loadBackupModules({ silent: true });
+      setDialog({
+        open: true,
+        title: "Restore complete",
+        message: "Data restored successfully. Reload the app to continue.",
+        variant: "info",
+        confirmLabel: "Reload",
+        onConfirm: () => window.location.reload(),
       });
-      updateGlobalProgress({
-        scope: moduleKey,
-        label: err?.response?.data?.message || `${label} backup failed.`,
-        percent: 0,
-        phase: "error",
-      });
-      showBackupToast({ title: `${label} failed`, detail: "Module backup could not be created.", tone: "error" });
-      toast.error(`${label} backup failed`);
-      return null;
+    } catch (err) {
+      setRestoreDialog((prev) => ({
+        ...prev,
+        busy: false,
+        error: err?.response?.data?.message || "Restore failed.",
+      }));
     }
   };
 
@@ -804,274 +945,6 @@ export default function SystemSettings() {
     } catch (err) {
       showBackupToast({ title: "Download failed", detail: "Could not download backup file.", tone: "error" });
       toast.error(err?.response?.data?.message || "Failed to download backup file");
-    }
-  };
-
-  const downloadAllModules = async ({ includeDropdowns = true } = {}) => {
-    if (!backupModules.length) return;
-    const zip = new JSZip();
-    updateGlobalProgress({
-      scope: "zip-all",
-      label: "Preparing ZIP package for all modules...",
-      percent: 4,
-      phase: "backup",
-    });
-    showBackupToast({ title: "ZIP export started", detail: "Collecting all module backups into one package." });
-    for (let index = 0; index < backupModules.length; index += 1) {
-      const module = backupModules[index];
-      const stepBase = Math.round((index / backupModules.length) * 80);
-      updateGlobalProgress({
-        scope: module.key,
-        label: `Collecting ${module.name} backup...`,
-        percent: Math.max(5, stepBase),
-        phase: "backup",
-      });
-      // eslint-disable-next-line no-await-in-loop
-      const result = await downloadModuleBackup(module.key, module.name, {
-        suppressDownload: true,
-        includeDropdowns,
-      });
-      if (result?.blob && result?.filename) {
-        zip.file(result.filename, result.blob);
-      }
-    }
-    try {
-      updateGlobalProgress({
-        scope: "zip-all",
-        label: "Compressing all module backups...",
-        percent: 88,
-        phase: "backup",
-      });
-      const zipBlob = await zip.generateAsync(
-        { type: "blob" },
-        (metadata) => {
-          const percent = 88 + Math.round((metadata.percent || 0) * 0.12);
-          updateGlobalProgress({
-            scope: "zip-all",
-            label: `Creating ZIP package... ${Math.min(percent, 100)}%`,
-            percent: Math.min(percent, 100),
-            phase: "backup",
-          });
-        }
-      );
-      const fileName = `smj-backup-modules-${new Date().toISOString().slice(0, 10)}.zip`;
-      triggerBlobDownload(zipBlob, fileName);
-      updateGlobalProgress({
-        scope: "zip-all",
-        label: "ZIP package downloaded successfully.",
-        percent: 100,
-        phase: "done",
-      });
-      showBackupToast({ title: "ZIP package ready", detail: "All module backups were bundled into one file.", tone: "success" });
-    } catch (err) {
-      updateGlobalProgress({
-        scope: "zip-all",
-        label: "ZIP creation failed.",
-        percent: 0,
-        phase: "error",
-      });
-      showBackupToast({ title: "ZIP export failed", detail: "The combined ZIP package could not be created.", tone: "error" });
-      toast.error("ZIP download failed");
-    }
-  };
-
-  const handleRestoreSelect = (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    setRestoreFile(f);
-  };
-
-  const openBackupChoiceDialog = (action) => {
-    setBackupChoiceDialog({ open: true, action });
-  };
-
-  const handleBackupChoice = async (includeDropdowns) => {
-    const action = backupChoiceDialog.action;
-    setBackupChoiceDialog({ open: false, action: "" });
-    if (action === "backup") {
-      await downloadBackup({ includeDropdowns });
-      return;
-    }
-    if (action === "zip") {
-      await downloadAllModules({ includeDropdowns });
-    }
-  };
-
-  const uploadRestore = async (file = restoreFile) => {
-    if (!file) {
-      setDialog({
-        open: true,
-        title: "No file selected",
-        message: "Please choose a backup JSON file first.",
-        variant: "warning",
-        confirmLabel: "OK",
-        onConfirm: null,
-      });
-      return;
-    }
-    const form = new FormData();
-    form.append("backup", file);
-    updateModuleProgress("all", {
-      busy: true,
-      phase: "restore",
-      percent: 5,
-      message: "Uploading full restore file...",
-    });
-    updateGlobalProgress({
-      scope: "all",
-      label: "Uploading full restore file...",
-      percent: 5,
-      phase: "restore",
-    });
-    showBackupToast({ title: "Restore started", detail: "Full system restore is in progress." });
-    setLoading(true);
-    try {
-      await api.post("/settings/restore", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (event) => {
-          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 60;
-          updateModuleProgress("all", {
-            busy: true,
-            phase: "restore",
-            percent,
-            message: `Restoring full backup... ${percent}%`,
-          });
-          updateGlobalProgress({
-            scope: "all",
-            label: `Restoring full backup... ${percent}%`,
-            percent,
-            phase: "restore",
-          });
-        },
-      });
-      setRestoreFile(null);
-      if (fullRestoreInputRef.current) fullRestoreInputRef.current.value = "";
-      updateModuleProgress("all", {
-        busy: false,
-        phase: "done",
-        percent: 100,
-        message: "Full restore completed successfully.",
-      });
-      updateGlobalProgress({
-        scope: "all",
-        label: "Full restore completed successfully.",
-        percent: 100,
-        phase: "done",
-      });
-      showBackupToast({ title: "Restore completed", detail: "Full system data was restored successfully.", tone: "success" });
-      await loadBackupModules({ silent: true });
-      setDialog({
-        open: true,
-        title: "Restore complete",
-        message: "Backup restored successfully. Reload the app to continue.",
-        variant: "info",
-        confirmLabel: "Reload",
-        onConfirm: () => window.location.reload(),
-      });
-    } catch (err) {
-      updateModuleProgress("all", {
-        busy: false,
-        phase: "error",
-        percent: 0,
-        message: err?.response?.data?.message || "Restore failed.",
-      });
-      updateGlobalProgress({
-        scope: "all",
-        label: err?.response?.data?.message || "Restore failed.",
-        percent: 0,
-        phase: "error",
-      });
-      showBackupToast({ title: "Restore failed", detail: "Full system restore could not be completed.", tone: "error" });
-      toast.error("Restore failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleModuleRestoreSelect = (module, file) => {
-    if (!file) return;
-    setDialog({
-      open: true,
-      title: `Restore ${module.name}?`,
-      message: `This will overwrite the current ${module.name.toLowerCase()} data with the selected backup file.`,
-      variant: "warning",
-      confirmLabel: "Restore",
-      onConfirm: () => uploadModuleRestore(module, file),
-    });
-  };
-
-  const uploadModuleRestore = async (module, file) => {
-    if (!file) return;
-    const form = new FormData();
-    form.append("backup", file);
-    updateModuleProgress(module.key, {
-      busy: true,
-      phase: "restore",
-      percent: 5,
-      message: `Uploading ${module.name} restore file...`,
-    });
-    updateGlobalProgress({
-      scope: module.key,
-      label: `Uploading ${module.name} restore file...`,
-      percent: 5,
-      phase: "restore",
-    });
-    showBackupToast({ title: `${module.name} restore started`, detail: "Module restore is in progress." });
-    setLoading(true);
-    try {
-      const res = await api.post(`/settings/restore/${module.key}`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (event) => {
-          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 60;
-          updateModuleProgress(module.key, {
-            busy: true,
-            phase: "restore",
-            percent,
-            message: `Restoring ${module.name}... ${percent}%`,
-          });
-          updateGlobalProgress({
-            scope: module.key,
-            label: `Restoring ${module.name}... ${percent}%`,
-            percent,
-            phase: "restore",
-          });
-        },
-      });
-      if (moduleRestoreInputRefs.current[module.key]) {
-        moduleRestoreInputRefs.current[module.key].value = "";
-      }
-      updateModuleProgress(module.key, {
-        busy: false,
-        phase: "done",
-        percent: 100,
-        message: res.data?.message || `${module.name} restored.`,
-      });
-      updateGlobalProgress({
-        scope: module.key,
-        label: res.data?.message || `${module.name} restored.`,
-        percent: 100,
-        phase: "done",
-      });
-      showBackupToast({ title: `${module.name} restored`, detail: "Module data was restored successfully.", tone: "success" });
-      await loadBackupModules({ silent: true });
-      toast.success(`${module.name} restored`);
-    } catch (err) {
-      updateModuleProgress(module.key, {
-        busy: false,
-        phase: "error",
-        percent: 0,
-        message: err?.response?.data?.message || `${module.name} restore failed.`,
-      });
-      updateGlobalProgress({
-        scope: module.key,
-        label: err?.response?.data?.message || `${module.name} restore failed.`,
-        percent: 0,
-        phase: "error",
-      });
-      showBackupToast({ title: `${module.name} restore failed`, detail: "Module restore could not be completed.", tone: "error" });
-      toast.error(`${module.name} restore failed`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1550,29 +1423,204 @@ export default function SystemSettings() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
-                      onClick={() => openBackupChoiceDialog("backup")}
-                      disabled={loading}
-                      className="rounded-lg border border-emerald-200 bg-white text-emerald-800 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-emerald-50 disabled:opacity-60"
-                    >
-                      <ArrowDownCircle size={15} /> Backup
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openBackupChoiceDialog("zip")}
-                      disabled={loading || backupModules.length === 0}
+                      onClick={runFullBackup}
+                      disabled={loading || activeBackupTask.running}
                       className="rounded-lg border border-emerald-600 bg-emerald-600 text-white px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-emerald-700 disabled:opacity-60"
                     >
-                      <Download size={15} /> ZIP
+                      <DatabaseBackup size={15} />
+                      {activeBackupTask.running ? "Backing Up..." : "Backup Now"}
                     </button>
+                    {activeBackupTask.running ? (
+                      <button
+                        type="button"
+                        onClick={handlePauseResume}
+                        disabled={loading}
+                        className="rounded-lg border border-amber-400 bg-amber-50 text-amber-800 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-amber-100 disabled:opacity-60"
+                      >
+                        {activeBackupTask.paused ? <Play size={15} /> : <Pause size={15} />}
+                        {activeBackupTask.paused ? "Resume" : "Pause"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {}}
+                        disabled
+                        className="rounded-lg border border-gray-200 bg-gray-50 text-gray-400 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-100"
+                      >
+                        <Pause size={15} /> Pause
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => fullRestoreInputRef.current?.click()}
+                      onClick={openRestoreDialog}
                       disabled={loading}
                       className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-emerald-100 disabled:opacity-60"
                     >
                       <RotateCcw size={15} /> Restore
                     </button>
                   </div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <HardDrive size={16} className="text-emerald-700" />
+                    Backup Storage
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-emerald-800 mb-1">Storage Mode</label>
+                    <select
+                      value={settings.backupStorageMode || "auto"}
+                      onChange={(e) =>
+                        setSettings((prev) => ({ ...prev, backupStorageMode: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                    >
+                      <option value="auto">Auto (Drive if connected, else local)</option>
+                      <option value="local">Local computer only</option>
+                      <option value="gdrive">Google Drive only</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-emerald-800 mb-1">
+                      Local Backup Folder (optional)
+                    </label>
+                    <input
+                      value={settings.backupLocalFolderPath || ""}
+                      onChange={(e) =>
+                        setSettings((prev) => ({ ...prev, backupLocalFolderPath: e.target.value }))
+                      }
+                      placeholder="Leave empty to use the app's default backups folder"
+                      className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                    />
+                    {typeof window !== "undefined" && window.electronAPI?.openBackupFolder && (
+                      <button
+                        type="button"
+                        onClick={() => window.electronAPI.openBackupFolder()}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                      >
+                        <FolderOpen size={14} /> Open backup folder
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveBackupStorageSettings}
+                    disabled={backupBusy}
+                    className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                  >
+                    Save Storage Settings
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <Cloud size={16} className="text-emerald-700" />
+                      Google Drive
+                    </div>
+                    {driveStatus.connected ? (
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                        Connected
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
+                        Not Connected
+                      </span>
+                    )}
+                  </div>
+
+                  {driveStatus.connected ? (
+                    <div className="space-y-2 text-sm">
+                      <div className="text-xs text-gray-600">
+                        Backup uploads to:{" "}
+                        <span className="font-medium text-emerald-900">{driveStatus.accountEmail || "your Google account"}</span>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Last Drive backup: {formatDateTime(driveStatus.lastDriveBackupAt)}
+                      </div>
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-2 max-h-36 overflow-y-auto thin-scrollbar">
+                        {driveFiles.length === 0 ? (
+                          <div className="text-xs text-gray-500 py-1">No backup files on Drive yet.</div>
+                        ) : (
+                          <div className="space-y-1">
+                            {driveFiles.slice(0, 8).map((file) => (
+                              <div
+                                key={file.id}
+                                className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 border border-emerald-100"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-gray-800 truncate">{file.name}</div>
+                                  <div className="text-[10px] text-gray-400">
+                                    {formatDateTime(file.modifiedTime)} · {Math.round(Number(file.size || 0) / 1024)} KB
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteDriveFile(file)}
+                                  className="text-gray-400 hover:text-rose-600 shrink-0"
+                                  title="Delete from Drive"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={disconnectDrive}
+                        className="w-full rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100"
+                      >
+                        Disconnect Google Drive
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-sm">
+                      <p className="text-xs text-gray-600">
+                        Store backups in your Google Drive so they are safe even if this computer fails.
+                        Requires a free Google account and your Google Cloud OAuth credentials.
+                      </p>
+                      {driveStatus.configured ? (
+                        <button
+                          type="button"
+                          onClick={openDriveDialog}
+                          disabled={backupBusy}
+                          className="w-full rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          Connect Google Drive
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <input
+                            value={settings.gdriveClientId || ""}
+                            onChange={(e) => setSettings((prev) => ({ ...prev, gdriveClientId: e.target.value }))}
+                            placeholder="Google OAuth Client ID"
+                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                          />
+                          <input
+                            value={settings.gdriveClientSecret || ""}
+                            onChange={(e) => setSettings((prev) => ({ ...prev, gdriveClientSecret: e.target.value }))}
+                            placeholder="Google OAuth Client Secret"
+                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                          />
+                          <button
+                            type="button"
+                            onClick={saveBackupStorageSettings}
+                            disabled={backupBusy}
+                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                          >
+                            Save Drive Credentials
+                          </button>
+                          <p className="text-[11px] text-gray-400">
+                            Register a Desktop OAuth Client in the Google Cloud Console, then add the redirect URI shown on the next screen to its authorized redirect URIs.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1585,7 +1633,14 @@ export default function SystemSettings() {
                       ? "Backup Progress"
                       : "System Status"}
                   </span>
-                  <span>{activeBackupTask.percent || 0}%</span>
+                  <span className="flex items-center gap-2">
+                    {activeBackupTask.paused && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        Paused
+                      </span>
+                    )}
+                    <span>{activeBackupTask.percent || 0}%</span>
+                  </span>
                 </div>
                 <div className="h-3 rounded-full bg-emerald-50 overflow-hidden">
                   <div
@@ -1601,34 +1656,24 @@ export default function SystemSettings() {
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3 text-xs">
                   <div className="text-gray-700">
-                    {activeBackupTask.label || "Use Backup System to download a complete snapshot of the whole application."}
+                    {activeBackupTask.label || "Backups keep a complete snapshot of the whole application."}
                   </div>
-                  <div className="rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-emerald-700 whitespace-nowrap">
-                    {activeBackupTask.scope || "idle"}
+                  <div className="flex items-center gap-2">
+                    {activeBackupTask.running && (
+                      <button
+                        type="button"
+                        onClick={handlePauseResume}
+                        className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-amber-800 font-medium hover:bg-amber-100 whitespace-nowrap"
+                      >
+                        {activeBackupTask.paused ? "Resume" : "Pause"}
+                      </button>
+                    )}
+                    <div className="rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-emerald-700 whitespace-nowrap">
+                      {activeBackupTask.scope === "full" ? "Full System" : activeBackupTask.scope || "idle"}
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <input
-                ref={fullRestoreInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  handleRestoreSelect(e);
-                  if (!file) return;
-                  setDialog({
-                    open: true,
-                    title: "Restore full backup?",
-                    message:
-                      "This will overwrite the current system data with the selected full backup file.",
-                    variant: "warning",
-                    confirmLabel: "Restore All",
-                    onConfirm: () => uploadRestore(file),
-                  });
-                }}
-              />
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
@@ -1920,38 +1965,188 @@ export default function SystemSettings() {
         variant={dialog.variant}
       />
 
-      {backupChoiceDialog.open && (
+      {driveDialog.open && (
         <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 border border-emerald-100">
-            <div className="text-lg font-semibold text-gray-900">Choose Backup Type</div>
-            <p className="mt-2 text-sm text-gray-600">
-              Do you want a full backup with dropdown options, or only record data without dropdown lists?
-            </p>
-            <div className="mt-5 space-y-3">
-              <button
-                type="button"
-                onClick={() => handleBackupChoice(true)}
-                className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left hover:bg-emerald-100"
-              >
-                <div className="text-sm font-semibold text-emerald-900">Full Backup With Dropdowns</div>
-                <div className="text-xs text-emerald-700 mt-1">Includes records plus saved dropdown values and list options.</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBackupChoice(false)}
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50"
-              >
-                <div className="text-sm font-semibold text-gray-900">Records Only</div>
-                <div className="text-xs text-gray-600 mt-1">Exports business records without dropdown option lists.</div>
-              </button>
+            <div className="text-lg font-semibold text-gray-900">Connect Google Drive</div>
+            <ol className="mt-3 space-y-2 text-sm text-gray-700 list-decimal list-inside">
+              <li>
+                Open{" "}
+                <a
+                  href={driveDialog.authUrl || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-emerald-700 underline break-all"
+                >
+                  Google sign-in
+                </a>
+              </li>
+              <li>Sign in and allow access, then copy the code shown on the page.</li>
+              <li>Paste the code below and click Connect.</li>
+            </ol>
+            <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 break-all">
+              Authorized redirect URI:{" "}
+              <span className="font-mono text-emerald-800">{driveDialog.redirectUri || "..."}</span>
             </div>
-            <div className="mt-4 flex justify-end">
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Authorization code</label>
+              <input
+                value={driveDialog.code}
+                onChange={(e) => setDriveDialog((prev) => ({ ...prev, code: e.target.value, error: "" }))}
+                placeholder="Paste the code from Google"
+                className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+              />
+              {driveDialog.error && <div className="mt-1 text-xs text-rose-600">{driveDialog.error}</div>}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setBackupChoiceDialog({ open: false, action: "" })}
+                onClick={() => setDriveDialog({ open: false, authUrl: "", redirectUri: "", code: "", busy: false, error: "" })}
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitDriveCode}
+                disabled={driveDialog.busy}
+                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {driveDialog.busy ? "Connecting..." : "Connect"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {restoreDialog.open && (
+        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 border border-emerald-100">
+            <div className="text-lg font-semibold text-gray-900">Restore Backup</div>
+            <p className="mt-1 text-sm text-gray-600">
+              Choose how to handle existing data when restoring.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRestoreDialog((prev) => ({ ...prev, source: "local", error: "" }))}
+                className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+                  restoreDialog.source === "local"
+                    ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                Local file
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRestoreDialog((prev) => ({ ...prev, source: "drive", error: "" }));
+                  if (driveStatus.connected) loadDriveFiles({ silent: true });
+                }}
+                disabled={!driveStatus.connected}
+                className={`rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50 ${
+                  restoreDialog.source === "drive"
+                    ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                From Google Drive
+              </button>
+            </div>
+
+            {restoreDialog.source === "local" ? (
+              <div className="mt-3">
+                <input
+                  ref={restoreLocalFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) =>
+                    setRestoreDialog((prev) => ({
+                      ...prev,
+                      localFile: e.target.files?.[0] || null,
+                      error: "",
+                    }))
+                  }
+                  className="w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-emerald-200 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-800 hover:file:bg-emerald-100"
+                />
+                {restoreDialog.localFile && (
+                  <div className="mt-2 text-xs text-emerald-800 truncate">
+                    Selected: {restoreDialog.localFile.name}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 max-h-44 overflow-y-auto thin-scrollbar rounded-xl border border-emerald-100 bg-emerald-50/60 p-2">
+                {driveFiles.length === 0 ? (
+                  <div className="text-xs text-gray-500 py-1">No backup files on Google Drive.</div>
+                ) : (
+                  <div className="space-y-1">
+                    {driveFiles.map((file) => (
+                      <button
+                        key={file.id}
+                        type="button"
+                        onClick={() =>
+                          setRestoreDialog((prev) => ({ ...prev, driveFile: String(file.id), error: "" }))
+                        }
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
+                          restoreDialog.driveFile === String(file.id)
+                            ? "border-emerald-600 bg-white text-emerald-900"
+                            : "border-transparent bg-white/70 text-gray-700 hover:border-emerald-200"
+                        }`}
+                      >
+                        <div className="font-medium truncate">{file.name}</div>
+                        <div className="text-[11px] text-gray-400">
+                          {formatDateTime(file.modifiedTime)} ·{" "}
+                          {Math.round(Number(file.size || 0) / 1024)} KB
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Conflict handling
+              </label>
+              <select
+                value={restoreDialog.conflict}
+                onChange={(e) => setRestoreDialog((prev) => ({ ...prev, conflict: e.target.value }))}
+                className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+              >
+                <option value="replace">
+                  Replace — wipe existing data and use the backup (recommended for full restore)
+                </option>
+                <option value="merge">
+                  Merge — add only records that do not already exist (safer, keeps current data)
+                </option>
+              </select>
+            </div>
+
+            {restoreDialog.error && (
+              <div className="mt-2 text-xs text-rose-600">{restoreDialog.error}</div>
+            )}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setRestoreDialog({ open: false, source: "local", conflict: "replace", driveFile: "", localFile: null, busy: false, error: "" })
+                }
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRestore}
+                disabled={restoreDialog.busy}
+                className="rounded-lg border border-rose-600 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+              >
+                {restoreDialog.busy ? "Restoring..." : "Restore Now"}
               </button>
             </div>
           </div>

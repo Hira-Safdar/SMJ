@@ -13,6 +13,19 @@ const {
   downloadBackupHistoryFile,
   exportModuleBackup,
   restoreModuleBackup,
+  runFullBackup,
+  getBackupStatus,
+  pauseBackup,
+  resumeBackup,
+  cancelBackup,
+  getGdriveAuthUrl,
+  gdriveCallback,
+  connectGdriveWithCode,
+  disconnectGdrive,
+  getGdriveStatus,
+  listGdriveFiles,
+  deleteGdriveFile,
+  restoreFromGdrive,
   sendEmailOtp,
   verifyEmailOtp,
   resetPinWithOtp,
@@ -54,9 +67,28 @@ const uploadRestoreFile = multer({ storage: restoreStorage });
 router.get("/", getSettings); // GET settings
 router.put("/", saveSettings); // SAVE (upsert)
 router.post("/logo", uploadLogoFile.single("logo"), uploadLogo); // upload logo
+
+// Backup control center (full backup only)
 router.get("/backup/modules", getBackupModules);
 router.delete("/backup/history", clearBackupHistory);
 router.get("/backup/history/download/:fileName", downloadBackupHistoryFile);
+router.post("/backup/run", runFullBackup);
+router.get("/backup/status", getBackupStatus);
+router.post("/backup/pause", pauseBackup);
+router.post("/backup/resume", resumeBackup);
+router.post("/backup/cancel", cancelBackup);
+
+// Google Drive backup
+router.get("/backup/gdrive/auth-url", getGdriveAuthUrl);
+router.get("/backup/gdrive/callback", gdriveCallback);
+router.post("/backup/gdrive/connect", connectGdriveWithCode);
+router.post("/backup/gdrive/disconnect", disconnectGdrive);
+router.get("/backup/gdrive/status", getGdriveStatus);
+router.get("/backup/gdrive/files", listGdriveFiles);
+router.post("/backup/gdrive/delete", deleteGdriveFile);
+router.post("/backup/gdrive/restore", restoreFromGdrive);
+
+// Download/export endpoints (kept for compatibility)
 router.get("/backup", exportBackup); // download backup JSON
 router.get("/backup/:moduleKey", exportModuleBackup);
 router.post("/restore", uploadRestoreFile.single("backup"), restoreBackup); // restore from JSON file
