@@ -425,6 +425,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [gpSenders, setGpSenders] = useState([]);
   const [gpCustomers, setGpCustomers] = useState([]);
   const [gpStock, setGpStock] = useState([]);
+  const [gpStockAll, setGpStockAll] = useState([]);
+  const [gpExpandedOutCompany, setGpExpandedOutCompany] = useState("");
   const [gpGeneratedList, setGpGeneratedList] = useState([]);
   const [gpGeneratedLoading, setGpGeneratedLoading] = useState(false);
   const [gpExpandedCompany, setGpExpandedCompany] = useState("");
@@ -620,6 +622,32 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       return Array.from(set).sort((a, b) => a.localeCompare(b));
     },
     [gpStock]
+  );
+
+  const gpOutStockCompanies = useMemo(() => {
+    const companiesWithStock = new Set(
+      (gpStock || []).map((r) => String(r.companyName || r.brandName || "").trim()).filter(Boolean)
+    );
+    const set = new Set();
+    (gpStockAll || []).forEach((r) => {
+      const c = String(r.companyName || r.brandName || "").trim();
+      if (c && c !== "Mill Own Stock" && !companiesWithStock.has(c)) set.add(c);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [gpStock, gpStockAll]);
+
+  const gpOutProductsForCompany = useCallback(
+    (company) => {
+      const set = new Set();
+      (gpStockAll || []).forEach((r) => {
+        if (String(r.companyName || r.brandName || "").trim() === company) {
+          const p = String(r.productTypeName || "").trim();
+          if (p) set.add(p);
+        }
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b));
+    },
+    [gpStockAll]
   );
 
   const visibleTabs = useMemo(() => {
@@ -1021,6 +1049,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
               .filter(Boolean)
               .sort((a, b) => a.localeCompare(b))
           );
+          setGpStockAll(stockRowsArr);
           setGpStock(stockRowsArr.filter((r) => Number(r?.balanceKg || 0) > 0));
         }
       } catch {
@@ -2871,6 +2900,18 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         company: c,
         products: gpProductsForCompany(c).join(", "),
       }));
+    } else if (kind === "out-stock") {
+      title = "Companies & Out-Of-Stock Products";
+      cols = [
+        { key: "sr", label: "Sr. No" },
+        { key: "company", label: "Company" },
+        { key: "products", label: "Products (Out Of Stock)" },
+      ];
+      dataRows = (gpOutStockCompanies || []).map((c, i) => ({
+        sr: i + 1,
+        company: c,
+        products: gpOutProductsForCompany(c).join(", "),
+      }));
     } else if (kind === "send-to") {
       title = "Send To Companies List";
       cols = [
@@ -3454,6 +3495,57 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Companies Report
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Factory size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Out of Stock Companies</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Companies with out-of-stock products</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpOutStockCompanies.length === 0 ? (
+                            <div className="text-xs text-gray-400">No companies found.</div>
+                          ) : (
+                            gpOutStockCompanies.map((c) => (
+                              <div key={c} className="overflow-hidden rounded-lg border border-gray-200">
+                                <button
+                                  type="button"
+                                  onClick={() => setGpExpandedOutCompany(gpExpandedOutCompany === c ? "" : c)}
+                                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                                >
+                                  <span className="truncate">{c}</span>
+                                  <ChevronDown
+                                    size={14}
+                                    className={`shrink-0 text-gray-400 transition-transform ${gpExpandedOutCompany === c ? "rotate-180" : ""}`}
+                                  />
+                                </button>
+                                {gpExpandedOutCompany === c && (
+                                  <div className="space-y-1 border-t border-gray-100 bg-gray-50/60 px-2 py-2">
+                                    {gpOutProductsForCompany(c).length === 0 ? (
+                                      <div className="px-1 text-[11px] text-gray-400">No products found.</div>
+                                    ) : (
+                                      gpOutProductsForCompany(c).map((p) => (
+                                        <div key={p} className="rounded-md px-2 py-1.5 text-[11px] text-gray-600">
+                                          {p}
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("out-stock")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Out Of Stock Report
                         </button>
                       </div>
 
