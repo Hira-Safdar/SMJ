@@ -724,80 +724,48 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   const renderCustomerDropdown = () => {
     const errorMessage = errors.customer;
-    const selectedLabel = String(form?.customer || "").trim();
     const options = (customerOptions || [])
       .map((c) => String(c?.name || "").trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
 
-    if (form.customerMode === "input") {
-      return (
-        <div className="flex items-center gap-2">
-          <input
-            value={form.customerInput || ""}
-            onChange={(e) => {
-              const nextValue = sanitizeCustomerName(e.target.value);
-              setForm((prev) => ({ ...prev, customerInput: nextValue }));
-              validateField("customer", nextValue);
-            }}
-            placeholder="Enter company name"
-            className={`flex-1 rounded-lg border px-3 py-2 text-sm outline-none ${
-              errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
-            }`}
-          />
-          <button
-            type="button"
-            onClick={async () => {
-              const savedName = await ensureCustomerOption(form.customerInput);
-              if (!savedName) {
-                validateField("customer", "");
-                return;
-              }
-              setForm((prev) => ({
-                ...prev,
-                customer: savedName,
-                customerMode: "list",
-                customerInput: "",
-              }));
-              clearFieldError("customer");
-            }}
-            className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
-          >
-            List
-          </button>
-        </div>
-      );
-    }
+    const inputValue = String(getCustomerDisplayName(form) || "").trim();
 
     return (
-      <select
-        value={selectedLabel}
-        onChange={(e) => {
-          const selectedValue = String(e.target.value || "");
-          if (selectedValue === OTHER_OPTION) {
+      <div>
+        <input
+          list="gatepass-out-customer-options"
+          value={inputValue}
+          onChange={(e) => {
+            const nextValue = sanitizeCustomerName(e.target.value);
             setForm((prev) => ({
               ...prev,
-              customerMode: "input",
-              customerInput: "",
+              customer: nextValue,
+              customerInput: nextValue,
+              customerMode: nextValue ? "input" : "list",
             }));
-            clearFieldError("customer");
-            return;
-          }
-          setForm((prev) => ({ ...prev, customer: selectedValue }));
-          validateField("customer", selectedValue);
-        }}
-        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-          errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
-        }`}
-      >
-        <option value="">Select company</option>
-        {options.map((name, idx) => (
-          <option key={`${name}-${idx}`} value={name}>
-            {name}
-          </option>
-        ))}
-        <option value={OTHER_OPTION}>Add New</option>
-      </select>
+            validateField("customer", nextValue);
+          }}
+          onBlur={async () => {
+            const name = String(getCustomerDisplayName(form) || "").trim();
+            if (!name) return;
+            const savedName = await ensureCustomerOption(name);
+            if (savedName) {
+              setForm((prev) => ({ ...prev, customer: savedName }));
+              clearFieldError("customer");
+            }
+          }}
+          placeholder="Type or select company name"
+          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
+          }`}
+        />
+        <datalist id="gatepass-out-customer-options">
+          {options.map((name, idx) => (
+            <option key={`${name}-${idx}`} value={name} />
+          ))}
+        </datalist>
+      </div>
     );
   };
 
