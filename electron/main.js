@@ -224,6 +224,15 @@ ipcMain.handle("open-backup-folder", () => {
     shell.openPath(backupDir);
   }
 });
+ipcMain.handle("pick-backup-folder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose backup folder",
+    buttonLabel: "Select This Folder",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths?.length) return null;
+  return result.filePaths[0];
+});
 
 // ─── App Lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {

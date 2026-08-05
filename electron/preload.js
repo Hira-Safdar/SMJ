@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Backup controls
   triggerBackup: () => ipcRenderer.invoke("trigger-backup"),
   openBackupFolder: () => ipcRenderer.invoke("open-backup-folder"),
+  pickBackupFolder: () => ipcRenderer.invoke("pick-backup-folder"),
 
   // System
   getSystemInfo: () => ipcRenderer.invoke("get-system-info"),

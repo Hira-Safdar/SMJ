@@ -22,7 +22,6 @@ const AccountingGeneratedJournal = require("../models/accountingGeneratedJournal
 const JournalEntry = require("../models/journalEntryModel");
 const JournalLine = require("../models/journalLineModel");
 const backupService = require("../services/backupService");
-const googleDriveService = require("../services/googleDriveService");
 
 const COLLECTIONS = [
   { key: "customers", model: Customer },
@@ -338,11 +337,6 @@ const PROTECTED_SETTINGS_KEYS = new Set([
   "loginPassword",
   "otpCodeHash",
   "otpExpiresAt",
-  "gdriveRefreshToken",
-  "gdriveOAuthState",
-  "gdriveAccountEmail",
-  "gdriveFolderId",
-  "gdriveLastBackupAt",
   "backupHistory",
   "backupLastBackupAt",
   "backupLastRestoreAt",
@@ -372,7 +366,14 @@ const mergeSettingsPayload = async (backupSettings) => {
     merged[key] = value;
   });
   Object.assign(target, merged);
+  target.backupStorageMode = "local";
   await target.save();
+};
+
+const normalizeBackupStorage = (settings) => {
+  const normalized = { ...settings };
+  if (normalized && typeof normalized === "object") normalized.backupStorageMode = "local";
+  return normalized;
 };
 
 const restoreCollections = async (data, collectionKeys, mode = "replace") => {
@@ -384,7 +385,7 @@ const restoreCollections = async (data, collectionKeys, mode = "replace") => {
     } else {
       await SystemSettings.deleteMany({});
       if (data.settings) {
-        await SystemSettings.create(data.settings);
+        await SystemSettings.create(normalizeBackupStorage(data.settings));
       }
     }
   }
@@ -559,7 +560,6 @@ const runScheduledBackupIfDue = async () => {
       settings,
       countRecords: countPayloadRecords,
       buildPayload: () => buildBackupPayload({ includeDropdowns: true }),
-      gdriveService: googleDriveService,
     });
 
     await SystemSettings.findOneAndUpdate(
@@ -623,6 +623,10 @@ exports.getSettings = async (req, res) => {
       const duplicateIds = all.slice(1).map((d) => d._id);
       await SystemSettings.deleteMany({ _id: { $in: duplicateIds } });
     }
+    if (settings.backupStorageMode && settings.backupStorageMode !== "local") {
+      settings.backupStorageMode = "local";
+      await settings.save();
+    }
     res.json({ success: true, data: settings });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -641,6 +645,7 @@ exports.saveSettings = async (req, res) => {
       payload.newAdminPin != null ? String(payload.newAdminPin).trim() : null;
     delete payload.adminPin;
     delete payload.newAdminPin;
+    payload.backupStorageMode = "local";
 
     const needsPin =
       payload.stockStatusExtremeLowKg !== undefined ||
@@ -786,18 +791,8 @@ exports.getBackupModules = async (_req, res) => {
         lastScheduledRunAt: settings?.backupScheduleLastRunAt || null,
         history: Array.isArray(settings?.backupHistory) ? settings.backupHistory : [],
         modules,
-        storageMode: settings?.backupStorageMode || "auto",
+        storageMode: settings?.backupStorageMode || "local",
         localFolderPath: settings?.backupLocalFolderPath || "",
-        drive: {
-          configured: Boolean(
-            String(settings?.gdriveClientId || process.env.GDRIVE_CLIENT_ID || "").trim() &&
-              String(settings?.gdriveClientSecret || process.env.GDRIVE_CLIENT_SECRET || "").trim()
-          ),
-          connected: Boolean(String(settings?.gdriveRefreshToken || "").trim()),
-          accountEmail: String(settings?.gdriveAccountEmail || "").trim(),
-          folderId: String(settings?.gdriveFolderId || "").trim(),
-          lastDriveBackupAt: settings?.gdriveLastBackupAt || null,
-        },
       },
     });
   } catch (err) {
@@ -977,10 +972,8 @@ exports.runFullBackup = async (req, res) => {
       settings,
       countRecords: countPayloadRecords,
       buildPayload: () => buildBackupPayload({ includeDropdowns: true }),
-      gdriveService: googleDriveService,
     });
     const set = { backupLastBackupAt: new Date() };
-    if (result.gdrive?.id) set.gdriveLastBackupAt = new Date();
     await SystemSettings.findOneAndUpdate(
       {},
       { $set: set },
@@ -1037,153 +1030,6 @@ exports.cancelBackup = (_req, res) => {
     res.json({ success: true, data: backupService.cancelBackup() });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
-  }
-};
-
-// ─── Google Drive backup endpoints ──────────────────────────────────────
-exports.getGdriveAuthUrl = async (req, res) => {
-  try {
-    const { authUrl, redirectUri } = await googleDriveService.startOAuth(req);
-    res.json({ success: true, data: { authUrl, redirectUri } });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-};
-
-exports.gdriveCallback = async (req, res) => {
-  const { code, state, error } = req.query || {};
-  if (error) {
-    return res.status(400).send(`Google Drive authorization failed: ${error}`);
-  }
-  if (!code) return res.status(400).send("Missing authorization code.");
-  try {
-    await googleDriveService.exchangeCode({ code, req, expectedState: state });
-    res.setHeader("Content-Type", "text/html");
-    res.send(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Connected</title></head>` +
-        `<body style="margin:0;font-family:Arial,sans-serif;text-align:center;padding-top:80px;background:#f4f8f4">` +
-        `<div style="display:inline-block;background:#fff;padding:32px 40px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08)">` +
-        `<div style="font-size:40px">✅</div>` +
-        `<h2 style="color:#065f46;margin:12px 0 6px">Google Drive connected</h2>` +
-        `<p style="color:#4b5563;font-size:14px;margin:0">You can close this tab and return to SMJ.</p>` +
-        `</div></body></html>`
-    );
-  } catch (err) {
-    res.status(400).send(`Connection failed: ${err.message}`);
-  }
-};
-
-exports.connectGdriveWithCode = async (req, res) => {
-  try {
-    const code = String(req.body?.code || "").trim();
-    if (!code) {
-      return res.status(400).json({ success: false, message: "Missing authorization code." });
-    }
-    const result = await googleDriveService.exchangeCode({ code, req });
-    res.json({ success: true, message: "Google Drive connected.", data: result });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-};
-
-exports.disconnectGdrive = async (_req, res) => {
-  try {
-    const settings = await getSingletonSettings();
-    await googleDriveService.revokeAccess(settings);
-    await SystemSettings.findOneAndUpdate(
-      {},
-      {
-        $set: {
-          gdriveRefreshToken: "",
-          gdriveAccountEmail: "",
-          gdriveFolderId: "",
-          gdriveOAuthState: "",
-        },
-      },
-      { new: true, upsert: true, sort: { createdAt: 1 } }
-    );
-    res.json({ success: true, message: "Google Drive disconnected." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-exports.getGdriveStatus = async (_req, res) => {
-  try {
-    res.json({ success: true, data: await googleDriveService.getStatus() });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-exports.listGdriveFiles = async (_req, res) => {
-  try {
-    const files = await googleDriveService.listBackupFiles();
-    res.json({ success: true, data: { files } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-exports.deleteGdriveFile = async (req, res) => {
-  try {
-    const fileId = String(req.body?.fileId || "").trim();
-    if (!fileId) return res.status(400).json({ success: false, message: "Missing file id." });
-    await googleDriveService.deleteBackupFile({ fileId });
-    res.json({ success: true, message: "Backup file deleted from Google Drive." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-exports.restoreFromGdrive = async (req, res) => {
-  try {
-    const fileId = String(req.body?.fileId || "").trim();
-    const fileName = String(req.body?.fileName || "smj-backup-drive.json").trim();
-    const mode =
-      String(req.body?.mode || "replace").trim().toLowerCase() === "merge" ? "merge" : "replace";
-    if (!fileId) return res.status(400).json({ success: false, message: "Missing file id." });
-
-    const settings = await getSingletonSettings();
-    const raw = await googleDriveService.downloadBackupFile({ fileId, settings });
-    const data = JSON.parse(raw);
-    validateBackupPayload(data);
-
-    backupService.beginRestore({ percent: 10, label: "Backup downloaded. Restoring data..." });
-    const restoredCollections = await restoreCollections(
-      data,
-      ["settings", ...COLLECTIONS.map((c) => c.key)],
-      mode
-    );
-    const restoredCount = restoredCollections.reduce((sum, row) => sum + Number(row.count || 0), 0);
-    const message =
-      mode === "merge"
-        ? `Backup merged with existing data (${restoredCount} records added).`
-        : `Backup restored successfully (${restoredCount} records).`;
-    await SystemSettings.findOneAndUpdate(
-      {},
-      { $set: { backupLastRestoreAt: new Date() } },
-      { new: true, upsert: true, sort: { createdAt: 1 } }
-    );
-    await appendBackupHistory({
-      action: "RESTORE",
-      trigger: "MANUAL",
-      scope: "full",
-      moduleName: "Full System (Google Drive)",
-      fileName,
-      recordCount: restoredCount,
-      status: "SUCCESS",
-      message,
-    });
-    backupService.endRestore({ success: true, message });
-    res.json({
-      success: true,
-      message,
-      data: { mode, restoredCollections, backupVersion: data.backupVersion || null },
-    });
-  } catch (err) {
-    backupService.endRestore({ success: false, message: err.message });
-    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -1280,6 +1126,27 @@ const getMailer = (settings = null) => {
     secure,
     auth: { user, pass },
   });
+};
+
+const mapSmtpError = (err, { host, user, pass } = {}) => {
+  const code = err?.responseCode || err?.code;
+  const msg = String(err?.message || "");
+  const lower = msg.toLowerCase();
+  if (code === 535 || lower.includes("535") || lower.includes("badcredentials") || lower.includes("username and password not accepted")) {
+    let hint = "";
+    if (String(host).toLowerCase().includes("gmail")) {
+      const passLen = String(pass || "").length;
+      if (passLen !== 16) {
+        hint = ` The saved password is ${passLen} characters, but Gmail app passwords are exactly 16 characters. Generate a new one at myaccount.google.com → Security → 2-Step Verification → App passwords, then save it again.`;
+      } else {
+        hint = ` Make sure the app password was generated for "${user}" and that 2-Step Verification is enabled on that Google account. Generate a fresh one at myaccount.google.com → Security → App passwords.`;
+      }
+    } else {
+      hint = ` The username ("${user}") or password is incorrect for host "${host}".`;
+    }
+    return `Login rejected by ${host} (error 535: username or password not accepted).${hint}`;
+  }
+  return msg;
 };
 
 const escapeHtml = (value = "") =>
@@ -1403,8 +1270,9 @@ const hashOtp = (otp) =>
   crypto.createHash("sha256").update(String(otp)).digest("hex");
 
 exports.sendEmailOtp = async (req, res) => {
+  let settings = null;
   try {
-    const settings = await SystemSettings.findOne({});
+    settings = await SystemSettings.findOne({});
     if (!settings) {
       return res.status(400).json({ success: false, message: "System settings not found." });
     }
@@ -1440,7 +1308,50 @@ exports.sendEmailOtp = async (req, res) => {
 
     res.json({ success: true, message: "OTP sent to email", data: { expiresAt } });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+    const mailerConfig = resolveMailerConfig(settings);
+    const friendly = mapSmtpError(err, mailerConfig);
+    res.status(err.statusCode || 500).json({ success: false, message: friendly });
+  }
+};
+
+exports.testSmtp = async (_req, res) => {
+  try {
+    const settings = await SystemSettings.findOne({});
+    const { host, port, secure, user, pass, from } = resolveMailerConfig(settings);
+    if (!host || !user || !pass) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "SMTP is not fully configured. Set the email and app password in System Settings, or SMJ_SMTP_* env vars.",
+        data: { host, port, user, from, passLength: 0 },
+      });
+    }
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
+    try {
+      await transport.verify();
+      res.json({
+        success: true,
+        message: "SMTP connection successful — login accepted. You can send OTP emails.",
+        data: { host, port, user, from, passLength: String(pass).length },
+      });
+    } catch (err) {
+      res.status(400).json({
+        success: false,
+        message: mapSmtpError(err, { host, port, user, pass }),
+        raw: String(err?.message || ""),
+        data: { host, port, user, from, passLength: String(pass).length },
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

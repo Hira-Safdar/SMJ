@@ -1,7 +1,7 @@
 // backend/services/backupService.js
-// Full-backup engine with live progress, pause/resume/cancel, and dual storage
-// (local disk + optional Google Drive). The controller supplies the payload
-// collector so this module stays decoupled from the collection definitions.
+// Full-backup engine with live progress, pause/resume/cancel, and local disk
+// storage. The controller supplies the payload collector so this module stays
+// decoupled from the collection definitions.
 const path = require("path");
 const fs = require("fs");
 
@@ -18,7 +18,7 @@ const progressState = {
   label: "Backup system is idle.",
   startedAt: null,
   finishedAt: null,
-  result: null, // { success, message, fileName, recordCount, storage, gdrive }
+  result: null, // { success, message, fileName, recordCount, storage }
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -91,7 +91,7 @@ const writeFileWithProgress = ({ folder, fileName, jsonBuffer }) => {
  * Returns a result object. The controller is responsible for persisting
  * history/settings entries.
  */
-exports.runFullBackup = async ({ trigger = "MANUAL", settings, buildPayload, countRecords = null, gdriveService }) => {
+exports.runFullBackup = async ({ trigger = "MANUAL", settings, buildPayload, countRecords = null }) => {
   if (progressState.running) {
     throw new Error("A backup is already running.");
   }
@@ -116,59 +116,25 @@ exports.runFullBackup = async ({ trigger = "MANUAL", settings, buildPayload, cou
     await waitWhilePaused();
     setProgress({ percent: 70, label: "Writing backup file to disk..." });
 
-    const storageMode = String(settings?.backupStorageMode || "auto").trim() || "auto";
     const localFolder = resolveLocalFolder(settings);
     const nowParts = getTimeParts(settings?.timezone || "Asia/Karachi");
     const fileName = `smj-backup-all-${nowParts.dateKey.replace(/-/g, "")}-${nowParts.timeKey.replace(":", "")}.json`;
     const jsonBuffer = JSON.stringify(payload, null, 2);
     const localPath = writeFileWithProgress({ folder: localFolder, fileName, jsonBuffer });
 
-    let storage = "local";
-    let message = "Backup saved locally.";
-    let gdrive = null;
-
-    if (storageMode === "gdrive" || storageMode === "auto") {
-      const connected =
-        gdriveService &&
-        settings?.gdriveRefreshToken &&
-        (String(settings.gdriveClientId || process.env.GDRIVE_CLIENT_ID || "").trim() ||
-          String(process.env.GDRIVE_CLIENT_ID || "").trim());
-
-      if (connected) {
-        setProgress({ percent: 82, label: "Uploading backup to Google Drive..." });
-        try {
-          gdrive = await gdriveService.uploadBackupFile({
-            fileName,
-            jsonBuffer,
-            settings,
-          });
-          storage = "gdrive";
-          message = "Backup saved to Google Drive.";
-        } catch (err) {
-          if (storageMode === "gdrive") {
-            throw new Error(`Google Drive upload failed: ${err.message}`);
-          }
-          storage = "local";
-          message = `Drive upload skipped (${err.message}). Backup saved locally.`;
-        }
-      } else if (storageMode === "gdrive") {
-        throw new Error("Google Drive backup is selected but Drive is not connected.");
-      } else {
-        storage = "local";
-        message = "Google Drive not connected. Backup saved locally.";
-      }
-    }
+    const storage = "local";
+    const message = "Backup saved locally.";
 
     await waitWhilePaused();
     setProgress({
       percent: 100,
       label: "Backup completed.",
       phase: "done",
-      result: { success: true, message, fileName, recordCount, storage, gdrive, localPath },
+      result: { success: true, message, fileName, recordCount, storage, localPath },
     });
     progressState.finishedAt = new Date();
 
-    return { success: true, message, fileName, recordCount, storage, gdrive, localPath };
+    return { success: true, message, fileName, recordCount, storage, localPath };
   } catch (err) {
     setProgress({
       percent: 0,

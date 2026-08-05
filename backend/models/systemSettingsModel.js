@@ -85,18 +85,10 @@ const systemSettingsSchema = new mongoose.Schema(
     // Backup storage
     backupStorageMode: {
       type: String,
-      enum: ["auto", "local", "gdrive"],
-      default: "auto",
+      enum: ["local", "auto"],
+      default: "local",
     },
     backupLocalFolderPath: { type: String, default: "" },
-    // Google Drive
-    gdriveClientId: { type: String, default: "" },
-    gdriveClientSecret: { type: String, default: "" },
-    gdriveRefreshToken: { type: String, default: "" },
-    gdriveAccountEmail: { type: String, default: "" },
-    gdriveFolderId: { type: String, default: "" },
-    gdriveLastBackupAt: { type: Date, default: null },
-    gdriveOAuthState: { type: String, default: "" },
     // Accounting migration marker for idempotent historical journal rebuild
     accountingBackfillVersion: { type: Number, default: 0, min: 0 },
     accountingBackfillAt: { type: Date, default: null },

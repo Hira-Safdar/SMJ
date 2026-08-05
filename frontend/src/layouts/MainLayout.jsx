@@ -247,6 +247,7 @@ export default function MainLayout({ children }) {
     const onLogout = () => {
       localStorage.setItem("smj_logged_in", "false");
       setAuthLocked(true);
+      loadSettings();
     };
     const onSettingsUpdate = () => loadSettings();
     const onKeyDown = (e) => {
@@ -327,7 +328,7 @@ export default function MainLayout({ children }) {
     if (enteredPin === expectedPin) {
       completeLoginWithTransition();
     } else {
-      setLoginError("PIN is incorrect");
+      setLoginError("Incorrect PIN. Forgot it? Use 'Forgot PIN' below.");
     }
   };
 
@@ -726,6 +727,9 @@ export default function MainLayout({ children }) {
                 </button>
               </div>
               <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  OTP code — the 4 digits you received in your email
+                </label>
                 <Pin4Input
                   value={forgotDialog.otp}
                   onChange={(v) =>

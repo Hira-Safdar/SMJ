@@ -33,9 +33,7 @@ import {
   Pause,
   Play,
   HardDrive,
-  Cloud,
   FolderOpen,
-  Trash2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -106,10 +104,8 @@ export default function SystemSettings() {
     loginPassword: "",
     backupAutomationEnabled: false,
     backupScheduleTime: "02:00",
-    backupStorageMode: "auto",
+    backupStorageMode: "local",
     backupLocalFolderPath: "",
-    gdriveClientId: "",
-    gdriveClientSecret: "",
   });
 
   const [activeTab, setActiveTab] = useState("general");
@@ -142,27 +138,9 @@ export default function SystemSettings() {
     paused: false,
     running: false,
   });
-  const [driveStatus, setDriveStatus] = useState({
-    configured: false,
-    connected: false,
-    accountEmail: "",
-    folderId: "",
-    lastDriveBackupAt: null,
-  });
-  const [driveFiles, setDriveFiles] = useState([]);
-  const [driveDialog, setDriveDialog] = useState({
-    open: false,
-    authUrl: "",
-    redirectUri: "",
-    code: "",
-    busy: false,
-    error: "",
-  });
   const [restoreDialog, setRestoreDialog] = useState({
     open: false,
-    source: "local",
     conflict: "replace",
-    driveFile: "",
     localFile: null,
     busy: false,
     error: "",
@@ -176,6 +154,8 @@ export default function SystemSettings() {
   const [otpDialog, setOtpDialog] = useState({
     open: false,
     sent: false,
+    verified: false,
+    verifying: false,
     channel: "email",
     otp: "",
     newPin: "",
@@ -308,18 +288,11 @@ export default function SystemSettings() {
         history: Array.isArray(data.history) ? data.history : [],
       });
       setBackupModules(Array.isArray(data.modules) ? data.modules : []);
-      setDriveStatus({
-        configured: !!data.drive?.configured,
-        connected: !!data.drive?.connected,
-        accountEmail: data.drive?.accountEmail || "",
-        folderId: data.drive?.folderId || "",
-        lastDriveBackupAt: data.drive?.lastDriveBackupAt || null,
-      });
       setSettings((prev) => ({
         ...prev,
         backupAutomationEnabled: !!data.automationEnabled,
         backupScheduleTime: data.scheduleTime || prev.backupScheduleTime || "02:00",
-        backupStorageMode: data.storageMode || prev.backupStorageMode || "auto",
+        backupStorageMode: "local",
         backupLocalFolderPath: data.localFolderPath || prev.backupLocalFolderPath || "",
       }));
     } catch (err) {
@@ -399,7 +372,6 @@ export default function SystemSettings() {
             tone: s.result?.success ? "success" : "default",
           });
           loadBackupModules({ silent: true });
-          loadDriveFiles({ silent: true });
         } else if (phase === "error" && lastStatusPhaseRef.current !== "error") {
           showBackupToast({
             title: "Backup failed",
@@ -484,7 +456,7 @@ export default function SystemSettings() {
       smtpHost: String(settings.smtpHost || "").trim() || "smtp.gmail.com",
       smtpPort: Number(settings.smtpPort) || 587,
       smtpUser: nextEmail,
-      smtpPass: settings.smtpPass || "",
+      smtpPass: String(settings.smtpPass || "").replace(/\s+/g, ""),
       smtpSecure: false,
       mailFrom: nextEmail,
       defaultCurrency: settings.defaultCurrency || "",
@@ -599,6 +571,40 @@ export default function SystemSettings() {
     return `${maskedUser}@${maskedDomain}`;
   };
 
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState(null);
+  const testSmtp = async () => {
+    setSmtpTesting(true);
+    setSmtpTestResult(null);
+    try {
+      await api.put("/settings", {
+        smtpHost: String(settings.smtpHost || "").trim() || "smtp.gmail.com",
+        smtpPort: Number(settings.smtpPort) || 587,
+        smtpUser: settings.email || "",
+        smtpPass: String(settings.smtpPass || "").replace(/\s+/g, ""),
+        smtpSecure: false,
+        mailFrom: settings.email || "",
+      });
+      const res = await api.post("/settings/smtp/test");
+      setSmtpTestResult({ ok: true, message: res?.data?.message || "SMTP connection successful." });
+      toast.success("SMTP test passed");
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.message || "SMTP test failed.";
+      setSmtpTestResult({ ok: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
+
+  const appPasswordLength = String(settings.smtpPass || "").replace(/\s+/g, "").length;
+  const appPasswordHint =
+    appPasswordLength === 0
+      ? "Enter the 16-character Gmail app password."
+      : appPasswordLength !== 16
+      ? `This password is ${appPasswordLength} characters — Gmail app passwords are exactly 16. It will not be accepted until fixed.`
+      : "Looks like a valid 16-character app password.";
+
   const canSendEmailOtp = !!String(settings.email || "").trim();
   useEffect(() => {
     if (!otpResendIn) return undefined;
@@ -623,6 +629,8 @@ export default function SystemSettings() {
     setOtpDialog({
       open: false,
       sent: false,
+      verified: false,
+      verifying: false,
       channel: "email",
       otp: "",
       newPin: "",
@@ -633,6 +641,72 @@ export default function SystemSettings() {
       error: "",
     });
     setOtpResendIn(0);
+  };
+
+  const verifyOtp = async () => {
+    if (otpDialog.otp.length !== 4) {
+      setOtpDialog((prev) => ({ ...prev, error: "Enter the 4-digit OTP from your email." }));
+      return;
+    }
+    setOtpDialog((prev) => ({ ...prev, verifying: true, error: "" }));
+    try {
+      const res = await api.post("/settings/otp/verify", { otp: otpDialog.otp });
+      if (res.data?.success) {
+        setOtpDialog((prev) => ({ ...prev, verifying: false, verified: true, error: "" }));
+        toast.success("OTP verified. Now set your new PIN.");
+      } else {
+        setOtpDialog((prev) => ({
+          ...prev,
+          verifying: false,
+          error: res.data?.message || "OTP verification failed",
+        }));
+      }
+    } catch (err) {
+      setOtpDialog((prev) => ({
+        ...prev,
+        verifying: false,
+        error: err.response?.data?.message || "OTP verification failed",
+      }));
+    }
+  };
+
+  const resetPinViaOtp = async () => {
+    if (otpDialog.newPin.length !== 4) {
+      setOtpDialog((prev) => ({ ...prev, error: "Enter a new 4-digit PIN." }));
+      return;
+    }
+    if (otpDialog.newPin !== otpDialog.confirmPin) {
+      setOtpDialog((prev) => ({ ...prev, error: "PIN confirmation does not match." }));
+      return;
+    }
+    setOtpDialog((prev) => ({ ...prev, resetting: true, error: "" }));
+    try {
+      const res = await api.post("/settings/otp/reset-pin", {
+        otp: otpDialog.otp,
+        newPin: otpDialog.newPin,
+      });
+      if (res.data?.success) {
+        toast.success("New PIN saved. Use it to log in next time.");
+        setSettings((prev) => ({ ...prev, adminPin: otpDialog.newPin, loginPassword: otpDialog.newPin }));
+        window.dispatchEvent(new Event("smj-settings-updated"));
+        setCurrentPin("");
+        setNewPin("");
+        setConfirmPin("");
+        resetOtpDialog();
+      } else {
+        setOtpDialog((prev) => ({
+          ...prev,
+          resetting: false,
+          error: res.data?.message || "PIN reset failed",
+        }));
+      }
+    } catch (err) {
+      setOtpDialog((prev) => ({
+        ...prev,
+        resetting: false,
+        error: err.response?.data?.message || "PIN reset failed",
+      }));
+    }
   };
 
   const formatCountdown = (seconds) => {
@@ -770,14 +844,25 @@ export default function SystemSettings() {
     }
   };
 
+  const pickBackupFolder = async () => {
+    if (typeof window === "undefined" || !window.electronAPI?.pickBackupFolder) return;
+    try {
+      const folder = await window.electronAPI.pickBackupFolder();
+      if (folder) {
+        setSettings((prev) => ({ ...prev, backupLocalFolderPath: folder }));
+        toast.success("Backup folder selected");
+      }
+    } catch (_) {
+      toast.error("Could not open the folder picker.");
+    }
+  };
+
   const saveBackupStorageSettings = async () => {
     setBackupBusy(true);
     try {
       await api.put("/settings", {
-        backupStorageMode: settings.backupStorageMode || "auto",
+        backupStorageMode: "local",
         backupLocalFolderPath: settings.backupLocalFolderPath || "",
-        gdriveClientId: settings.gdriveClientId || "",
-        gdriveClientSecret: settings.gdriveClientSecret || "",
       });
       window.dispatchEvent(new Event("smj-settings-updated"));
       toast.success("Backup storage settings saved");
@@ -789,129 +874,32 @@ export default function SystemSettings() {
     }
   };
 
-  const loadDriveFiles = async ({ silent = true } = {}) => {
-    try {
-      const res = await api.get("/settings/backup/gdrive/files");
-      setDriveFiles(Array.isArray(res.data?.data?.files) ? res.data.data.files : []);
-    } catch (err) {
-      if (!silent) toast.error(err?.response?.data?.message || "Failed to load Google Drive files");
-      setDriveFiles([]);
-    }
-  };
-
-  const openDriveDialog = async () => {
-    try {
-      const res = await api.get("/settings/backup/gdrive/auth-url");
-      const { authUrl, redirectUri } = res.data?.data || {};
-      setDriveDialog({ open: true, authUrl, redirectUri, code: "", busy: false, error: "" });
-      if (driveStatus.connected) loadDriveFiles({ silent: true });
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Could not start Google Drive connection");
-    }
-  };
-
-  const submitDriveCode = async () => {
-    if (!String(driveDialog.code || "").trim()) {
-      setDriveDialog((prev) => ({ ...prev, error: "Paste the code shown by Google first." }));
-      return;
-    }
-    setDriveDialog((prev) => ({ ...prev, busy: true, error: "" }));
-    try {
-      await api.post("/settings/backup/gdrive/connect", { code: driveDialog.code });
-      toast.success("Google Drive connected");
-      setDriveDialog({ open: false, authUrl: "", redirectUri: "", code: "", busy: false, error: "" });
-      await loadBackupModules({ silent: true });
-      loadDriveFiles({ silent: true });
-    } catch (err) {
-      setDriveDialog((prev) => ({
-        ...prev,
-        busy: false,
-        error: err?.response?.data?.message || "Google Drive connection failed",
-      }));
-    }
-  };
-
-  const disconnectDrive = async () => {
-    setDriveDialog((prev) => ({ ...prev, busy: true, error: "" }));
-    try {
-      await api.post("/settings/backup/gdrive/disconnect");
-      toast.success("Google Drive disconnected");
-      setDriveDialog((prev) => ({ ...prev, busy: false }));
-      setDriveFiles([]);
-      await loadBackupModules({ silent: true });
-    } catch (err) {
-      setDriveDialog((prev) => ({
-        ...prev,
-        busy: false,
-        error: err?.response?.data?.message || "Failed to disconnect Google Drive",
-      }));
-    }
-  };
-
-  const deleteDriveFile = async (file) => {
-    const fileId = String(file?.id || "").trim();
-    if (!fileId) return;
-    setDialog({
-      open: true,
-      title: "Delete backup from Google Drive?",
-      message: `This removes "${file.name || "backup"}" from Google Drive. This cannot be undone.`,
-      variant: "warning",
-      confirmLabel: "Delete",
-      onConfirm: async () => {
-        try {
-          await api.post("/settings/backup/gdrive/delete", { fileId });
-          toast.success("Backup deleted from Google Drive");
-          loadDriveFiles({ silent: true });
-        } catch (err) {
-          toast.error(err?.response?.data?.message || "Failed to delete Google Drive backup");
-        }
-      },
-    });
-  };
-
   const openRestoreDialog = () => {
     setRestoreDialog({
       open: true,
-      source: "local",
       conflict: "replace",
-      driveFile: "",
       localFile: null,
       busy: false,
       error: "",
     });
-    if (driveStatus.connected) loadDriveFiles({ silent: true });
   };
 
   const confirmRestore = async () => {
-    const { source, conflict, driveFile, localFile } = restoreDialog;
-    if (source === "drive" && !driveFile) {
-      setRestoreDialog((prev) => ({ ...prev, error: "Select a backup from Google Drive." }));
-      return;
-    }
-    if (source === "local" && !localFile) {
+    const { conflict, localFile } = restoreDialog;
+    if (!localFile) {
       setRestoreDialog((prev) => ({ ...prev, error: "Choose a backup JSON file." }));
       return;
     }
     setRestoreDialog((prev) => ({ ...prev, busy: true, error: "" }));
     try {
-      if (source === "drive") {
-        const chosen = driveFiles.find((f) => String(f.id) === String(driveFile));
-        const res = await api.post("/settings/backup/gdrive/restore", {
-          fileId: driveFile,
-          fileName: chosen?.name || "smj-backup-drive.json",
-          mode: conflict,
-        });
-        showBackupToast({ title: "Restore completed", detail: res.data?.message || "Restore finished.", tone: "success" });
-      } else {
-        const form = new FormData();
-        form.append("backup", localFile);
-        form.append("mode", conflict);
-        const res = await api.post("/settings/restore", form, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        showBackupToast({ title: "Restore completed", detail: res.data?.message || "Restore finished.", tone: "success" });
-      }
-      setRestoreDialog({ open: false, source: "local", conflict: "replace", driveFile: "", localFile: null, busy: false, error: "" });
+      const form = new FormData();
+      form.append("backup", localFile);
+      form.append("mode", conflict);
+      const res = await api.post("/settings/restore", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      showBackupToast({ title: "Restore completed", detail: res.data?.message || "Restore finished.", tone: "success" });
+      setRestoreDialog({ open: false, conflict: "replace", localFile: null, busy: false, error: "" });
       await loadBackupModules({ silent: true });
       setDialog({
         open: true,
@@ -1135,20 +1123,30 @@ export default function SystemSettings() {
                   <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">SMTP Settings</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleChange("smtpHost", "smtp.gmail.com");
-                          handleChange("smtpPort", 587);
-                          handleChange("smtpUser", settings.email || "");
-                          handleChange("mailFrom", settings.email || "");
-                          handleChange("smtpSecure", false);
-                          toast.success("Gmail SMTP applied. Enter your App Password below.");
-                        }}
-                        className="text-xs text-emerald-700 font-medium border border-emerald-300 rounded-lg px-2.5 py-1 bg-white hover:bg-emerald-100"
-                      >
-                        Connect Google Account
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={testSmtp}
+                          disabled={smtpTesting}
+                          className="text-xs text-emerald-700 font-medium border border-emerald-300 rounded-lg px-2.5 py-1 bg-white hover:bg-emerald-100 disabled:opacity-60"
+                        >
+                          {smtpTesting ? "Testing..." : "Test Connection"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleChange("smtpHost", "smtp.gmail.com");
+                            handleChange("smtpPort", 587);
+                            handleChange("smtpUser", settings.email || "");
+                            handleChange("mailFrom", settings.email || "");
+                            handleChange("smtpSecure", false);
+                            toast.success("Gmail SMTP applied. Enter your App Password below.");
+                          }}
+                          className="text-xs text-emerald-700 font-medium border border-emerald-300 rounded-lg px-2.5 py-1 bg-white hover:bg-emerald-100"
+                        >
+                          Connect Google Account
+                        </button>
+                      </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
@@ -1167,13 +1165,34 @@ export default function SystemSettings() {
                         <label className="block text-xs text-gray-600 mb-1">App Password</label>
                         <input
                           type="password"
-                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
+                            appPasswordLength > 0 && appPasswordLength !== 16
+                              ? "border-rose-300"
+                              : "border-emerald-200"
+                          }`}
                           value={settings.smtpPass || ""}
                           onChange={(e) => handleChange("smtpPass", e.target.value)}
                           placeholder="16-character app password"
                         />
+                        {appPasswordLength > 0 && appPasswordLength !== 16 && (
+                          <p className="mt-1 text-[11px] font-medium text-rose-600">
+                            {appPasswordLength} characters — must be exactly 16.
+                          </p>
+                        )}
                       </div>
                     </div>
+                    {smtpTestResult && (
+                      <div
+                        className={`rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+                          smtpTestResult.ok
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-rose-200 bg-rose-50 text-rose-700"
+                        }`}
+                      >
+                        <span className="font-semibold">{smtpTestResult.ok ? "✓ " : "✗ "}</span>
+                        {smtpTestResult.message}
+                      </div>
+                    )}
                     <p className="text-[11px] text-gray-500 leading-relaxed">
                       For Gmail: go to <span className="font-medium">myaccount.google.com → Security → App passwords</span>, generate a 16-character password and paste it here. Host will be <span className="font-medium">smtp.gmail.com</span>, port <span className="font-medium">587</span>.
                     </p>
@@ -1322,7 +1341,7 @@ export default function SystemSettings() {
                   <button
                     type="button"
                     onClick={() =>
-                      setOtpDialog({ open: true, sent: false, channel: "email", otp: "", newPin: "", confirmPin: "", expiresIn: 0, sending: false, resetting: false, error: "" })
+                      setOtpDialog({ open: true, sent: false, verified: false, verifying: false, channel: "email", otp: "", newPin: "", confirmPin: "", expiresIn: 0, sending: false, resetting: false, error: "" })
                     }
                     className="text-sm text-emerald-700 hover:underline text-left"
                   >
@@ -1462,30 +1481,45 @@ export default function SystemSettings() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                    <HardDrive size={16} className="text-emerald-700" />
-                    Backup Storage
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-emerald-800 mb-1">Storage Mode</label>
-                    <select
-                      value={settings.backupStorageMode || "auto"}
-                      onChange={(e) =>
-                        setSettings((prev) => ({ ...prev, backupStorageMode: e.target.value }))
-                      }
-                      className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                    >
-                      <option value="auto">Auto (Drive if connected, else local)</option>
-                      <option value="local">Local computer only</option>
-                      <option value="gdrive">Google Drive only</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-emerald-800 mb-1">
-                      Local Backup Folder (optional)
-                    </label>
+              <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <HardDrive size={16} className="text-emerald-700" />
+                  Backup Storage (Local)
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-emerald-800 mb-1">
+                    Backup Folder
+                  </label>
+                  {typeof window !== "undefined" && window.electronAPI?.pickBackupFolder ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={pickBackupFolder}
+                          disabled={backupBusy}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          <FolderOpen size={15} /> Choose Folder
+                        </button>
+                        {settings.backupLocalFolderPath ? (
+                          <button
+                            type="button"
+                            onClick={() => setSettings((prev) => ({ ...prev, backupLocalFolderPath: "" }))}
+                            className="text-xs font-medium text-gray-500 hover:text-rose-600"
+                          >
+                            Reset to default
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900 break-all">
+                        {settings.backupLocalFolderPath ||
+                          "Default folder (inside the app's backups directory)"}
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        Pick the folder from the dialog — no typing needed, so there are no typos.
+                      </p>
+                    </div>
+                  ) : (
                     <input
                       value={settings.backupLocalFolderPath || ""}
                       onChange={(e) =>
@@ -1494,134 +1528,25 @@ export default function SystemSettings() {
                       placeholder="Leave empty to use the app's default backups folder"
                       className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
                     />
-                    {typeof window !== "undefined" && window.electronAPI?.openBackupFolder && (
-                      <button
-                        type="button"
-                        onClick={() => window.electronAPI.openBackupFolder()}
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                      >
-                        <FolderOpen size={14} /> Open backup folder
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={saveBackupStorageSettings}
-                    disabled={backupBusy}
-                    className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-                  >
-                    Save Storage Settings
-                  </button>
-                </div>
-
-                <div className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                      <Cloud size={16} className="text-emerald-700" />
-                      Google Drive
-                    </div>
-                    {driveStatus.connected ? (
-                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                        Connected
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
-                        Not Connected
-                      </span>
-                    )}
-                  </div>
-
-                  {driveStatus.connected ? (
-                    <div className="space-y-2 text-sm">
-                      <div className="text-xs text-gray-600">
-                        Backup uploads to:{" "}
-                        <span className="font-medium text-emerald-900">{driveStatus.accountEmail || "your Google account"}</span>
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        Last Drive backup: {formatDateTime(driveStatus.lastDriveBackupAt)}
-                      </div>
-                      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-2 max-h-36 overflow-y-auto thin-scrollbar">
-                        {driveFiles.length === 0 ? (
-                          <div className="text-xs text-gray-500 py-1">No backup files on Drive yet.</div>
-                        ) : (
-                          <div className="space-y-1">
-                            {driveFiles.slice(0, 8).map((file) => (
-                              <div
-                                key={file.id}
-                                className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 border border-emerald-100"
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-800 truncate">{file.name}</div>
-                                  <div className="text-[10px] text-gray-400">
-                                    {formatDateTime(file.modifiedTime)} · {Math.round(Number(file.size || 0) / 1024)} KB
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteDriveFile(file)}
-                                  className="text-gray-400 hover:text-rose-600 shrink-0"
-                                  title="Delete from Drive"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={disconnectDrive}
-                        className="w-full rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100"
-                      >
-                        Disconnect Google Drive
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 text-sm">
-                      <p className="text-xs text-gray-600">
-                        Store backups in your Google Drive so they are safe even if this computer fails.
-                        Requires a free Google account and your Google Cloud OAuth credentials.
-                      </p>
-                      {driveStatus.configured ? (
-                        <button
-                          type="button"
-                          onClick={openDriveDialog}
-                          disabled={backupBusy}
-                          className="w-full rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-                        >
-                          Connect Google Drive
-                        </button>
-                      ) : (
-                        <div className="space-y-2">
-                          <input
-                            value={settings.gdriveClientId || ""}
-                            onChange={(e) => setSettings((prev) => ({ ...prev, gdriveClientId: e.target.value }))}
-                            placeholder="Google OAuth Client ID"
-                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                          />
-                          <input
-                            value={settings.gdriveClientSecret || ""}
-                            onChange={(e) => setSettings((prev) => ({ ...prev, gdriveClientSecret: e.target.value }))}
-                            placeholder="Google OAuth Client Secret"
-                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                          />
-                          <button
-                            type="button"
-                            onClick={saveBackupStorageSettings}
-                            disabled={backupBusy}
-                            className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-                          >
-                            Save Drive Credentials
-                          </button>
-                          <p className="text-[11px] text-gray-400">
-                            Register a Desktop OAuth Client in the Google Cloud Console, then add the redirect URI shown on the next screen to its authorized redirect URIs.
-                          </p>
-                        </div>
-                      )}
-                    </div>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={saveBackupStorageSettings}
+                  disabled={backupBusy}
+                  className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                >
+                  Save Storage Settings
+                </button>
+                {typeof window !== "undefined" && window.electronAPI?.openBackupFolder && (
+                  <button
+                    type="button"
+                    onClick={() => window.electronAPI.openBackupFolder()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                  >
+                    <FolderOpen size={14} /> Open backup folder
+                  </button>
+                )}
               </div>
 
               <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm">
@@ -1965,148 +1890,34 @@ export default function SystemSettings() {
         variant={dialog.variant}
       />
 
-      {driveDialog.open && (
-        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 border border-emerald-100">
-            <div className="text-lg font-semibold text-gray-900">Connect Google Drive</div>
-            <ol className="mt-3 space-y-2 text-sm text-gray-700 list-decimal list-inside">
-              <li>
-                Open{" "}
-                <a
-                  href={driveDialog.authUrl || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-emerald-700 underline break-all"
-                >
-                  Google sign-in
-                </a>
-              </li>
-              <li>Sign in and allow access, then copy the code shown on the page.</li>
-              <li>Paste the code below and click Connect.</li>
-            </ol>
-            <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 break-all">
-              Authorized redirect URI:{" "}
-              <span className="font-mono text-emerald-800">{driveDialog.redirectUri || "..."}</span>
-            </div>
-            <div className="mt-3">
-              <label className="block text-xs font-medium text-gray-700 mb-1">Authorization code</label>
-              <input
-                value={driveDialog.code}
-                onChange={(e) => setDriveDialog((prev) => ({ ...prev, code: e.target.value, error: "" }))}
-                placeholder="Paste the code from Google"
-                className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-              />
-              {driveDialog.error && <div className="mt-1 text-xs text-rose-600">{driveDialog.error}</div>}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDriveDialog({ open: false, authUrl: "", redirectUri: "", code: "", busy: false, error: "" })}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitDriveCode}
-                disabled={driveDialog.busy}
-                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-              >
-                {driveDialog.busy ? "Connecting..." : "Connect"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {restoreDialog.open && (
         <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 border border-emerald-100">
             <div className="text-lg font-semibold text-gray-900">Restore Backup</div>
             <p className="mt-1 text-sm text-gray-600">
-              Choose how to handle existing data when restoring.
+              Choose a backup file to restore. Existing data will be handled as selected below.
             </p>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setRestoreDialog((prev) => ({ ...prev, source: "local", error: "" }))}
-                className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                  restoreDialog.source === "local"
-                    ? "border-emerald-600 bg-emerald-50 text-emerald-900"
-                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                Local file
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRestoreDialog((prev) => ({ ...prev, source: "drive", error: "" }));
-                  if (driveStatus.connected) loadDriveFiles({ silent: true });
-                }}
-                disabled={!driveStatus.connected}
-                className={`rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50 ${
-                  restoreDialog.source === "drive"
-                    ? "border-emerald-600 bg-emerald-50 text-emerald-900"
-                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                From Google Drive
-              </button>
+            <div className="mt-3">
+              <input
+                ref={restoreLocalFileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={(e) =>
+                  setRestoreDialog((prev) => ({
+                    ...prev,
+                    localFile: e.target.files?.[0] || null,
+                    error: "",
+                  }))
+                }
+                className="w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-emerald-200 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-800 hover:file:bg-emerald-100"
+              />
+              {restoreDialog.localFile && (
+                <div className="mt-2 text-xs text-emerald-800 truncate">
+                  Selected: {restoreDialog.localFile.name}
+                </div>
+              )}
             </div>
-
-            {restoreDialog.source === "local" ? (
-              <div className="mt-3">
-                <input
-                  ref={restoreLocalFileInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(e) =>
-                    setRestoreDialog((prev) => ({
-                      ...prev,
-                      localFile: e.target.files?.[0] || null,
-                      error: "",
-                    }))
-                  }
-                  className="w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-emerald-200 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-800 hover:file:bg-emerald-100"
-                />
-                {restoreDialog.localFile && (
-                  <div className="mt-2 text-xs text-emerald-800 truncate">
-                    Selected: {restoreDialog.localFile.name}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="mt-3 max-h-44 overflow-y-auto thin-scrollbar rounded-xl border border-emerald-100 bg-emerald-50/60 p-2">
-                {driveFiles.length === 0 ? (
-                  <div className="text-xs text-gray-500 py-1">No backup files on Google Drive.</div>
-                ) : (
-                  <div className="space-y-1">
-                    {driveFiles.map((file) => (
-                      <button
-                        key={file.id}
-                        type="button"
-                        onClick={() =>
-                          setRestoreDialog((prev) => ({ ...prev, driveFile: String(file.id), error: "" }))
-                        }
-                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
-                          restoreDialog.driveFile === String(file.id)
-                            ? "border-emerald-600 bg-white text-emerald-900"
-                            : "border-transparent bg-white/70 text-gray-700 hover:border-emerald-200"
-                        }`}
-                      >
-                        <div className="font-medium truncate">{file.name}</div>
-                        <div className="text-[11px] text-gray-400">
-                          {formatDateTime(file.modifiedTime)} ·{" "}
-                          {Math.round(Number(file.size || 0) / 1024)} KB
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className="mt-3">
               <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -2134,7 +1945,7 @@ export default function SystemSettings() {
               <button
                 type="button"
                 onClick={() =>
-                  setRestoreDialog({ open: false, source: "local", conflict: "replace", driveFile: "", localFile: null, busy: false, error: "" })
+                  setRestoreDialog({ open: false, conflict: "replace", localFile: null, busy: false, error: "" })
                 }
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
               >
@@ -2158,20 +1969,27 @@ export default function SystemSettings() {
           <div className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 shadow-2xl">
             <div className="text-left text-sm font-semibold text-emerald-800">Forgot PIN</div>
 
-            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
-                <Mail size={14} />
-                Recovery Email
-              </div>
-              <div className="mt-1 text-sm font-medium text-emerald-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
-              {otpDialog.expiresIn > 0 && (
-                <div className="mt-1 text-xs text-emerald-700">OTP expires in {formatCountdown(otpDialog.expiresIn)}</div>
-              )}
+            <div className="mt-3 flex items-center gap-2 text-[11px] font-semibold">
+              <span
+                className={`rounded-full px-2.5 py-1 ${
+                  otpDialog.verified ? "bg-emerald-100 text-emerald-700" : "bg-emerald-600 text-white"
+                }`}
+              >
+                1. Verify OTP
+              </span>
+              <span className="text-gray-300">→</span>
+              <span
+                className={`rounded-full px-2.5 py-1 ${
+                  otpDialog.verified ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-400"
+                }`}
+              >
+                2. Set New PIN
+              </span>
             </div>
 
             <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-gray-900">Enter OTP</div>
+                <div className="text-sm font-semibold text-gray-900">Step 1 — Enter the OTP from your email</div>
                 <button
                   type="button"
                   onClick={async () => {
@@ -2209,7 +2027,22 @@ export default function SystemSettings() {
                     : "Send OTP"}
                 </button>
               </div>
+
+              <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-emerald-700">
+                  <Mail size={14} />
+                  Recovery Email
+                </div>
+                <div className="mt-1 text-sm font-medium text-emerald-900">{settings.email ? maskEmail(settings.email) : "Not configured"}</div>
+                {otpDialog.expiresIn > 0 && (
+                  <div className="mt-1 text-xs text-emerald-700">OTP expires in {formatCountdown(otpDialog.expiresIn)}</div>
+                )}
+              </div>
+
               <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  OTP code — the 4 digits you received in your email
+                </label>
                 <Pin4Input
                   value={otpDialog.otp}
                   onChange={(v) =>
@@ -2223,42 +2056,52 @@ export default function SystemSettings() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-700">
-              After OTP verification, enter your new 4-digit PIN below.
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength="4"
-                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                placeholder="New PIN"
-                value={otpDialog.newPin}
-                onChange={(e) =>
-                  setOtpDialog((prev) => ({
-                    ...prev,
-                    newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
-                    error: "",
-                  }))
-                }
-              />
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength="4"
-                className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                placeholder="Confirm PIN"
-                value={otpDialog.confirmPin}
-                onChange={(e) =>
-                  setOtpDialog((prev) => ({
-                    ...prev,
-                    confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
-                    error: "",
-                  }))
-                }
-              />
-            </div>
+            {otpDialog.verified && (
+              <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+                <div className="text-sm font-semibold text-gray-900">Step 2 — Create your new login PIN</div>
+                <p className="mt-1 text-xs text-gray-600">
+                  Enter a 4-digit PIN twice. This will be your new login PIN.
+                </p>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">New PIN</label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength="4"
+                      className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                      placeholder="4 digits"
+                      value={otpDialog.newPin}
+                      onChange={(e) =>
+                        setOtpDialog((prev) => ({
+                          ...prev,
+                          newPin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                          error: "",
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Confirm PIN</label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength="4"
+                      className="w-full rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                      placeholder="Same 4 digits"
+                      value={otpDialog.confirmPin}
+                      onChange={(e) =>
+                        setOtpDialog((prev) => ({
+                          ...prev,
+                          confirmPin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                          error: "",
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {otpDialog.error && (
               <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -2274,58 +2117,25 @@ export default function SystemSettings() {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (otpDialog.otp.length !== 4) {
-                    setOtpDialog((prev) => ({ ...prev, error: "Enter 4-digit OTP" }));
-                    return;
-                  }
-                  if (otpDialog.newPin.length !== 4) {
-                    setOtpDialog((prev) => ({ ...prev, error: "Enter a new 4-digit PIN" }));
-                    return;
-                  }
-                  if (otpDialog.newPin !== otpDialog.confirmPin) {
-                    setOtpDialog((prev) => ({ ...prev, error: "PIN confirmation does not match" }));
-                    return;
-                  }
-                  setOtpDialog((prev) => ({ ...prev, resetting: true, error: "" }));
-                  try {
-                    const res = await api.post("/settings/otp/reset-pin", {
-                      otp: otpDialog.otp,
-                      newPin: otpDialog.newPin,
-                    });
-                    if (res.data?.success) {
-                      toast.success("PIN reset successful");
-                      setSettings((prev) => ({
-                        ...prev,
-                        adminPin: otpDialog.newPin,
-                        loginPassword: otpDialog.newPin,
-                      }));
-                      setCurrentPin("");
-                      setNewPin("");
-                      setConfirmPin("");
-                      resetOtpDialog();
-                    } else {
-                      setOtpDialog((prev) => ({
-                        ...prev,
-                        resetting: false,
-                        error: res.data?.message || "PIN reset failed",
-                      }));
-                    }
-                  } catch (err) {
-                    setOtpDialog((prev) => ({
-                      ...prev,
-                      resetting: false,
-                      error: err.response?.data?.message || "PIN reset failed",
-                    }));
-                  }
-                }}
-                disabled={otpDialog.resetting}
-                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-              >
-                {otpDialog.resetting ? "Resetting..." : "Reset PIN"}
-              </button>
+              {otpDialog.verified ? (
+                <button
+                  type="button"
+                  onClick={resetPinViaOtp}
+                  disabled={otpDialog.resetting}
+                  className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {otpDialog.resetting ? "Saving..." : "Save New PIN"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={verifyOtp}
+                  disabled={otpDialog.verifying || otpDialog.otp.length !== 4}
+                  className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {otpDialog.verifying ? "Verifying..." : "Verify OTP"}
+                </button>
+              )}
             </div>
           </div>
         </div>
