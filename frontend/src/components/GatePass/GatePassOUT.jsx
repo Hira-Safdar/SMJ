@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Edit2, Trash2, Printer, X, Plus, ChevronDown, Coins } from "lucide-react";
 import { toast } from "react-hot-toast";
 import api, { toAbsoluteUrl } from "../../services/api";
@@ -122,6 +122,8 @@ export default function GatePassOUT({ highlightId = "" }) {
   const [settings, setSettings] = useState(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [openBrandDropdown, setOpenBrandDropdown] = useState(null);
+  const [activeBrandIdx, setActiveBrandIdx] = useState(-1);
+  const brandOptionRefs = useRef({});
 
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({
@@ -824,37 +826,148 @@ export default function GatePassOUT({ highlightId = "" }) {
   // deleteBrandOption removed — company deletion is now managed
   // from Stock page → Manage Companies (PIN-protected).
 
+  useEffect(() => {
+    if (activeBrandIdx < 0) return;
+    const el = brandOptionRefs.current?.[activeBrandIdx];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeBrandIdx]);
+
+  const getFilteredBrands = (selectedLabel = "") =>
+    Array.from(
+      new Set(
+        [...(brandsInStock || []), ...(brandOptions || []), ...(selectedLabel ? [selectedLabel] : [])]
+          .filter(Boolean)
+      )
+    )
+      .sort((a, b) => String(a).localeCompare(String(b)))
+      .filter(
+        (brand) =>
+          !selectedLabel ||
+          normalizeText(brand).includes(normalizeText(selectedLabel))
+      );
+
+  const handleBrandKeyDown = (e, idx, list) => {
+    if (!openBrandDropdown || openBrandDropdown !== idx) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveBrandIdx(0);
+        setOpenBrandDropdown(idx);
+      }
+      return;
+    }
+    const count = list.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveBrandIdx((p) => (count ? (p < 0 ? 0 : (p + 1) % count) : -1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveBrandIdx((p) => (count ? (p <= 0 ? count - 1 : p - 1) : -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeBrandIdx >= 0 && list[activeBrandIdx]) {
+        const brand = list[activeBrandIdx];
+        setItems((prev) => {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], brand, productName: "" };
+          return updated;
+        });
+        clearItemFieldError(idx, "brand");
+        setOpenBrandDropdown(null);
+      }
+    } else if (e.key === "Escape") {
+      setOpenBrandDropdown(null);
+    }
+  };
+
   const renderBrandDropdown = (item, idx) => {
     const errorMessage = errors.itemRows?.[idx]?.brand;
     const selectedLabel = String(item?.brand || "").trim();
-    const stockCompanyOptions = Array.from(
-      new Set(
-        [...(brandsInStock || []), ...(selectedLabel ? [selectedLabel] : [])].filter(Boolean)
-      )
-    ).sort((a, b) => String(a).localeCompare(String(b)));
+    const filteredBrands = getFilteredBrands(selectedLabel);
     return (
-      <select
-        value={selectedLabel}
-        onChange={(e) => {
-          const brand = String(e.target.value || "");
-          setItems((prev) => {
-            const updated = [...prev];
-            updated[idx] = { ...updated[idx], brand, productName: "" };
-            return updated;
-          });
-          clearItemFieldError(idx, "brand");
-        }}
-        className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-          errorMessage ? "border-red-500 bg-red-50" : "border-gray-300"
-        }`}
-      >
-        <option value="">Select company</option>
-        {stockCompanyOptions.map((brand, optionIdx) => (
-          <option key={`${brand}-${optionIdx}`} value={brand}>
-            {brand}
-          </option>
-        ))}
-      </select>
+      <div className="relative">
+        <div className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none ${
+            errorMessage ? "border-red-500 bg-red-50" : "border-gray-300 bg-white"
+          }`}>
+          <input
+            value={selectedLabel}
+            onFocus={() => {
+              setActiveBrandIdx(-1);
+              setOpenBrandDropdown(idx);
+            }}
+            onKeyDown={(e) => handleBrandKeyDown(e, idx, filteredBrands)}
+            onChange={(e) => {
+              const next = String(e.target.value || "")
+                .replace(/[^a-zA-Z0-9\s.,&()\-]/g, "")
+                .slice(0, 80);
+              setItems((prev) => {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], brand: next, productName: "" };
+                return updated;
+              });
+              clearItemFieldError(idx, "brand");
+              setActiveBrandIdx(-1);
+              setOpenBrandDropdown(idx);
+            }}
+            onBlur={async () => {
+              const typed = String(item?.brand || "").trim();
+              if (typed) {
+                const resolved = await ensureBrandOption(typed);
+                setItems((prev) => {
+                  const updated = [...prev];
+                  updated[idx] = { ...updated[idx], brand: resolved || typed };
+                  return updated;
+                });
+              }
+              setTimeout(() => setOpenBrandDropdown(null), 120);
+            }}
+            placeholder="Type or select company name"
+            className="flex-1 bg-transparent outline-none"
+          />
+          <ChevronDown size={16} className="text-gray-400" />
+        </div>
+        {openBrandDropdown === idx ? (
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+            {filteredBrands.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-gray-400">No matching companies</div>
+            ) : (
+              filteredBrands.map((brand, optionIdx) => {
+                return (
+                  <div
+                    key={`${brand}-${optionIdx}`}
+                    className="flex items-center gap-2 border-t border-gray-100 px-3 py-2"
+                  >
+                    <button
+                      type="button"
+                      onMouseDown={() => {
+                        setItems((prev) => {
+                          const updated = [...prev];
+                          updated[idx] = { ...updated[idx], brand, productName: "" };
+                          return updated;
+                        });
+                        clearItemFieldError(idx, "brand");
+                        setOpenBrandDropdown(null);
+                      }}
+                      onMouseEnter={() => setActiveBrandIdx(optionIdx)}
+                      ref={(el) => {
+                        brandOptionRefs.current[optionIdx] = el;
+                      }}
+                      className={`flex-1 text-left text-sm ${
+                        activeBrandIdx === optionIdx
+                          ? "text-emerald-700 bg-emerald-50 font-medium"
+                          : "text-gray-700 hover:text-emerald-700"
+                      }`}
+                    >
+                      {brand}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ) : null}
+      </div>
     );
   };
   const addRow = () =>
