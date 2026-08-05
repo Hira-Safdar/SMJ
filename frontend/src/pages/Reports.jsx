@@ -19,10 +19,11 @@ import {
   ChevronDown,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
-import api from "../services/api";
+import api, { toAbsoluteUrl } from "../services/api";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { fmtDate } from "../utils/dateUtils";
 
 const REPORT_TABS = [
   { key: "gatepass", label: "Gatepass Reports", icon: <Truck size={16} /> },
@@ -76,7 +77,6 @@ const shortEntryId = (value) => {
   if (!raw) return "";
   return raw.slice(-4);
 };
-const fmtDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
 const normalizePaymentStatus = (value) => {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "Unpaid/Pending";
@@ -182,6 +182,12 @@ const gatePassInReportColumns = [
     key: "weightOnArrival",
     label: "Wt on Arrival (kg)",
     render: (_v, row) => gpItemListText(row, (it) => gpFmtNum(it?.weightOnArrival)),
+  },
+  {
+    key: "bagsOnArrival",
+    label: "Bags on Arrival",
+    render: (_v, row) =>
+      gpItemListText(row, (it) => (Number(it?.bagsOnArrival) > 0 ? gpFmtNum(it?.bagsOnArrival) : "")),
   },
   {
     key: "weightAtSmjKg",
@@ -448,14 +454,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     "border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
   const filterLabelClass = "block text-xs font-medium text-gray-600 mb-1";
 
-  const toAbsoluteLogoUrl = (value) => {
-    const url = String(value || "").trim();
-    if (!url) return "";
-    if (/^https?:\/\//i.test(url)) return url;
-    const base = api.defaults.baseURL || "";
-    const origin = base.replace(/\/api\/?$/i, "");
-    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
-  };
+  const toAbsoluteLogoUrl = (value) => toAbsoluteUrl(value);
 
   const fetchLogoAsDataUrl = async (url) => {
     if (!url) return "";
@@ -1815,7 +1814,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         const startY = addPdfHeader(
           doc,
           selectedCompanyName || "Business",
-          `Voucher: ${entry.voucherNo || "-"} | Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`
+          `Voucher: ${entry.voucherNo || "-"} | Date: ${entry.date ? fmtDate(entry.date) : "-"}`
         );
 
       const rows = journalRowsForEntry(entry);
@@ -2693,8 +2692,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     const body = Array.from({ length: max }).map((_, i) => {
       const d = debits[i];
       const c = credits[i];
-      const dDate = d?.date ? new Date(d.date).toLocaleDateString() : "";
-      const cDate = c?.date ? new Date(c.date).toLocaleDateString() : "";
+      const dDate = d?.date ? fmtDate(d.date) : "";
+      const cDate = c?.date ? fmtDate(c.date) : "";
       return [
         dDate,
         d?.references || d?.description || "",

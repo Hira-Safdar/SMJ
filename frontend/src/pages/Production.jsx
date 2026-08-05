@@ -1,7 +1,8 @@
 ﻿// src/pages/Production.jsx
 import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import api from "../services/api";
+import api, { toAbsoluteUrl } from "../services/api";
+import { fmtDate } from "../utils/dateUtils";
 import {
   Factory,
   Activity,
@@ -38,10 +39,6 @@ function todayISODate() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function fmtDate(v) {
-  return v ? new Date(v).toLocaleDateString() : "-";
 }
 
 const intClean = (v) =>
@@ -153,7 +150,7 @@ export default function Production() {
         name: general.companyName || general.millName || prev.name,
         address: general.address || general.fullAddress || prev.address,
         phone: general.phone || "",
-        logoUrl: data.logoUrl || "",
+        logoUrl: toAbsoluteUrl(data.logoUrl || ""),
       }));
     } catch {
       /* silent */

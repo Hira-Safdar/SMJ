@@ -1,6 +1,6 @@
 // src/components/MasterData/SystemSettings.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import api from "../../services/api";
+import api, { toAbsoluteUrl } from "../../services/api";
 import JSZip from "jszip";
 import {
   UploadCloud,
@@ -348,14 +348,7 @@ export default function SystemSettings() {
     setSettings((s) => ({ ...s, [k]: v }));
   };
 
-  const toAbsoluteLogoUrl = (value) => {
-    const url = String(value || "").trim();
-    if (!url) return "";
-    if (/^https?:\/\//i.test(url)) return url;
-    const base = api.defaults.baseURL || "";
-    const origin = base.replace(/\/api\/?$/i, "");
-    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
-  };
+  const toAbsoluteLogoUrl = (value) => toAbsoluteUrl(value);
 
   useEffect(() => {
     const generalEmail = String(settings.email || "").trim();

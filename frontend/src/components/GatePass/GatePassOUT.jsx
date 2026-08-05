@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Edit2, Trash2, Printer, X, Plus, ChevronDown, Coins } from "lucide-react";
 import { toast } from "react-hot-toast";
-import api from "../../services/api";
+import api, { toAbsoluteUrl } from "../../services/api";
 import DataTable from "../ui/DataTable";
 import AddOptionModal from "../ui/AddOptionModal";
 import { FilterToggleButton } from "../ui/CollapsibleFilter";
 import GatePassFilter, { applyGatePassFilters, gatePassFilterSummary } from "./GatePassFilter";
+import { fmtDate } from "../../utils/dateUtils";
 
 const OTHER_OPTION = "__OTHER__";
 
@@ -112,6 +113,7 @@ export default function GatePassOUT({ highlightId = "" }) {
   });
 
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterCriteria, setFilterCriteria] = useState({});
@@ -912,10 +914,12 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (!validateForm()) {
       toast.error("Please fix the highlighted fields.");
       return;
     }
+    setSubmitting(true);
 
     const savedCustomerName = await ensureCustomerOption(getCustomerDisplayName(form));
 
@@ -1042,6 +1046,8 @@ export default function GatePassOUT({ highlightId = "" }) {
         behavior: "smooth",
         block: "start",
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1193,11 +1199,12 @@ export default function GatePassOUT({ highlightId = "" }) {
     const millName = settings?.companyName || settings?.name || "Rice Mill";
     const millAddress = settings?.companyAddress || settings?.address || "";
     const apiHost = api.defaults.baseURL.replace(/\/api\/?$/, "");
-    const logo =
+    const logo = toAbsoluteUrl(
       settings?.logoUrl ||
-      settings?.logo ||
-      settings?.logoPath ||
-      `${apiHost}/uploads/logo.png`;
+        settings?.logo ||
+        settings?.logoPath ||
+        `${apiHost}/uploads/logo.png`
+    );
 
     const logoHtml = logo
       ? `<img src="${logo}" style="height:96px;margin-right:10px;" alt="logo" />`
@@ -1272,7 +1279,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           row.gatePassNo || "-"
         }</span></div>
         <div><span class="label">Date:</span><span class="value">${
-          row.date ? new Date(row.date).toLocaleDateString() : "-"
+          row.date ? fmtDate(row.date) : "-"
         }</span></div>
         <div><span class="label">Company Name (Send To):</span><span class="value">${
           customerName || "-"
@@ -1333,7 +1340,7 @@ export default function GatePassOUT({ highlightId = "" }) {
     {
       key: "date",
       label: "Date",
-      render: (val) => (val ? new Date(val).toLocaleDateString() : "-"),
+      render: (val) => (val ? fmtDate(val) : "-"),
     },
     { key: "gatePassNo", label: "GP No" },
     { key: "customer", label: "Company Name (Send To)" },
@@ -1445,7 +1452,7 @@ export default function GatePassOUT({ highlightId = "" }) {
   ];
 
   const exportColumns = [
-    { key: "date", label: "Date", render: (val) => (val ? new Date(val).toLocaleDateString() : "-") },
+    { key: "date", label: "Date", render: (val) => (val ? fmtDate(val) : "-") },
     { key: "gatePassNo", label: "GP No" },
     { key: "customer", label: "Company Name (Send To)" },
     { key: "truckNo", label: "Truck No" },
@@ -1980,9 +1987,18 @@ export default function GatePassOUT({ highlightId = "" }) {
           <button
             type="submit"
             data-tour="gatepass-out-submit"
-            className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
+            disabled={submitting}
+            className={`px-4 py-2 rounded-lg text-white text-sm shadow ${
+              submitting
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-700"
+            }`}
           >
-            {editingId ? "Update Gate Pass" : "Generate Gate Pass"}
+            {submitting
+              ? "Saving..."
+              : editingId
+                ? "Update Gate Pass"
+                : "Generate Gate Pass"}
           </button>
 
           {editingId && (

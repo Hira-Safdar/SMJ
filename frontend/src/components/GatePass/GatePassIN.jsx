@@ -1,11 +1,12 @@
 ﻿import React, { useEffect, useRef, useState } from "react";
 import { Edit2, Trash2, Printer, X, Plus, ChevronDown } from "lucide-react";
 import { toast } from "react-hot-toast";
-import api from "../../services/api";
+import api, { toAbsoluteUrl } from "../../services/api";
 import DataTable from "../ui/DataTable";
 import AddOptionModal from "../ui/AddOptionModal";
 import { FilterToggleButton } from "../ui/CollapsibleFilter";
 import GatePassFilter, { applyGatePassFilters, gatePassFilterSummary } from "./GatePassFilter";
+import { fmtDate } from "../../utils/dateUtils";
 
 const UNITS = ["kg", "ton", "bags", "pcs", "mounds"];
 const PADDY_UNITS = ["kg", "ton"];
@@ -48,6 +49,7 @@ export default function GatePassIN({ highlightId = "" }) {
     productMode: "list",
     productInput: "",
     weightOnArrival: "",
+    bagsOnArrival: "",
     weightAtSmjKg: "",
     emptyBagWeightKg: "",
     netWeightKg: "",
@@ -58,6 +60,7 @@ export default function GatePassIN({ highlightId = "" }) {
   const [items, setItems] = useState([emptyItem()]);
 
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterCriteria, setFilterCriteria] = useState({});
@@ -1167,10 +1170,12 @@ export default function GatePassIN({ highlightId = "" }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (!validateForm()) {
       toast.error("Please fix the highlighted fields.");
       return;
     }
+    setSubmitting(true);
 
     const normalizeUnit = (unit) => {
       const u = String(unit || "").toLowerCase().trim();
@@ -1225,6 +1230,7 @@ export default function GatePassIN({ highlightId = "" }) {
             netWeightKg: Number(it.netWeightKg || 0),
             weightAtSmjKg: Number(it.weightAtSmjKg || 0),
             weightOnArrival: Number(it.weightOnArrival || 0),
+            bagsOnArrival: Number(it.bagsOnArrival || 0),
           };
         })
     );
@@ -1272,6 +1278,8 @@ export default function GatePassIN({ highlightId = "" }) {
         behavior: "smooth",
         block: "start",
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1302,6 +1310,7 @@ export default function GatePassIN({ highlightId = "" }) {
         productMode: "list",
         productInput: "",
         weightOnArrival: it.weightOnArrival != null ? String(it.weightOnArrival) : "",
+        bagsOnArrival: it.bagsOnArrival != null ? String(it.bagsOnArrival) : "",
         weightAtSmjKg: wSmj ? String(wSmj) : "",
         emptyBagWeightKg: it.emptyBagWeightKg != null ? String(it.emptyBagWeightKg) : "",
         netWeightKg: netKg ? fmtNum(netKg) : "",
@@ -1365,11 +1374,12 @@ export default function GatePassIN({ highlightId = "" }) {
     const millName = settings?.companyName || settings?.name || "Rice Mill";
     const millAddress = settings?.companyAddress || settings?.address || "";
     const apiHost = api.defaults.baseURL.replace(/\/api\/?$/, "");
-    const logo =
+    const logo = toAbsoluteUrl(
       settings?.logoUrl ||
-      settings?.logo ||
-      settings?.logoPath ||
-      `${apiHost}/uploads/logo.png`;
+        settings?.logo ||
+        settings?.logoPath ||
+        `${apiHost}/uploads/logo.png`
+    );
 
     const logoHtml = logo
       ? `<img src="${logo}" style="height:96px;margin-right:10px;" alt="logo" />`
@@ -1398,6 +1408,7 @@ export default function GatePassIN({ highlightId = "" }) {
           const emptyW = item.emptyBagWeightKg || 0;
           const weightAtSmj = item.weightAtSmjKg || 0;
           const weightOnArrival = item.weightOnArrival || 0;
+          const bagsOnArrival = item.bagsOnArrival || 0;
 
           // Format bags (whole count) + leftover weight
           const bagsDisplay = computeItemWeights({
@@ -1410,6 +1421,7 @@ export default function GatePassIN({ highlightId = "" }) {
           <td style="border:1px solid #ddd;padding:6px;">${companyName || "-"}</td>
           <td style="border:1px solid #ddd;padding:6px;">${displayName}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(weightOnArrival)}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(bagsOnArrival)}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(weightAtSmj)}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(emptyW)}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(bagW)}</td>
@@ -1428,11 +1440,11 @@ export default function GatePassIN({ highlightId = "" }) {
     );
     const itemsTableHtml = `
       <table>
-        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Wt on Arrival</th><th style="text-align:right;">Wt at SMJ</th><th style="text-align:right;">Total Empty Bags</th><th style="text-align:right;">Bag Wt Each</th><th style="text-align:right;">Net (kg)</th><th style="text-align:right;">Net (man/kg)</th><th style="text-align:right;">Bags</th></tr></thead>
+        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Wt on Arrival</th><th style="text-align:right;">Bags on Arrival</th><th style="text-align:right;">Wt at SMJ</th><th style="text-align:right;">Total Empty Bags</th><th style="text-align:right;">Bag Wt Each</th><th style="text-align:right;">Net (kg)</th><th style="text-align:right;">Net (man/kg)</th><th style="text-align:right;">Bags</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
         <tfoot>
           <tr style="background:#f0fdf4;font-weight:700;">
-            <td style="border:1px solid #ddd;padding:6px;" colspan="6">Total</td>
+            <td style="border:1px solid #ddd;padding:6px;" colspan="7">Total</td>
             <td style="border:1px solid #ddd;padding:6px;text-align:right;">${fmtNum(totalNetKg)}</td>
             <td style="border:1px solid #ddd;padding:6px;text-align:right;">${formatKgToMan(totalNetKg)}</td>
             <td style="border:1px solid #ddd;padding:6px;"></td>
@@ -1476,8 +1488,8 @@ export default function GatePassIN({ highlightId = "" }) {
         }</span></div>
         <div><span class="label">Date:</span><span class="value">${
           row.date
-            ? new Date(row.date).toLocaleDateString()
-            : (row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "-")
+            ? fmtDate(row.date)
+            : (row.createdAt ? fmtDate(row.createdAt) : "-")
         }</span></div>
         <div><span class="label">Sender Name:</span><span class="value">${
           row.supplier || row.senderName || "-"
@@ -1517,9 +1529,9 @@ export default function GatePassIN({ highlightId = "" }) {
       label: "Date",
       render: (_val, row) =>
         row?.date
-          ? new Date(row.date).toLocaleDateString()
+          ? fmtDate(row.date)
           : row?.createdAt
-            ? new Date(row.createdAt).toLocaleDateString()
+            ? fmtDate(row.createdAt)
             : "-",
     },
     { key: "gatePassNo", label: "GP No" },
@@ -1550,6 +1562,11 @@ export default function GatePassIN({ highlightId = "" }) {
       key: "weightOnArrival",
       label: "Wt on Arrival (kg)",
       render: (_val, row) => itemListText(row, (it) => fmtNum(it.weightOnArrival)),
+    },
+    {
+      key: "bagsOnArrival",
+      label: "Bags on Arrival",
+      render: (_val, row) => itemListText(row, (it) => (Number(it.bagsOnArrival) > 0 ? fmtNum(it.bagsOnArrival) : "")),
     },
     {
       key: "weightAtSmjKg",
@@ -1628,13 +1645,14 @@ export default function GatePassIN({ highlightId = "" }) {
   ];
 
   const exportColumns = [
-    { key: "date", label: "Date", render: (val) => (val ? new Date(val).toLocaleDateString() : "-") },
+    { key: "date", label: "Date", render: (val) => (val ? fmtDate(val) : "-") },
     { key: "gatePassNo", label: "GP No" },
     { key: "truckNo", label: "Truck" },
     { key: "senderName", label: "Sender Name" },
     { key: "companyName", label: "Company" },
     { key: "productName", label: "Product" },
     { key: "weightOnArrival", label: "Weight on Arrival (kg)" },
+    { key: "bagsOnArrival", label: "Bags on Arrival" },
     { key: "weightAtSmjKg", label: "Weight at SMJ (kg)" },
     { key: "emptyBagWeightKg", label: "Weight of Empty Bags (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
@@ -1664,6 +1682,7 @@ export default function GatePassIN({ highlightId = "" }) {
           companyName: String(it.brand || "").trim(),
           productName: it.itemType || it.customItemName || "",
           weightOnArrival: it.weightOnArrival || "",
+          bagsOnArrival: it.bagsOnArrival || "",
           weightAtSmjKg: it.weightAtSmjKg || "",
           emptyBagWeightKg: it.emptyBagWeightKg || "",
           netWeightKg: Number(netKg.toFixed(2)),
@@ -1862,8 +1881,8 @@ export default function GatePassIN({ highlightId = "" }) {
                   )}
                 </div>
 
-                {/* Row 1: Company, Product, Weight on Arrival */}
-                <div className="grid md:grid-cols-3 gap-3 items-start">
+                {/* Row 1: Company, Product, Weight on Arrival, Bags on Arrival */}
+                <div className="grid md:grid-cols-4 gap-3 items-start">
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs text-gray-500">
@@ -1965,10 +1984,20 @@ export default function GatePassIN({ highlightId = "" }) {
                       className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">No. of Bags on Arrival</label>
+                    <input
+                      inputMode="numeric"
+                      value={it?.bagsOnArrival ?? ""}
+                      onChange={(e) => handleItemChange(idx, "bagsOnArrival", e.target.value)}
+                      placeholder="0"
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
+                    />
+                  </div>
                 </div>
 
-                {/* Row 2: Weight at SMJ, Empty Bags Weight, Net Weight (kg) */}
-                <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
+                {/* Row 2: Weight at SMJ, Empty Bags Weight, Net Weight (kg), Net Weight (man/kg) */}
+                <div className="grid md:grid-cols-4 gap-3 items-start mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Weight at SMJ (kg) <span className="text-red-500">*</span></label>
                     <input
@@ -2003,10 +2032,6 @@ export default function GatePassIN({ highlightId = "" }) {
                     />
                     {renderFieldError(errors.itemRows?.[idx]?.netWeightKg)}
                   </div>
-                </div>
-
-                {/* Row 3: Net Weight (man/kg), Bag Weight Each, No. of Bags (auto) */}
-                <div className="grid md:grid-cols-3 gap-3 items-start mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Net Weight (man / kg)</label>
                     <input
@@ -2016,6 +2041,10 @@ export default function GatePassIN({ highlightId = "" }) {
                       placeholder="Auto"
                     />
                   </div>
+                </div>
+
+                {/* Row 3: Bag Weight Each, No. of Bags (auto) */}
+                <div className="grid md:grid-cols-2 gap-3 items-start mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Bag Weight Each (kg) <span className="text-red-500">*</span></label>
                     <input
@@ -2075,9 +2104,18 @@ export default function GatePassIN({ highlightId = "" }) {
             <button
               type="submit"
               data-tour="gatepass-in-submit"
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm shadow hover:bg-emerald-700"
+              disabled={submitting}
+              className={`px-4 py-2 rounded-lg text-white text-sm shadow ${
+                submitting
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-emerald-600 hover:bg-emerald-700"
+              }`}
             >
-              {editingId ? "Update Gate Pass" : "Generate Gate Pass"}
+              {submitting
+                ? "Saving..."
+                : editingId
+                  ? "Update Gate Pass"
+                  : "Generate Gate Pass"}
             </button>
 
             {editingId && (

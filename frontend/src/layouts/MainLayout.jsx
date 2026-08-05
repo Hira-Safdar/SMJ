@@ -5,7 +5,7 @@ import { toast, Toaster } from "react-hot-toast";
 import { Building2, CheckCircle2, Leaf, LockKeyhole, Mail, ShieldCheck, Sprout, Wheat } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import GuidedTour from "../components/GuidedTour";
-import api from "../services/api";
+import api, { toAbsoluteUrl } from "../services/api";
 import Pin4Input from "../components/Pin4Input";
 
 export default function MainLayout({ children }) {
@@ -69,14 +69,7 @@ export default function MainLayout({ children }) {
   const isLoginAnimatingOut =
     loginScreenState === "success" || loginScreenState === "closing";
 
-  const toAbsoluteLogoUrl = (value) => {
-    const url = String(value || "").trim();
-    if (!url) return "";
-    if (/^https?:\/\//i.test(url)) return url;
-    const base = api.defaults.baseURL || "";
-    const origin = base.replace(/\/api\/?$/i, "");
-    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
-  };
+  const toAbsoluteLogoUrl = (value) => toAbsoluteUrl(value);
 
   const resetLoginTimers = () => {
     loginTimersRef.current.forEach((id) => window.clearTimeout(id));

@@ -78,6 +78,11 @@ const ItemSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    bagsOnArrival: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     grossWeightKg: {
       type: Number,
       min: 0,

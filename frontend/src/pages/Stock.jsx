@@ -50,7 +50,10 @@ const companyOf = (row) =>
 const fmtDate = (d) => {
   if (!d) return "";
   const dt = new Date(d);
-  return isNaN(dt) ? "" : dt.toLocaleDateString();
+  if (isNaN(dt)) return "";
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${dt.getFullYear()}`;
 };
 
 const sourceBadgeClass = (type) => {

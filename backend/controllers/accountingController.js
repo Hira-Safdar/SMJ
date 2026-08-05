@@ -224,6 +224,119 @@ async function getAccountMapForLines(lines) {
   return new Map(accounts.map((a) => [String(a._id), a]));
 }
 
+function summarizeEntryAmount(lines) {
+  const totalDebit = round2((lines || []).reduce((s, l) => s + toNum(l?.debit), 0));
+  const totalCredit = round2((lines || []).reduce((s, l) => s + toNum(l?.credit), 0));
+  return { totalDebit, totalCredit, amount: round2(Math.max(totalDebit, totalCredit)) };
+}
+
+function isCashAccount(account = {}) {
+  return (
+    String(account?.subType || "").toUpperCase() === "CASH" ||
+    /^\s*cash(\s+in\s+hand)?\s*$/i.test(String(account?.name || ""))
+  );
+}
+
+function getCashEffectForLines(lines = [], accountMap = new Map()) {
+  return round2(
+    (lines || []).reduce((sum, line) => {
+      const account = accountMap.get(String(line.accountId));
+      if (!isCashAccount(account)) return sum;
+      return sum + toNum(line.debit) - toNum(line.credit);
+    }, 0)
+  );
+}
+
+async function loadEntryWithLines(entry) {
+  if (!entry) return null;
+  const lines = await JournalLine.find({ journalEntryId: entry._id }).lean();
+  const accountMap = await getAccountMapForLines(lines);
+  const withNames = lines.map((l) => ({
+    ...l,
+    accountCode: accountMap.get(String(l.accountId))?.code || "",
+    accountName: accountMap.get(String(l.accountId))?.name || "",
+    accountType: accountMap.get(String(l.accountId))?.type || "",
+    accountSubType: accountMap.get(String(l.accountId))?.subType || "",
+  }));
+  const sums = summarizeEntryAmount(withNames);
+  return { ...(entry.toObject?.() ? entry.toObject() : entry), lines: withNames, ...sums };
+}
+
+// Cascade recalculate cash-in-hand for all POSTED entries in chronological order.
+// When { renumber: true } (default), also fixes entryNo in chronological order.
+// When called from delete, pass { renumber: false } to keep existing entryNo intact.
+async function cascadeCashInHand({ renumber = true } = {}) {
+  const entries = await JournalEntry.find({ status: "POSTED" }).sort({ date: 1, createdAt: 1 }).lean();
+  if (!entries.length) return;
+
+  const allLines = await JournalLine.find({
+    journalEntryId: { $in: entries.map((e) => e._id) },
+  }).lean();
+  const accountMap = await getAccountMapForLines(allLines);
+
+  // Group lines by entryId
+  const linesByEntry = new Map();
+  allLines.forEach((line) => {
+    const key = String(line.journalEntryId);
+    const arr = linesByEntry.get(key) || [];
+    arr.push(line);
+    linesByEntry.set(key, arr);
+  });
+
+  let runningCash = 0;
+  const resolvedCashInHand = new Map();
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const entryLines = linesByEntry.get(String(e._id)) || [];
+    const cashEffect = getCashEffectForLines(entryLines, accountMap);
+    const correctEntryNo = i + 1;
+
+    if (i === 0) {
+      resolvedCashInHand.set(String(e._id), round2(toNum(e.cashInHand)));
+      runningCash = round2(toNum(e.cashInHand) + cashEffect);
+      if (renumber && e.entryNo !== correctEntryNo) {
+        await JournalEntry.updateOne({ _id: e._id }, { $set: { entryNo: correctEntryNo } });
+      }
+      continue;
+    }
+
+    const prevId = String(entries[i - 1]._id);
+    const prevCashInHand = resolvedCashInHand.get(prevId);
+    const prevLines = linesByEntry.get(prevId) || [];
+    const prevCashEffect = getCashEffectForLines(prevLines, accountMap);
+    const previousCashAfterEntry = round2(prevCashInHand + prevCashEffect);
+
+    if (String(e.cashInHandSource) === "MANUAL_EDIT") {
+      resolvedCashInHand.set(String(e._id), round2(toNum(e.cashInHand)));
+      runningCash = round2(toNum(e.cashInHand) + cashEffect);
+      if (renumber && e.entryNo !== correctEntryNo) {
+        await JournalEntry.updateOne({ _id: e._id }, { $set: { entryNo: correctEntryNo } });
+      }
+      continue;
+    }
+
+    const newCashInHand = previousCashAfterEntry;
+    resolvedCashInHand.set(String(e._id), newCashInHand);
+
+    const cashChanged = round2(toNum(e.cashInHand)) !== newCashInHand;
+    const entryNoChanged = renumber && e.entryNo !== correctEntryNo;
+
+    if (cashChanged || entryNoChanged) {
+      const update = {};
+      if (cashChanged) {
+        update.cashInHand = newCashInHand;
+        update.cashInHandSource = "CARRIED";
+      }
+      if (entryNoChanged) {
+        update.entryNo = correctEntryNo;
+      }
+      await JournalEntry.updateOne({ _id: e._id }, { $set: update });
+    }
+    runningCash = round2(newCashInHand + cashEffect);
+  }
+}
+
 // -------------------- MASTER SYNC (CUSTOMERS/PRODUCT TYPES) --------------------
 
 exports.syncPartiesFromMasters = async (_req, res) => {

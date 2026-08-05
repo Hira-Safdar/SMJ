@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, Download, Printer, Filter, X, FileText, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
-import api from "../../services/api";
+import api, { toAbsoluteUrl } from "../../services/api";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -76,13 +76,7 @@ export default function DataTable({
         const data = res.data?.data || res.data || {};
         const general = data.general || data.generalSettings || data;
         const rawLogo = general?.logoUrl || general?.logo || "";
-        const base = api.defaults.baseURL || "";
-        const origin = base.replace(/\/api\/?$/i, "");
-        const logoUrl = rawLogo
-          ? /^https?:\/\//i.test(rawLogo)
-            ? rawLogo
-            : `${origin}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
-          : "";
+        const logoUrl = toAbsoluteUrl(rawLogo);
         setPrintHeader({
           name: String(general?.companyName || general?.shortName || "").trim(),
           address: String(general?.address || "").trim(),

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
+import { fmtDate as utilFmtDate } from "../utils/dateUtils";
 import {
   BookOpen,
   BookCopy,
@@ -24,7 +25,7 @@ import {
   RefreshCcw,
   Tags,
 } from "lucide-react";
-import api from "../services/api";
+import api, { toAbsoluteUrl } from "../services/api";
 import DataTable from "../components/ui/DataTable";
 import Combobox from "../components/ui/Combobox";
 import CoaFilter, { applyCoaFilters, coaFilterSummary } from "../components/Accounting/CoaFilter";
@@ -160,9 +161,7 @@ const toTitleCase = (value) =>
   const formatAccountCreatedOn = (row = {}) => {
     const value = row.createdOn || row.createdAt;
     if (!value) return "-";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "-";
-    return d.toLocaleDateString();
+    return utilFmtDate(value);
   };
   const formatMonthDay = (iso) => {
   const d = iso ? new Date(iso) : new Date();
@@ -1023,14 +1022,7 @@ export default function AccountingFinance() {
     return `By ${date} ${time}`;
   };
 
-  const toAbsoluteLogoUrl = (value) => {
-    const url = String(value || "").trim();
-    if (!url) return "";
-    if (/^https?:\/\//i.test(url)) return url;
-    const base = api.defaults.baseURL || "";
-    const origin = base.replace(/\/api\/?$/i, "");
-    return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
-  };
+  const toAbsoluteLogoUrl = (value) => toAbsoluteUrl(value);
 
   const fetchLogoAsDataUrl = async (url) => {
     if (!url) return "";
@@ -1907,7 +1899,7 @@ export default function AccountingFinance() {
 
       const details = [
         `Voucher: ${v.voucherNo}`,
-        `Date: ${new Date(v.date).toLocaleDateString()}`,
+        `Date: ${utilFmtDate(v.date)}`,
         `Type: ${v.voucherType}`,
         `Company: ${v.companyName}`,
         v.description ? `Description: ${v.description}` : "",
@@ -4813,7 +4805,7 @@ export default function AccountingFinance() {
         if (!entry) throw new Error("Voucher not found.");
         const doc = new jsPDF();
         const title = `Journal: ${entry.voucherNo || "-"}`;
-        const subTitle = `Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`;
+        const subTitle = `Date: ${entry.date ? utilFmtDate(entry.date) : "-"}`;
         const startY = addPdfHeader(doc, title, subTitle);
 
       const rows = journalRowsForEntry(entry);
@@ -4882,7 +4874,7 @@ export default function AccountingFinance() {
         const entryStartY = index === 0 ? startY : addPdfHeader(
           doc,
           `Journal Voucher: ${entry.voucherNo || "-"}`,
-          `Date: ${entry.date ? new Date(entry.date).toLocaleDateString() : "-"}`
+          `Date: ${entry.date ? utilFmtDate(entry.date) : "-"}`
         );
 
       const body = [];
@@ -6971,7 +6963,7 @@ export default function AccountingFinance() {
               title="Daybook Entries"
               columns={[
                 { key: "entryNo", label: "Entry No" },
-                { key: "date", label: "Date", render: (v) => (v ? new Date(v).toLocaleDateString() : "-") },
+                { key: "date", label: "Date", render: (v) => (v ? utilFmtDate(v) : "-") },
                 { key: "accountName", label: "Account Name", render: (v, row) => row?.accountName || row?.account || "-" },
                 { key: "description", label: "Description", render: (v, row) => v || row?.narration || "-" },
                 { key: "cashInHand", label: "Cash in Hand" },

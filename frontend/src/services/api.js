@@ -38,4 +38,22 @@ api.interceptors.response.use(
   }
 );
 
+export const toAbsoluteUrl = (value) => {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  let absolute = url;
+  if (!/^https?:\/\//i.test(absolute)) {
+    const origin = apiUrl.replace(/\/api\/?$/i, "");
+    absolute = `${origin}${absolute.startsWith("/") ? "" : "/"}${absolute}`;
+  }
+  if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    /^http:\/\//i.test(absolute)
+  ) {
+    absolute = absolute.replace(/^http:\/\//i, "https://");
+  }
+  return absolute;
+};
+
 export default api;
