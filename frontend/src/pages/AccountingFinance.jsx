@@ -19,7 +19,6 @@ import {
   ArrowDown,
   Trash2,
   Printer,
-  Filter,
   Download,
   ChevronDown,
   RefreshCcw,
@@ -1307,6 +1306,7 @@ export default function AccountingFinance() {
       itemId: filterProductId || undefined,
       itemName: filterProductLabel || undefined,
       range: "custom",
+      limit: 5000,
     };
     const res = await api.get("/accounting/vouchers", { params });
     const vouchersData = res.data?.data || [];
@@ -6912,52 +6912,6 @@ export default function AccountingFinance() {
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-            {showVoucherFilters && (
-              <div className="grid md:grid-cols-4 gap-3 items-end">
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">Start</label>
-                  <input
-                    type="date"
-                    value={rangeStart}
-                    onChange={(e) => setRangeStart(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">End</label>
-                  <input
-                    type="date"
-                    value={rangeEnd}
-                    onChange={(e) => setRangeEnd(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-600 mb-1">Account</label>
-                  <select
-                    value={filterAccountId}
-                    onChange={(e) => setFilterAccountId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="">All accounts</option>
-                    {accountOptions.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-1 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => loadVouchers().catch(() => {})}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-                  >
-                    <RefreshCcw size={16} /> Apply
-                  </button>
-                </div>
-              </div>
-            )}
 
             <DataTable
               title="Daybook Entries"
@@ -7013,16 +6967,62 @@ export default function AccountingFinance() {
               rowClassName={(row) => (row.status === "REVERSED" ? "opacity-60" : "")}
               showFilters={false}
               showClearFilters={false}
+              showSearch={false}
+              toolbarActionsInHeader
               toolbarActions={
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowVoucherFilters((v) => !v)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Filter size={16} /> {showVoucherFilters ? "Hide Filters" : "Filters"}
-                  </button>
-                </div>
+                <FilterToggleButton
+                  open={showVoucherFilters}
+                  onToggle={() => setShowVoucherFilters((v) => !v)}
+                  title="Filters"
+                />
+              }
+              belowHeader={
+                showVoucherFilters ? (
+                  <div className="grid md:grid-cols-4 gap-3 items-end">
+                    <div className="md:col-span-1">
+                      <label className="block text-xs text-gray-600 mb-1">Start</label>
+                      <input
+                        type="date"
+                        value={rangeStart}
+                        onChange={(e) => setRangeStart(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-xs text-gray-600 mb-1">End</label>
+                      <input
+                        type="date"
+                        value={rangeEnd}
+                        onChange={(e) => setRangeEnd(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-xs text-gray-600 mb-1">Account</label>
+                      <select
+                        value={filterAccountId}
+                        onChange={(e) => setFilterAccountId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                      >
+                        <option value="">All accounts</option>
+                        {accountOptions.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-1 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => loadVouchers().catch(() => {})}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                      >
+                        <RefreshCcw size={16} /> Apply
+                      </button>
+                    </div>
+                  </div>
+                ) : null
               }
               exportColumns={[
                 { key: "entryNo", label: "Entry No" },

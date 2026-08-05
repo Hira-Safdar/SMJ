@@ -893,7 +893,7 @@ exports.getVouchers = async (req, res) => {
 
     // Pagination
     const page = Math.max(1, parseInt(req.query.page || "1", 10));
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit || "500", 10)));
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit || "5000", 10)));
     const skip = (page - 1) * limit;
 
     const entryFilter = { date: { $gte: start, $lte: end } };
