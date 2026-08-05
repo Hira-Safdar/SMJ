@@ -1612,19 +1612,6 @@ export default function SystemSettings() {
                       {settings.backupLocalFolderPath ||
                         "Default folder (inside the app's backups directory)"}
                     </div>
-                    <p className="text-[11px] text-gray-400">
-                      Pick the folder from the dialog — no typing needed, so there are no typos.
-                    </p>
-                    {typeof window !== "undefined" && !window.electronAPI?.pickBackupFolder && (
-                      <input
-                        value={settings.backupLocalFolderPath || ""}
-                        onChange={(e) =>
-                          setSettings((prev) => ({ ...prev, backupLocalFolderPath: e.target.value }))
-                        }
-                        placeholder="Or type a full path (leave empty to use the app's default backups folder)"
-                        className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                      />
-                    )}
                   </div>
                 </div>
                 <button
