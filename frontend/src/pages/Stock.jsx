@@ -1,9 +1,10 @@
 // src/pages/Stock.jsx
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import api from "../services/api";
-import { Package, Factory, Filter, Info, X } from "lucide-react";
+import { Info, X } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../components/ui/DataTable";
+import { FilterToggleButton } from "../components/ui/CollapsibleFilter";
 import {
   PieChart,
   Pie,
@@ -24,28 +25,71 @@ const COLORS = [
   "#10B981",
 ];
 
-const TABS = [
-  {
-    value: "RAW",
-    label: "Raw Inventory",
-    icon: <Package size={16} />,
-  },
-  {
-    value: "PRODUCTION",
-    label: "Production Inventory",
-    icon: <Factory size={16} />,
-  },
-];
-
-const isRawRow = (row) => {
-  if (row?.category === "PRODUCTION") return false;
-  if (row?.category === "RAW") return true;
-  const name = String(row?.productTypeName || "").toLowerCase();
-  return !row?.productTypeId || /paddy|unprocess/.test(name);
-};
-
 const companyOf = (row) =>
   String(row?.companyName || row?.brandName || "").trim() || "Mill Own Stock";
+
+function StockFilter({ companies = [], products = [], criteria = {}, onChange }) {
+  const company = criteria.company || "";
+  const product = criteria.product || "";
+
+  const productOptions = products;
+
+  const hasActive = Boolean(company) || Boolean(product);
+
+  const clear = () => onChange({ company: "", product: "" });
+
+  const selectCls =
+    "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 bg-white";
+  const labelCls = "block text-xs text-gray-500 mb-1";
+
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className={labelCls}>Company</label>
+          <select
+            value={company}
+            onChange={(e) => onChange({ company: e.target.value, product: "" })}
+            className={`${selectCls} min-w-[180px]`}
+          >
+            <option value="">All Companies</option>
+            {companies.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelCls}>Product</label>
+          <select
+            value={product}
+            onChange={(e) => onChange({ company, product: e.target.value })}
+            className={`${selectCls} min-w-[180px]`}
+          >
+            <option value="">All Products</option>
+            {productOptions.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {hasActive && (
+          <button
+            type="button"
+            onClick={clear}
+            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50"
+          >
+            <X size={14} /> Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const fmtDate = (d) => {
   if (!d) return "";
@@ -70,12 +114,13 @@ const sourceBadgeClass = (type) => {
 };
 
 export default function Stock() {
-  const [activeTab, setActiveTab] = useState("RAW");
+  const [viewMode, setViewMode] = useState("KG");
   const [rows, setRows] = useState([]);
+  const [productTypesMap, setProductTypesMap] = useState({});
   const [loading, setLoading] = useState(false);
 
-  const [companyFilter, setCompanyFilter] = useState("ALL");
-  const [productFilter, setProductFilter] = useState("ALL");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterCriteria, setFilterCriteria] = useState({});
   const [infoRow, setInfoRow] = useState(null);
 
   const loadData = useCallback(async () => {
@@ -90,12 +135,27 @@ export default function Stock() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const loadProductTypes = useCallback(async () => {
+    try {
+      const res = await api.get("/product-types");
+      const m = {};
+      (res.data?.data || []).forEach((p) => {
+        m[String(p?.name || "").trim().toLowerCase()] = p;
+      });
+      setProductTypesMap(m);
+    } catch {}
+  }, []);
 
   useEffect(() => {
-    const onChanged = () => loadData();
+    loadData();
+    loadProductTypes();
+  }, [loadData, loadProductTypes]);
+
+  useEffect(() => {
+    const onChanged = () => {
+      loadData();
+      loadProductTypes();
+    };
     window.addEventListener("smj-stock-changed", onChanged);
     window.addEventListener("stock:refresh", onChanged);
     window.addEventListener("product:refresh", onChanged);
@@ -104,15 +164,12 @@ export default function Stock() {
       window.removeEventListener("stock:refresh", onChanged);
       window.removeEventListener("product:refresh", onChanged);
     };
-  }, [loadData]);
+  }, [loadData, loadProductTypes]);
 
   // ------------------------------------------------------------------
-  // SPLIT INVENTORY
+  // ALL STOCK (paddy + products) ON ONE SCREEN
   // ------------------------------------------------------------------
-  const rawRows = useMemo(() => rows.filter(isRawRow), [rows]);
-  const productionRows = useMemo(() => rows.filter((r) => !isRawRow(r)), [rows]);
-
-  const activeRows = activeTab === "RAW" ? rawRows : productionRows;
+  const activeRows = rows;
 
   const activeCompanies = useMemo(() => {
     const s = new Set();
@@ -129,27 +186,43 @@ export default function Stock() {
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [activeRows]);
 
-  useEffect(() => {
-    if (companyFilter !== "ALL" && !activeCompanies.includes(companyFilter)) {
-      setCompanyFilter("ALL");
-    }
-  }, [activeCompanies, companyFilter]);
-
-  useEffect(() => {
-    if (productFilter !== "ALL" && !activeProducts.includes(productFilter)) {
-      setProductFilter("ALL");
-    }
-  }, [activeProducts, productFilter]);
-
   const filteredRows = useMemo(
     () =>
       activeRows.filter((r) => {
-        if (companyFilter !== "ALL" && companyOf(r) !== companyFilter) return false;
-        if (productFilter !== "ALL" && String(r.productTypeName || "").trim() !== productFilter)
-          return false;
+        const company = filterCriteria.company || "";
+        const product = filterCriteria.product || "";
+        if (company && companyOf(r) !== company) return false;
+        if (product && String(r.productTypeName || "").trim() !== product) return false;
         return true;
       }),
-    [activeRows, companyFilter, productFilter],
+    [activeRows, filterCriteria],
+  );
+
+  // ------------------------------------------------------------------
+  // KG / BAGS VIEW HELPERS
+  // ------------------------------------------------------------------
+  const displayUnit = viewMode === "BAGS" ? "bags" : "kg";
+
+  const bagWeightOf = useCallback(
+    (productName) => {
+      const p = productTypesMap[String(productName || "").trim().toLowerCase()];
+      const bw = Number(p?.conversionFactors?.Bag || 0);
+      return bw > 0 ? bw : 65;
+    },
+    [productTypesMap],
+  );
+
+  const fmtQty = useCallback(
+    (kg, productName) => {
+      const k = Number(kg || 0);
+      if (!k) return 0;
+      if (viewMode === "BAGS") {
+        const bw = bagWeightOf(productName);
+        return bw ? +Math.round((k / bw) * 10) / 10 : 0;
+      }
+      return Math.round(k);
+    },
+    [viewMode, bagWeightOf],
   );
 
   // ------------------------------------------------------------------
@@ -189,36 +262,30 @@ export default function Stock() {
   // ------------------------------------------------------------------
   const summaryStats = useMemo(() => {
     const companies = new Set();
-    let totalKg = 0;
+    let totalQty = 0;
     visibleTableData.forEach((r) => {
       Object.keys(r.companyMap || {}).forEach((c) => companies.add(c));
-      totalKg += Number(r.totalKg || 0);
+      totalQty += fmtQty(r.totalKg, r.product);
     });
     return {
       companies: companies.size,
       products: visibleTableData.length,
-      totalKg: Math.round(totalKg),
+      totalKg: Math.round(totalQty),
     };
-  }, [visibleTableData]);
+  }, [visibleTableData, fmtQty]);
 
   const donutData = useMemo(() => {
     const map = new Map();
-    if (activeTab === "RAW") {
-      visibleTableData.forEach((row) => {
-        Object.entries(row.companyMap || {}).forEach(([comp, kg]) => {
-          map.set(comp, (map.get(comp) || 0) + Number(kg || 0));
-        });
+    visibleTableData.forEach((row) => {
+      Object.entries(row.companyMap || {}).forEach(([comp, kg]) => {
+        map.set(comp, (map.get(comp) || 0) + Number(fmtQty(kg, row.product) || 0));
       });
-    } else {
-      visibleTableData.forEach((row) => {
-        map.set(row.product, (map.get(row.product) || 0) + Number(row.totalKg || 0));
-      });
-    }
+    });
     return Array.from(map.entries()).map(([name, value]) => ({
       name,
       value: Math.round(Number(value || 0)),
     }));
-  }, [visibleTableData, activeTab]);
+  }, [visibleTableData, fmtQty]);
 
   // ------------------------------------------------------------------
   // COLUMNS — product first, then one column per company, then total
@@ -252,117 +319,88 @@ export default function Stock() {
         label: c,
         align: "right",
         render: (_v, row) => {
-          const q = Math.round(Number(row.companyMap?.[c] || 0));
+          const q = fmtQty(row.companyMap?.[c], row.product);
           return q ? q : "-";
         },
       });
     });
     cols.push({
       key: "totalKg",
-      label: "Total (kg)",
+      label: `Total (${displayUnit})`,
       align: "right",
-      render: (v) => (
+      render: (_v, row) => (
         <span className="font-semibold text-emerald-700">
-          {Math.round(Number(v || 0))}
+          {fmtQty(row.totalKg, row.product)}
         </span>
       ),
     });
     return cols;
-  }, [activeCompanies]);
+  }, [activeCompanies, fmtQty, displayUnit]);
 
   const exportColumns = useMemo(() => {
     const cols = [{ key: "product", label: "Product" }];
     (activeCompanies || []).forEach((c) => {
       cols.push({ key: `cmp_${c}`, label: c });
     });
-    cols.push({ key: "totalKg", label: "Total (kg)" });
+    cols.push({ key: "totalKg", label: `Total (${displayUnit})` });
     return cols;
-  }, [activeCompanies]);
+  }, [activeCompanies, displayUnit]);
 
   const exportData = useCallback(
     (data) =>
       (data || []).map((r) => {
         const row = { product: r.product };
         (activeCompanies || []).forEach((c) => {
-          row[`cmp_${c}`] = Math.round(Number(r.companyMap?.[c] || 0)) || "";
+          row[`cmp_${c}`] = fmtQty(r.companyMap?.[c], r.product) || "";
         });
-        row.totalKg = Math.round(Number(r.totalKg || 0));
+        row.totalKg = fmtQty(r.totalKg, r.product);
         return row;
       }),
-    [activeCompanies],
+    [activeCompanies, fmtQty],
   );
+
+  const hasActiveFilters = Boolean(filterCriteria.company || filterCriteria.product);
 
   // ------------------------------------------------------------------
   // RENDER
   // ------------------------------------------------------------------
   return (
     <div className="space-y-6 w-full">
-      {/* SUB-TABS (gatepass-style) */}
-      <div className="border-b border-emerald-200" data-tour="stock-tabs">
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => {
-            const isActive = activeTab === t.value;
-            return (
-              <button
-                key={t.value}
-                onClick={() => setActiveTab(t.value)}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-t-lg border-b-2 transition whitespace-nowrap
-                  ${
-                    isActive
-                      ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
-                      : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
-                  }`}
-              >
-                {t.icon}
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* TOOLBAR */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-tour="stock-filters">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
-            <Filter size={14} />
-            Filters
-          </span>
-          <select
-            value={companyFilter}
-            onChange={(e) => setCompanyFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none"
-          >
-            <option value="ALL">All Companies</option>
-            {activeCompanies.map((c, idx) => (
-              <option key={`${c}-${idx}`} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          {activeTab === "PRODUCTION" && (
-            <select
-              value={productFilter}
-              onChange={(e) => setProductFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none"
+          <div className="inline-flex rounded-lg border border-emerald-200 bg-white p-0.5" data-tour="stock-view-toggle">
+            <button
+              type="button"
+              onClick={() => setViewMode("KG")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                viewMode === "KG" ? "bg-emerald-600 text-white" : "text-gray-500 hover:text-emerald-700"
+              }`}
             >
-              <option value="ALL">All Products</option>
-              {activeProducts.map((p, idx) => (
-                <option key={`${p}-${idx}`} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+              Per kg
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("BAGS")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                viewMode === "BAGS" ? "bg-emerald-600 text-white" : "text-gray-500 hover:text-emerald-700"
+              }`}
+            >
+              No. of Bags
+            </button>
+          </div>
+          {hasActiveFilters && (
+            <span className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Filters Applied
+            </span>
           )}
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600">
           <span>{summaryStats.companies} Companies</span>
-          {activeTab === "PRODUCTION" && (
-            <span>{summaryStats.products} Products</span>
-          )}
+          <span>{summaryStats.products} Products</span>
           <span className="font-semibold text-emerald-700">
-            {summaryStats.totalKg.toLocaleString()} kg
+            {summaryStats.totalKg.toLocaleString()} {displayUnit}
           </span>
         </div>
       </div>
@@ -372,7 +410,7 @@ export default function Stock() {
         <div className="lg:col-span-8 bg-white rounded-lg shadow p-4">
            <DataTable
              data-tour="stock-table"
-             title={activeTab === "RAW" ? "Raw Inventory" : "Production Inventory"}
+             title="Stock Inventory"
             columns={pivotColumns}
             data={loading ? [] : visibleTableData}
             idKey="__rowId"
@@ -381,6 +419,25 @@ export default function Stock() {
             showSearch={false}
             showFilters={false}
             showClearFilters={false}
+            toolbarActionsInHeader
+            toolbarActions={
+              <FilterToggleButton
+                open={filterOpen}
+                onToggle={() => setFilterOpen((o) => !o)}
+                title="Filters"
+                dataTour="stock-filter-toggle"
+              />
+            }
+            belowHeader={
+              filterOpen ? (
+                <StockFilter
+                  companies={activeCompanies}
+                  products={activeProducts}
+                  criteria={filterCriteria}
+                  onChange={setFilterCriteria}
+                />
+              ) : null
+            }
             exportColumns={exportColumns}
             exportData={exportData}
           />
@@ -405,7 +462,7 @@ export default function Stock() {
                       <Cell key={index} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => `${Math.round(Number(value) || 0)} kg`} />
+                  <Tooltip formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`} />
                   <Legend wrapperStyle={{ fontSize: "10px" }} />
                 </PieChart>
               </ResponsiveContainer>
@@ -432,8 +489,8 @@ export default function Stock() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">{infoRow.product}</h3>
                 <p className="text-xs text-gray-500">
-                  {activeTab === "RAW" ? "Raw Inventory" : "Production Inventory"} · Total{" "}
-                  {Math.round(Number(infoRow.totalKg || 0)).toLocaleString()} kg
+                  Stock Inventory · Total{" "}
+                  {fmtQty(infoRow.totalKg, infoRow.product).toLocaleString()} {displayUnit}
                 </p>
               </div>
               <button
@@ -466,14 +523,14 @@ export default function Stock() {
                         <div className="flex items-center gap-3 text-xs">
                           <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            +{Math.round(inTotal).toLocaleString()} kg in
+                            +{fmtQty(inTotal, infoRow.product).toLocaleString()} {displayUnit} in
                           </span>
                           <span className="inline-flex items-center gap-1 font-medium text-red-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                            −{Math.round(outTotal).toLocaleString()} kg out
+                            −{fmtQty(outTotal, infoRow.product).toLocaleString()} {displayUnit} out
                           </span>
                           <span className="text-gray-500">
-                            Balance {Math.round(Number(infoRow.companyMap?.[comp] || 0)).toLocaleString()} kg
+                            Balance {fmtQty(infoRow.companyMap?.[comp], infoRow.product).toLocaleString()} {displayUnit}
                           </span>
                         </div>
                       </div>
@@ -515,7 +572,7 @@ export default function Stock() {
                                   isOut ? "text-red-600" : "text-emerald-600"
                                 }`}
                               >
-                                {isOut ? "−" : "+"}{qty.toLocaleString()} kg
+                                {isOut ? "−" : "+"}{fmtQty(qty, infoRow.product).toLocaleString()} {displayUnit}
                               </span>
                             </li>
                           );
