@@ -15,7 +15,9 @@ const ProductionBatchSchema = new mongoose.Schema(
       default: "IN_PROCESS",
     },
 
-    // Raw paddy (kg) for this daily run
+    // Raw material (kg) for this daily run.
+    // Kept as `paddyWeightKg` for backward compatibility with existing data —
+    // semantically it is now "sourceWeightKg" (any product from stock, not only paddy).
     paddyWeightKg: { type: Number, required: true, min: 0 },
     sourceCompanyId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -23,6 +25,18 @@ const ProductionBatchSchema = new mongoose.Schema(
       default: null,
     },
     sourceCompanyName: { type: String, required: true, trim: true },
+
+    // The raw material product consumed from stock for this batch.
+    // null + "Unprocessed Paddy" => legacy raw paddy allocation.
+    sourceProductTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductType",
+      default: null,
+    },
+    sourceProductTypeName: { type: String, default: "Unprocessed Paddy", trim: true },
+    // Number of bags of raw material reserved from stock.
+    sourceBags: { type: Number, default: 0, min: 0 },
+
     ownerType: {
       type: String,
       enum: ["SMJ", "CUSTOM"],

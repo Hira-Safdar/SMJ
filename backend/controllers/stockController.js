@@ -57,8 +57,7 @@ function buildLedgerSource(l, delta) {
   };
 }
 
-exports.getCurrentStock = async (req, res) => {
-  try {
+async function computeCurrentStock() {
     const map = new Map();
     const companyCache = new Map(); // companyId -> companyName
 
@@ -277,6 +276,14 @@ exports.getCurrentStock = async (req, res) => {
       totalKg: +rows.reduce((sum, r) => sum + r.balanceKg, 0).toFixed(3),
     };
 
+    return { rows, summary };
+}
+
+exports.computeCurrentStock = computeCurrentStock;
+
+exports.getCurrentStock = async (req, res) => {
+  try {
+    const { rows, summary } = await computeCurrentStock();
     return res.json({ success: true, data: rows, summary });
   } catch (err) {
     console.error("getCurrentStock error:", err);

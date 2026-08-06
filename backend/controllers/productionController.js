@@ -4,6 +4,8 @@ const ProductionBatch = require("../models/productionBatchModel");
 const ProductionGroup = require("../models/productionGroupModel");
 const StockLedger = require("../models/stockLedgerModel");
 const SystemSettings = require("../models/systemSettingsModel");
+const ProductType = require("../models/productTypeModel");
+const { computeCurrentStock } = require("./stockController");
 
 // PB-YYYYMMDD-HHMMSS / PG-YYYYMMDD-HHMMSS
 function generateNo(prefix) {
@@ -23,22 +25,42 @@ function normBrand(s) {
 }
 
 /**
- * Get current paddy balance (kg) from stock ledger (Paddy only).
+ * Current stock balance (kg) for a company + product from the live stock view.
+ * Mirrors /api/stock/current so validation always matches what the UI shows.
+ * paddy (productTypeId null) matches by product name ("Paddy"/"Unprocessed Paddy").
  */
-async function getPaddyBalanceKg(companyName = "") {
-  const name = String(companyName || "").trim();
+async function getStockBalanceKg(companyName, productTypeId, productTypeName) {
+  const name = String(companyName || "").trim().toLowerCase();
   if (!name) return 0;
-  const rows = await StockLedger.find({
-    productTypeId: null,
-    productTypeName: { $in: ["Paddy", "Unprocessed Paddy"] },
-    companyName: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
-  }).lean();
-  let balance = 0;
-  rows.forEach((r) => {
-    const qty = Number(r.netWeightKg) || 0;
-    balance += r.type === "OUT" ? -qty : qty;
+  const { rows } = await computeCurrentStock();
+  const row = (rows || []).find((r) => {
+    if (String(r.companyName || "").toLowerCase() !== name) return false;
+    if (productTypeId) return String(r.productTypeId || "") === String(productTypeId);
+    return (
+      String(r.productTypeName || "").toLowerCase() ===
+      String(productTypeName || "Unprocessed Paddy").toLowerCase()
+    );
   });
-  return balance;
+  return row ? Number(row.balanceKg || 0) : 0;
+}
+
+/** Resolve the standard bag weight (kg) for a product (default 65). */
+async function bagWeightOf(productTypeId, productTypeName) {
+  if (productTypeId) {
+    const p = await ProductType.findById(productTypeId)
+      .select("conversionFactors")
+      .lean();
+    const bw = Number(p?.conversionFactors?.Bag || 0);
+    if (bw > 0) return bw;
+  }
+  return 65;
+}
+
+/** Product name to write into the stock ledger (paddy stays legacy "Unprocessed Paddy"). */
+function ledgerProductName(productTypeId, productTypeName) {
+  return productTypeId
+    ? String(productTypeName || "").trim() || "Product"
+    : "Unprocessed Paddy";
 }
 
 /** Recompute a group's totals from its batches + outputs. */
@@ -116,30 +138,26 @@ async function ensureGroup(sourceCompanyId, sourceCompanyName) {
 
 /**
  * POST /api/production/batches
- * Body: { date, paddyWeightKg, sourceCompanyName?, remarks? }
- * Creates a daily batch run and reserves paddy (OUT).
+ * Body: { date, sourceCompanyName, sourceProductTypeId?, sourceProductTypeName?, sourceBags?, sourceWeightKg?, remarks? }
+ * Creates a daily batch run and reserves the raw material (OUT) from stock
+ * for the selected company + product. Products (not only paddy) can be the raw material.
  */
 exports.createBatch = async (req, res) => {
   try {
-    const { date, paddyWeightKg, remarks, sourceCompanyId, sourceCompanyName } =
-      req.body;
+    const {
+      date,
+      remarks,
+      sourceCompanyId,
+      sourceCompanyName,
+      sourceProductTypeId,
+      sourceProductTypeName,
+      sourceBags,
+      sourceWeightKg,
+    } = req.body;
     if (!date)
       return res
         .status(400)
         .json({ success: false, message: "Field 'date' is required" });
-
-    if (paddyWeightKg == null || isNaN(Number(paddyWeightKg))) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Field 'paddyWeightKg' is required" });
-    }
-
-    const requestedKg = Number(paddyWeightKg);
-    if (requestedKg <= 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Paddy weight must be greater than 0" });
-    }
 
     const sourceName = normBrand(sourceCompanyName);
     if (!sourceName) {
@@ -149,13 +167,41 @@ exports.createBatch = async (req, res) => {
       });
     }
 
-    const paddyBalance = await getPaddyBalanceKg(sourceName);
-    if (paddyBalance < requestedKg) {
+    const productTypeId = sourceProductTypeId || null;
+    const productTypeName =
+      String(sourceProductTypeName || "").trim() || "Unprocessed Paddy";
+
+    let consumedKg = 0;
+    if (sourceWeightKg != null && !isNaN(Number(sourceWeightKg))) {
+      consumedKg = Number(sourceWeightKg);
+    } else {
+      const bags = Number(sourceBags) || 0;
+      const bw = await bagWeightOf(productTypeId, productTypeName);
+      consumedKg = bags * bw;
+    }
+    if (!(consumedKg > 0)) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient paddy stock for ${sourceName}. Available: ${paddyBalance.toFixed(
+        message: "Raw material weight must be greater than 0.",
+      });
+    }
+
+    const bags =
+      sourceBags != null && !isNaN(Number(sourceBags))
+        ? Math.floor(Number(sourceBags))
+        : Math.floor(consumedKg / (await bagWeightOf(productTypeId, productTypeName)));
+
+    const available = await getStockBalanceKg(
+      sourceName,
+      productTypeId,
+      productTypeName
+    );
+    if (available < consumedKg) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient stock for ${productTypeName} at ${sourceName}. Available: ${available.toFixed(
           3
-        )} kg. Add paddy via Gate Pass Inward.`,
+        )} kg.`,
       });
     }
 
@@ -182,9 +228,12 @@ exports.createBatch = async (req, res) => {
       batchNo,
       date,
       status: "IN_PROCESS",
-      paddyWeightKg: requestedKg,
+      paddyWeightKg: consumedKg,
       sourceCompanyId: sourceCompanyId || null,
       sourceCompanyName: sourceName,
+      sourceProductTypeId: productTypeId,
+      sourceProductTypeName: productTypeName,
+      sourceBags: bags,
       ownerType,
       groupId: group._id,
       remarks: remarks || "",
@@ -197,13 +246,13 @@ exports.createBatch = async (req, res) => {
         type: "OUT",
         companyId: sourceCompanyId || null,
         companyName: sourceName,
-        productTypeId: null,
-        productTypeName: "Unprocessed Paddy",
-        numBags: 0,
+        productTypeId: productTypeId,
+        productTypeName: ledgerProductName(productTypeId, productTypeName),
+        numBags: bags,
         netWeightKg: saved.paddyWeightKg,
         gatePassId: null,
         gatePassNo: "",
-        remarks: `Paddy assigned to production batch ${saved.batchNo} (${sourceName})`,
+        remarks: `Raw material assigned to production batch ${saved.batchNo} (${sourceName}) - ${productTypeName}`,
       });
       await ledger.save();
     } catch (e) {
@@ -225,7 +274,7 @@ exports.createBatch = async (req, res) => {
 
 /**
  * PUT /api/production/batches/:id
- * Body: { date?, paddyWeightKg?, remarks? } — only for IN_PROCESS.
+ * Body: { date?, paddyWeightKg?, sourceBags?, sourceWeightKg?, remarks? } — only for IN_PROCESS.
  */
 exports.updateBatch = async (req, res) => {
   try {
@@ -246,27 +295,49 @@ exports.updateBatch = async (req, res) => {
       });
     }
 
-    const { date, paddyWeightKg, remarks } = req.body;
+    const { date, paddyWeightKg, sourceBags, sourceWeightKg, remarks } = req.body;
 
     if (date) batch.date = date;
 
+    const productTypeId = batch.sourceProductTypeId || null;
+    const productTypeName =
+      String(batch.sourceProductTypeName || "").trim() || "Unprocessed Paddy";
+
     let delta = 0;
-    if (paddyWeightKg != null && !isNaN(Number(paddyWeightKg))) {
-      const newWeight = Number(paddyWeightKg);
+    let newWeight = null;
+    if (sourceBags != null && !isNaN(Number(sourceBags))) {
+      const bw = await bagWeightOf(productTypeId, productTypeName);
+      newWeight = Number(sourceBags) * bw;
+    } else if (sourceWeightKg != null && !isNaN(Number(sourceWeightKg))) {
+      newWeight = Number(sourceWeightKg);
+    } else if (paddyWeightKg != null && !isNaN(Number(paddyWeightKg))) {
+      newWeight = Number(paddyWeightKg);
+    }
+    if (newWeight != null) {
       delta = newWeight - batch.paddyWeightKg;
       if (delta > 0) {
         const sourceName = String(batch.sourceCompanyName || "").trim();
-        const available = await getPaddyBalanceKg(sourceName);
+        const available = await getStockBalanceKg(
+          sourceName,
+          productTypeId,
+          productTypeName
+        );
         if (available < delta) {
           return res.status(400).json({
             success: false,
-            message: `Insufficient paddy stock for ${sourceName}. Available extra: ${available.toFixed(
+            message: `Insufficient stock for ${productTypeName} at ${sourceName}. Available extra: ${available.toFixed(
               3
             )} kg.`,
           });
         }
       }
       batch.paddyWeightKg = newWeight;
+      if (sourceBags != null && !isNaN(Number(sourceBags))) {
+        batch.sourceBags = Number(sourceBags);
+      } else if (newWeight > 0) {
+        const bw = await bagWeightOf(productTypeId, productTypeName);
+        batch.sourceBags = Math.floor(newWeight / bw);
+      }
     }
 
     if (remarks !== undefined) {
@@ -284,15 +355,15 @@ exports.updateBatch = async (req, res) => {
           type: isIncrease ? "OUT" : "IN",
           companyId: batch.sourceCompanyId || null,
           companyName: sourceName,
-          productTypeId: null,
-          productTypeName: "Unprocessed Paddy",
-          numBags: 0,
+          productTypeId: productTypeId,
+          productTypeName: ledgerProductName(productTypeId, productTypeName),
+          numBags: isIncrease ? (batch.sourceBags || 0) : 0,
           netWeightKg: Math.abs(delta),
           gatePassId: null,
           gatePassNo: "",
           remarks: isIncrease
-            ? `Paddy adjustment (extra) - ${saved.batchNo} (${sourceName})`
-            : `Paddy adjustment (return) - ${saved.batchNo} (${sourceName})`,
+            ? `Raw material adjustment (extra) - ${saved.batchNo} (${sourceName})`
+            : `Raw material adjustment (return) - ${saved.batchNo} (${sourceName})`,
         });
         await ledger.save();
       } catch (e) {
@@ -337,6 +408,9 @@ exports.deleteBatch = async (req, res) => {
     const paddyWeight = batch.paddyWeightKg || 0;
     const sourceName = String(batch.sourceCompanyName || "").trim();
     const groupId = batch.groupId;
+    const productTypeId = batch.sourceProductTypeId || null;
+    const productTypeName =
+      String(batch.sourceProductTypeName || "").trim() || "Unprocessed Paddy";
 
     await batch.deleteOne();
 
@@ -347,13 +421,13 @@ exports.deleteBatch = async (req, res) => {
           type: "IN",
           companyId: batch.sourceCompanyId || null,
           companyName: sourceName,
-          productTypeId: null,
-          productTypeName: "Unprocessed Paddy",
-          numBags: 0,
+          productTypeId: productTypeId,
+          productTypeName: ledgerProductName(productTypeId, productTypeName),
+          numBags: batch.sourceBags || 0,
           netWeightKg: paddyWeight,
           gatePassId: null,
           gatePassNo: "",
-          remarks: `Batch deleted, paddy returned - ${batch.batchNo} (${sourceName})`,
+          remarks: `Batch deleted, raw material returned - ${batch.batchNo} (${sourceName}) - ${productTypeName}`,
         });
       } catch (e) {
         console.error("StockLedger (deleteBatch) error:", e);
@@ -959,18 +1033,28 @@ exports.markGroupDone = async (req, res) => {
     const remaining = Number(group.remainingPaddyKg || 0);
     if (remaining > 0) {
       try {
+        // Return unused raw material to stock. Use the most recent batch's source product.
+        const lastBatch = await ProductionBatch.findOne({
+          groupId: group._id,
+        })
+          .sort({ createdAt: -1 })
+          .lean();
+        const retProductTypeId = lastBatch?.sourceProductTypeId ?? null;
+        const retProductTypeName =
+          String(lastBatch?.sourceProductTypeName || "").trim() ||
+          "Unprocessed Paddy";
         await StockLedger.create({
           date: new Date(),
           type: "IN",
           companyId: group.sourceCompanyId || null,
           companyName: group.sourceCompanyName || "",
-          productTypeId: null,
-          productTypeName: "Unprocessed Paddy",
+          productTypeId: retProductTypeId,
+          productTypeName: ledgerProductName(retProductTypeId, retProductTypeName),
           numBags: 0,
           netWeightKg: remaining,
           gatePassId: null,
           gatePassNo: "",
-          remarks: `Remaining paddy returned - ${group.groupNo} (${group.sourceCompanyName})`,
+          remarks: `Remaining raw material returned - ${group.groupNo} (${group.sourceCompanyName}) - ${retProductTypeName}`,
         });
       } catch (e) {
         console.error("StockLedger (markGroupDone) error:", e);

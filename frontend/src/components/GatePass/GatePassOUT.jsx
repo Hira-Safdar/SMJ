@@ -2091,6 +2091,9 @@ export default function GatePassOUT({ highlightId = "" }) {
                       <label className="block text-xs text-gray-500">No. of Bags</label>
                     </div>
                     <input
+                      type="number"
+                      min="0"
+                      step="1"
                       value={it.bagCount || ""}
                       onChange={(e) => updateItemValue(idx, "bagCount", e.target.value)}
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
@@ -2106,6 +2109,9 @@ export default function GatePassOUT({ highlightId = "" }) {
                   <div className="md:col-span-4">
                     <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                     <input
+                      type="number"
+                      min="0"
+                      step="any"
                       value={it.emptyBagWeightKg || ""}
                       onChange={(e) => updateItemValue(idx, "emptyBagWeightKg", e.target.value)}
                       placeholder="0"
@@ -2115,6 +2121,9 @@ export default function GatePassOUT({ highlightId = "" }) {
                   <div className="md:col-span-4">
                     <label className="block text-xs text-gray-500 mb-1">Weight Per Bag (kg)</label>
                     <input
+                      type="number"
+                      min="0"
+                      step="any"
                       value={it.bagWeightEachKg || ""}
                       onChange={(e) => updateItemValue(idx, "bagWeightEachKg", e.target.value)}
                       placeholder="65"
@@ -2171,6 +2180,9 @@ export default function GatePassOUT({ highlightId = "" }) {
                       <label className="block text-xs text-gray-500">Price (per man)</label>
                     </div>
                     <input
+                      type="number"
+                      min="0"
+                      step="1"
                       value={it.rate || ""}
                       onChange={(e) => updateItemValue(idx, "rate", e.target.value)}
                       placeholder="0"
@@ -2232,6 +2244,9 @@ export default function GatePassOUT({ highlightId = "" }) {
             <div>
               <label className="block text-xs text-gray-500 mb-1">Amount Paid (Rs)</label>
               <input
+                type="number"
+                min="0"
+                step="1"
                 value={paymentInfo.amountPaid}
                 onChange={(e) =>
                   setPaymentInfo((p) => {
