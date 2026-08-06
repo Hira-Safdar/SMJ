@@ -375,12 +375,12 @@ export default function Stock() {
       (data || []).map((r) => {
         const row = { product: r.product };
         (activeCompanies || []).forEach((c) => {
-          row[`cmp_${c}`] = fmtQty(r.companyMap?.[c], r.product) || "";
+          row[`cmp_${c}`] = displayQty(r.companyMap?.[c], r.product);
         });
-        row.totalKg = fmtQty(r.totalKg, r.product);
+        row.totalKg = displayQty(r.totalKg, r.product);
         return row;
       }),
-    [activeCompanies, fmtQty],
+    [activeCompanies, displayQty],
   );
 
   const hasActiveFilters = Boolean(filterCriteria.company || filterCriteria.product);
@@ -514,7 +514,7 @@ export default function Stock() {
                 <h3 className="text-lg font-semibold text-gray-900">{infoRow.product}</h3>
                 <p className="text-xs text-gray-500">
                   Stock Inventory · Total{" "}
-                  {fmtQty(infoRow.totalKg, infoRow.product).toLocaleString()} {displayUnit}
+                  {displayQtyWithUnit(infoRow.totalKg, infoRow.product)}
                 </p>
               </div>
               <button
@@ -547,14 +547,14 @@ export default function Stock() {
                         <div className="flex items-center gap-3 text-xs">
                           <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            +{fmtQty(inTotal, infoRow.product).toLocaleString()} {displayUnit} in
+                            +{displayQtyWithUnit(inTotal, infoRow.product)} in
                           </span>
                           <span className="inline-flex items-center gap-1 font-medium text-red-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                            −{fmtQty(outTotal, infoRow.product).toLocaleString()} {displayUnit} out
+                            −{displayQtyWithUnit(outTotal, infoRow.product)} out
                           </span>
                           <span className="text-gray-500">
-                            Balance {fmtQty(infoRow.companyMap?.[comp], infoRow.product).toLocaleString()} {displayUnit}
+                            Balance {displayQtyWithUnit(infoRow.companyMap?.[comp], infoRow.product)}
                           </span>
                         </div>
                       </div>
@@ -596,7 +596,7 @@ export default function Stock() {
                                   isOut ? "text-red-600" : "text-emerald-600"
                                 }`}
                               >
-                                {isOut ? "−" : "+"}{fmtQty(qty, infoRow.product).toLocaleString()} {displayUnit}
+                                {isOut ? "−" : "+"}{displayQtyWithUnit(qty, infoRow.product)}
                               </span>
                             </li>
                           );
