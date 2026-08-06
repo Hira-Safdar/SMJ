@@ -30,6 +30,7 @@ export default function GatePassOUT({ highlightId = "" }) {
       bagCount: "",
       bagWeightEachKg: "65",
       emptyBagWeightKg: "",
+      totalWeightKg: "",
       netWeightKg: "",
       netWeightManDisplay: "",
       rateType: "MAN",
@@ -73,10 +74,11 @@ export default function GatePassOUT({ highlightId = "" }) {
     const bagWeightEach = Number(item?.bagWeightEachKg || 0);
     const totalEmptyWeight = Number(item?.emptyBagWeightKg || 0);
     const rate = Number(item?.rate || 0);
-    const grossWeightKg = +(bagCount * bagWeightEach).toFixed(2);
-    const netWeightKg = +Math.max(grossWeightKg - totalEmptyWeight, 0).toFixed(2);
+    const totalWeightKg = +(bagCount * bagWeightEach).toFixed(2);
+    const grossWeightKg = totalWeightKg;
+    const netWeightKg = +Math.max(totalWeightKg - totalEmptyWeight, 0).toFixed(2);
     const amount = Math.round((rate * netWeightKg) / 40);
-    return { grossWeightKg, totalEmptyWeight, netWeightKg, amount };
+    return { totalWeightKg, grossWeightKg, totalEmptyWeight, netWeightKg, amount };
   };
 
   useEffect(() => {
@@ -774,7 +776,8 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   const renderCustomerDropdown = () => {
     const errorMessage = errors.customer;
-    const inputValue = String(getCustomerDisplayName(form) || "").trim();
+    const inputValue =
+      form.customerMode === "input" ? String(form.customerInput || "") : String(form.customer || "");
     const filteredCustomers = getFilteredCustomers(inputValue);
     return (
       <div className="relative">
@@ -897,7 +900,8 @@ export default function GatePassOUT({ highlightId = "" }) {
       }
     }
     row.rateType = "MAN";
-    const { netWeightKg, amount } = calculateItemTotals(row);
+    const { totalWeightKg, netWeightKg, amount } = calculateItemTotals(row);
+    row.totalWeightKg = totalWeightKg ? formatNumberInputValue(totalWeightKg) : "";
     row.netWeightKg = formatNumberInputValue(netWeightKg);
     row.netWeightManDisplay = netWeightKg ? formatKgToMan(netWeightKg) : "";
     row.amount = amount ? String(amount) : "";
@@ -980,7 +984,7 @@ export default function GatePassOUT({ highlightId = "" }) {
 
   const renderBrandDropdown = (item, idx) => {
     const errorMessage = errors.itemRows?.[idx]?.brand;
-    const selectedLabel = String(item?.brand || "").trim();
+    const selectedLabel = String(item?.brand || "");
     const filteredBrands = getFilteredBrands(selectedLabel);
     return (
       <div className="relative">
@@ -1081,6 +1085,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         bagCount: "",
         bagWeightEachKg: "65",
         emptyBagWeightKg: "",
+        totalWeightKg: "",
         netWeightKg: "",
         netWeightManDisplay: "",
         rateType: "MAN",
@@ -1142,6 +1147,7 @@ export default function GatePassOUT({ highlightId = "" }) {
             bagWeightEachKg: Number(it.bagWeightEachKg || 0),
             emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
             grossWeightKg: Number((Number(it.bagCount || 0) || 0) * (Number(it.bagWeightEachKg || 0) || 0)) || 0,
+            totalWeightKg: Number((Number(it.bagCount || 0) || 0) * (Number(it.bagWeightEachKg || 0) || 0)) || 0,
             weightAtSmjKg: 0,
             netWeightKg: Number(it.netWeightKg || 0),
             rateType: "MAN",
@@ -1202,6 +1208,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           bagCount: "",
           bagWeightEachKg: "65",
           emptyBagWeightKg: "",
+          totalWeightKg: "",
           netWeightKg: "",
           netWeightManDisplay: "",
           rateType: "MAN",
@@ -1256,6 +1263,12 @@ export default function GatePassOUT({ highlightId = "" }) {
               bagCount: it.bagCount != null ? String(it.bagCount) : "",
               bagWeightEachKg: it.bagWeightEachKg != null ? String(it.bagWeightEachKg) : (it.bagWeightKg != null ? String(it.bagWeightKg) : "65"),
               emptyBagWeightKg: it.emptyBagWeightKg != null ? String(it.emptyBagWeightKg) : "",
+              totalWeightKg:
+                it.grossWeightKg != null
+                  ? formatNumberInputValue(it.grossWeightKg)
+                  : it.totalWeightKg != null
+                    ? formatNumberInputValue(it.totalWeightKg)
+                    : "",
               netWeightKg:
                 it.netWeightKg != null
                   ? formatNumberInputValue(it.netWeightKg)
@@ -1278,6 +1291,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         bagCount: "",
         bagWeightEachKg: "65",
         emptyBagWeightKg: "",
+        totalWeightKg: "",
         netWeightKg: "",
         netWeightManDisplay: "",
         rateType: "MAN",
@@ -1404,6 +1418,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           const emptyW = item.emptyBagWeightKg || 0;
           const net = item.netWeightKg || item.quantity || 0;
           const netMan = formatKgToMan(net);
+          const totalW = item.grossWeightKg || item.totalWeightKg || bags * bagW || 0;
           return `<tr>
           <td style="border:1px solid #ddd;padding:6px;">${companyName || "-"}</td>
           <td style="border:1px solid #ddd;padding:6px;">${displayName}</td>
@@ -1412,6 +1427,9 @@ export default function GatePassOUT({ highlightId = "" }) {
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${bagW}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${formatNumberInputValue(
             net
+          )}</td>
+          <td style="border:1px solid #ddd;padding:6px;text-align:right;">${formatNumberInputValue(
+            totalW
           )}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${netMan}</td>
           <td style="border:1px solid #ddd;padding:6px;text-align:right;">${item.rate || 0}</td>
@@ -1477,7 +1495,7 @@ export default function GatePassOUT({ highlightId = "" }) {
       </div>
 
       <table>
-        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Bags</th><th style="text-align:right;">Total Empty Bags</th><th style="text-align:right;">Weight/Bag</th><th style="text-align:right;">Net kg</th><th style="text-align:right;">Net man/kg</th><th style="text-align:right;">Price/Man</th><th style="text-align:right;">Amount</th></tr></thead>
+        <thead><tr><th>Company</th><th>Product</th><th style="text-align:right;">Bags</th><th style="text-align:right;">Total Empty Bags</th><th style="text-align:right;">Weight/Bag</th><th style="text-align:right;">Net kg</th><th style="text-align:right;">Total Weight</th><th style="text-align:right;">Net man/kg</th><th style="text-align:right;">Price/Man</th><th style="text-align:right;">Amount</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
         <tfoot>
           <tr style="background:#f0fdf4;font-weight:700;">
@@ -1485,6 +1503,12 @@ export default function GatePassOUT({ highlightId = "" }) {
             <td style="border:1px solid #ddd;padding:6px;text-align:right;">${formatNumberInputValue(
               (row.items || []).reduce(
                 (sum, it) => sum + Number(it.netWeightKg || it.quantity || 0),
+                0
+              )
+            )}</td>
+            <td style="border:1px solid #ddd;padding:6px;text-align:right;">${formatNumberInputValue(
+              (row.items || []).reduce(
+                (sum, it) => sum + Number(it.grossWeightKg || it.totalWeightKg || 0),
                 0
               )
             )}</td>
@@ -1560,6 +1584,14 @@ export default function GatePassOUT({ highlightId = "" }) {
       render: (_val, row) => itemListText(row, (it) => {
         const net = formatNumberInputValue(it.netWeightKg || it.quantity || 0);
         return net ? `${net} kg` : "";
+      }),
+    },
+    {
+      key: "totalWeightKg",
+      label: "Total Weight",
+      render: (_val, row) => itemListText(row, (it) => {
+        const total = formatNumberInputValue(it.grossWeightKg || it.totalWeightKg || 0);
+        return total ? `${total} kg` : "";
       }),
     },
     {
@@ -1639,6 +1671,7 @@ export default function GatePassOUT({ highlightId = "" }) {
     { key: "bagCount", label: "No. of Bags" },
     { key: "emptyBagWeightKg", label: "Weight of Empty Bags (kg)" },
     { key: "bagWeightEachKg", label: "Weight Per Bag (kg)" },
+    { key: "totalWeightKg", label: "Total Weight (kg)" },
     { key: "netWeightKg", label: "Net Weight (kg)" },
     { key: "netWeightMan", label: "Net Weight (man / kg)" },
     { key: "rate", label: "Price (per man)" },
@@ -1661,6 +1694,7 @@ export default function GatePassOUT({ highlightId = "" }) {
         bagCount: it.bagCount || "",
         emptyBagWeightKg: it.emptyBagWeightKg || "",
         bagWeightEachKg: it.bagWeightEachKg || it.bagWeightKg || "",
+        totalWeightKg: formatNumberInputValue(it.grossWeightKg || it.totalWeightKg || 0),
         netWeightKg: formatNumberInputValue(it.netWeightKg || it.quantity || 0),
         netWeightMan: formatKgToMan(it.netWeightKg || it.quantity || 0),
         rate: it.rate || "",
@@ -1987,10 +2021,67 @@ export default function GatePassOUT({ highlightId = "" }) {
                             {opt.available <= 0 ? " (Out of stock)" : ""}
                           </option>
                         ))}
+                        <option value={OTHER_OPTION}>+ Add New Product</option>
                       </select>
                     ) : (
-                      <div className="w-full rounded-lg border px-3 py-2 text-sm text-gray-500 bg-gray-50">
-                        Select product from list
+                      <div className="flex gap-2 items-start">
+                        <input
+                          value={it.productInput || ""}
+                          onChange={(e) =>
+                            setItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = {
+                                ...updated[idx],
+                                productInput: String(e.target.value)
+                                  .replace(/[^A-Za-z0-9\s.,&()\-]/g, "")
+                                  .replace(/\s+/g, " ")
+                                  .slice(0, 50),
+                              };
+                              return updated;
+                            })
+                          }
+                          placeholder="Type new product name"
+                          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                            errors.itemRows?.[idx]?.productName
+                              ? "border-red-500 bg-red-50"
+                              : "border-gray-300"
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const name = String(it.productInput || "").trim();
+                            if (!name) {
+                              clearItemFieldError(idx, "productName");
+                              setErrors((prev) => ({
+                                ...prev,
+                                itemRows: {
+                                  ...(prev.itemRows || {}),
+                                  [idx]: {
+                                    ...(prev.itemRows?.[idx] || {}),
+                                    productName: "Type a product name.",
+                                  },
+                                },
+                              }));
+                              return;
+                            }
+                            const created = await ensureProductOption(it.brand, name);
+                            setItems((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = {
+                                ...updated[idx],
+                                productName: created?.name || name,
+                                productMode: "list",
+                                productInput: "",
+                              };
+                              return updated;
+                            });
+                            clearItemFieldError(idx, "productName");
+                          }}
+                          className="px-3 py-2 rounded border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50"
+                        >
+                          List
+                        </button>
                       </div>
                     )}
                     {renderFieldError(errors.itemRows?.[idx]?.productName)}
@@ -2011,8 +2102,8 @@ export default function GatePassOUT({ highlightId = "" }) {
                     {renderFieldError(errors.itemRows?.[idx]?.bagCount)}
                   </div>
                 </div>
-                <div className="grid md:grid-cols-3 gap-3 items-start">
-                  <div>
+                <div className="grid md:grid-cols-12 gap-3 items-start">
+                  <div className="md:col-span-4">
                     <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>
                     <input
                       value={it.emptyBagWeightKg || ""}
@@ -2021,7 +2112,7 @@ export default function GatePassOUT({ highlightId = "" }) {
                       className="w-full rounded-lg border px-3 py-2 text-sm outline-none border-gray-300"
                     />
                   </div>
-                  <div>
+                  <div className="md:col-span-4">
                     <label className="block text-xs text-gray-500 mb-1">Weight Per Bag (kg)</label>
                     <input
                       value={it.bagWeightEachKg || ""}
@@ -2035,7 +2126,7 @@ export default function GatePassOUT({ highlightId = "" }) {
                     />
                     {renderFieldError(errors.itemRows?.[idx]?.bagWeightEachKg)}
                   </div>
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs text-gray-500 mb-1">Net Weight (kg)</label>
                     <input
                       value={it.netWeightKg || ""}
@@ -2051,6 +2142,18 @@ export default function GatePassOUT({ highlightId = "" }) {
                         ? "Net weight exceeds available stock."
                         : errors.itemRows?.[idx]?.netWeightKg
                     )}
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs text-gray-500 mb-1">Total Weight (kg)</label>
+                    <input
+                      value={it.totalWeightKg || ""}
+                      readOnly
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
+                        errors.itemRows?.[idx]?.bagWeightEachKg
+                          ? "border-red-500"
+                          : "border-gray-300"
+                      }`}
+                    />
                   </div>
                 </div>
                 <div className="grid md:grid-cols-3 gap-3 items-start">
@@ -2205,6 +2308,7 @@ export default function GatePassOUT({ highlightId = "" }) {
                       bagCount: "",
                       bagWeightEachKg: "65",
                       emptyBagWeightKg: "",
+                      totalWeightKg: "",
                       netWeightKg: "",
                       netWeightManDisplay: "",
                       rateType: "MAN",

@@ -88,6 +88,11 @@ const ItemSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    totalWeightKg: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     netWeightKg: {
       type: Number,
       min: 0,

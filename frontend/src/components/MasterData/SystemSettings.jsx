@@ -985,8 +985,7 @@ export default function SystemSettings() {
       triggerBlobDownload(res.data, finalName);
       showBackupToast({ title: "Download ready", detail: "Backup file downloaded successfully.", tone: "success" });
     } catch (err) {
-      showBackupToast({ title: "Download failed", detail: "Could not download backup file.", tone: "error" });
-      toast.error(err?.response?.data?.message || "Failed to download backup file");
+      showBackupToast({ title: "Download failed", detail: err?.response?.data?.message || "Could not download backup file.", tone: "error" });
     }
   };
 

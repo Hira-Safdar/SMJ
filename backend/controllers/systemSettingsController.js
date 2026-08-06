@@ -8,6 +8,7 @@ const SystemSettings = require("../models/systemSettingsModel");
 const ProductType = require("../models/productTypeModel");
 const ExpenseCategory = require("../models/expenseCategoryModel");
 const ProductionBatch = require("../models/productionBatchModel");
+const ProductionGroup = require("../models/productionGroupModel");
 const GatePass = require("../models/gatePassModel");
 const StockLedger = require("../models/stockLedgerModel");
 const Transaction = require("../models/transactionModel");
@@ -39,6 +40,7 @@ const COLLECTIONS = [
   { key: "journalLines", model: JournalLine },
   { key: "transactions", model: Transaction },
   { key: "gatePasses", model: GatePass },
+  { key: "productionGroups", model: ProductionGroup },
   { key: "productionBatches", model: ProductionBatch },
   { key: "stockLedgers", model: StockLedger },
   { key: "expenseEntries", model: ExpenseEntry },
@@ -96,7 +98,7 @@ const MODULES = [
     key: "production",
     name: "Production",
     description: "Production batches and process outputs.",
-    collections: ["productionBatches"],
+    collections: ["productionGroups", "productionBatches"],
   },
   {
     key: "stock",

@@ -269,6 +269,15 @@ const gatePassOutReportColumns = [
       }),
   },
   {
+    key: "totalWeightKg",
+    label: "Total Weight",
+    render: (_v, row) =>
+      gpItemListText(row, (it) => {
+        const total = gpFmtNum(it?.grossWeightKg || it?.totalWeightKg || 0);
+        return total ? `${total} kg` : "";
+      }),
+  },
+  {
     key: "rate",
     label: "Price/Man",
     render: (_v, row) => gpItemListText(row, (it) => String(Math.round(Number(it?.rate || 0)) || "").trim()),
