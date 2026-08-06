@@ -950,7 +950,7 @@ export default function GatePassIN({ highlightId = "" }) {
     );
 
   const handleBrandKeyDown = (e, idx, list) => {
-    if (!openBrandDropdown || openBrandDropdown !== idx) {
+    if (openBrandDropdown == null || openBrandDropdown !== idx) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setActiveBrandIdx(0);
