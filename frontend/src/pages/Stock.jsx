@@ -16,14 +16,24 @@ import {
 
 const COLORS = [
   "#0EA5E9",
+  "#F43F5E",
   "#22C55E",
-  "#A855F7",
+  "#8B5CF6",
   "#F97316",
+  "#06B6D4",
   "#EC4899",
-  "#6366F1",
-  "#14B8A6",
   "#10B981",
+  "#6366F1",
+  "#F59E0B",
+  "#14B8A6",
+  "#EF4444",
+  "#84CC16",
+  "#3B82F6",
+  "#D946EF",
+  "#EAB308",
 ];
+
+const donutColor = (index) => COLORS[index % COLORS.length];
 
 const companyOf = (row) =>
   String(row?.companyName || row?.brandName || "").trim() || "Mill Own Stock";
@@ -468,7 +478,7 @@ export default function Stock() {
             idKey="__rowId"
             emptyMessage={loading ? "Loading..." : "No stock records found."}
             pageSize={10}
-            showSearch
+            showSearch={false}
             showFilters={false}
             showClearFilters={false}
             toolbarActionsInHeader
@@ -511,7 +521,7 @@ export default function Stock() {
                     outerRadius={80}
                   >
                     {donutData.map((entry, index) => (
-                      <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                      <Cell key={index} fill={donutColor(index)} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`} />
