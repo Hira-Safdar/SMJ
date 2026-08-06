@@ -24,23 +24,17 @@ import {
   History,
   Sparkles,
   CheckCircle2,
-  Filter,
   Mail,
   X,
   Info,
   Home,
   Sprout,
-  Pause,
-  Play,
-  HardDrive,
-  FolderOpen,
-  FolderPlus,
-  ArrowUp,
   Loader2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
 import ConfirmDialog from "../ui/ConfirmDialog";
+import { FilterToggleButton } from "../ui/CollapsibleFilter";
 
 const MODULE_ICONS = {
   settings: Settings2,
@@ -128,10 +122,7 @@ export default function SystemSettings() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [moduleProgress, setModuleProgress] = useState({});
   const [historyFilterAction, setHistoryFilterAction] = useState("ALL");
-  const [historyFilterScope, setHistoryFilterScope] = useState("ALL");
   const [historySearch, setHistorySearch] = useState("");
-  const [historyDateFrom, setHistoryDateFrom] = useState("");
-  const [historyDateTo, setHistoryDateTo] = useState("");
   const [showHistoryFilters, setShowHistoryFilters] = useState(false);
   const [activeBackupTask, setActiveBackupTask] = useState({
     scope: "",
@@ -184,17 +175,6 @@ export default function SystemSettings() {
     confirmLabel: "OK",
     onConfirm: null,
   });
-  const [folderBrowser, setFolderBrowser] = useState({
-    open: false,
-    path: "",
-    parent: null,
-    dirs: [],
-    quickAccess: [],
-    loading: false,
-    error: "",
-    resolve: null,
-  });
-  const [newFolderName, setNewFolderName] = useState("");
   const restoreLocalFileInputRef = useRef(null);
   const savedGeneralEmailRef = useRef("");
   const pinSectionRef = useRef(null);
@@ -379,19 +359,7 @@ export default function SystemSettings() {
           running: !!s.running,
         });
         if (cancelled) return;
-        if (phase === "done" && lastStatusPhaseRef.current !== "done") {
-          showBackupToast({
-            title: s.result?.success ? "Backup completed" : "Operation completed",
-            detail: s.result?.message || "Finished.",
-            tone: s.result?.success ? "success" : "default",
-          });
-          loadBackupModules({ silent: true });
-        } else if (phase === "error" && lastStatusPhaseRef.current !== "error") {
-          showBackupToast({
-            title: "Backup failed",
-            detail: s.result?.message || "Backup failed.",
-            tone: "error",
-          });
+        if ((phase === "done" && lastStatusPhaseRef.current !== "done") || (phase === "error" && lastStatusPhaseRef.current !== "error")) {
           loadBackupModules({ silent: true });
         }
         lastStatusPhaseRef.current = phase;
@@ -814,15 +782,68 @@ export default function SystemSettings() {
     }
   };
 
+  const makeTimestamp = () => {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  };
+
+  const to12hParts = (time24) => {
+    const [h, m] = String(time24 || "02:00").split(":").map(Number);
+    const hour24 = Number.isFinite(h) ? ((h % 24) + 24) % 24 : 2;
+    const minute = Number.isFinite(m) ? m : 0;
+    const ampm = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    return { hour: hour12, minute, ampm };
+  };
+
+  const to24h = (hour12, minute, ampm) => {
+    let h = Number(hour12) % 12;
+    if (ampm === "PM") h += 12;
+    return `${String(h).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  };
+
+  const setScheduleTimeParts = (parts) => {
+    const current = to12hParts(settings.backupScheduleTime || "02:00");
+    const next = to24h(parts.hour ?? current.hour, parts.minute ?? current.minute, parts.ampm ?? current.ampm);
+    setSettings((prev) => ({ ...prev, backupScheduleTime: next }));
+  };
+
   const runFullBackup = async () => {
-    const picked = await chooseBackupFolder();
-    if (picked) {
+    const picked = await pickBackupFolderNative();
+    if (picked === "cancelled") {
+      toast.info("Backup cancelled — no folder selected.");
+      return;
+    }
+    if (picked && picked !== "default") {
       setSettings((prev) => ({ ...prev, backupLocalFolderPath: picked }));
-      await api.put("/settings", {
+      api.put("/settings", {
         backupStorageMode: "local",
         backupLocalFolderPath: picked,
-      });
+      }).catch(() => {});
     }
+
+    const isBrowser = typeof window === "undefined" || !window.electronAPI?.pickBackupFolder;
+    let saveHandle = null;
+    if (isBrowser && typeof window.showSaveFilePicker === "function") {
+      try {
+        saveHandle = await window.showSaveFilePicker({
+          suggestedName: `smj-backup-${makeTimestamp()}.json`,
+          types: [
+            {
+              description: "JSON Backup",
+              accept: { "application/json": [".json"] },
+            },
+          ],
+        });
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          toast.info("Backup cancelled — no save location chosen.");
+          return;
+        }
+      }
+    }
+
     updateGlobalProgress({
       scope: "all",
       label: "Preparing full system backup...",
@@ -830,16 +851,57 @@ export default function SystemSettings() {
       phase: "backup",
       running: true,
     });
-    showBackupToast({ title: "Backup started", detail: "Full system snapshot is being prepared." });
     try {
       const res = await api.post("/settings/backup/run");
-      showBackupToast({
-        title: "Backup completed",
-        detail: res.data?.data?.localPath
-          ? `Saved to: ${res.data.data.localPath}`
-          : res.data?.message || "Full system backup completed.",
-        tone: "success",
-      });
+      const fileName = res.data?.data?.fileName;
+      if (isBrowser) {
+        const url = toAbsoluteUrl(`/api/settings/backup/history/download/${encodeURIComponent(fileName)}`);
+        const download = () => {
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+        if (saveHandle) {
+          try {
+            const response = await fetch(url);
+            const text = await response.text();
+            const writable = await saveHandle.createWritable();
+            await writable.write(text);
+            await writable.close();
+            showBackupToast({
+              title: "Backup completed",
+              detail: `Saved to: ${saveHandle.name}`,
+              tone: "success",
+            });
+          } catch {
+            download();
+            showBackupToast({
+              title: "Backup completed",
+              detail: "Backup downloaded — check your Downloads folder.",
+              tone: "success",
+            });
+          }
+        } else {
+          download();
+          showBackupToast({
+            title: "Backup completed",
+            detail: "Backup downloaded — check your Downloads folder.",
+            tone: "success",
+          });
+        }
+      } else {
+        showBackupToast({
+          title: "Backup completed",
+          detail:
+            res.data?.data?.localPath ||
+            res.data?.message ||
+            "Full system backup completed.",
+          tone: "success",
+        });
+      }
       await loadBackupModules({ silent: true });
     } catch (err) {
       updateGlobalProgress({
@@ -856,85 +918,7 @@ export default function SystemSettings() {
     }
   };
 
-  const handlePauseResume = async () => {
-    try {
-      if (activeBackupTask.paused) {
-        await api.post("/settings/backup/resume");
-      } else {
-        await api.post("/settings/backup/pause");
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Could not update backup state");
-    }
-  };
-
-  const browseFolders = async (path) => {
-    setFolderBrowser((prev) => ({ ...prev, loading: true, error: "" }));
-    try {
-      const res = await api.get("/settings/backup/folder/browse", {
-        params: { path: path || "" },
-      });
-      const data = res.data?.data || {};
-      setFolderBrowser((prev) => ({
-        ...prev,
-        path: data.path || "",
-        parent: data.parent || null,
-        dirs: data.dirs || [],
-        quickAccess: Array.isArray(data.quickAccess) ? data.quickAccess : [],
-        loading: false,
-      }));
-    } catch (err) {
-      setFolderBrowser((prev) => ({
-        ...prev,
-        loading: false,
-        error: err?.response?.data?.message || "Could not browse folders.",
-      }));
-    }
-  };
-
-  const openFolderBrowser = () => {
-    setFolderBrowser((prev) => ({ ...prev, open: true }));
-    browseFolders("");
-  };
-
-  const closeFolderBrowser = () => {
-    const resolve = folderBrowser.resolve;
-    setFolderBrowser((prev) => ({ ...prev, open: false, resolve: null }));
-    if (resolve) resolve(null);
-  };
-
-  const confirmFolderSelection = () => {
-    const folder = folderBrowser.path;
-    const resolve = folderBrowser.resolve;
-    if (!folder) return;
-    setFolderBrowser((prev) => ({ ...prev, open: false, resolve: null }));
-    if (resolve) resolve(folder);
-  };
-
-  const createNewBackupFolder = async () => {
-    const parentPath = folderBrowser.path;
-    const name = String(newFolderName || "").trim();
-    if (!parentPath) {
-      setFolderBrowser((prev) => ({ ...prev, error: "Open a folder first, then create a new one inside it." }));
-      return;
-    }
-    if (!name) {
-      setFolderBrowser((prev) => ({ ...prev, error: "Enter a folder name." }));
-      return;
-    }
-    try {
-      await api.post("/settings/backup/folder/create", { path: parentPath, name });
-      setNewFolderName("");
-      await browseFolders(parentPath);
-    } catch (err) {
-      setFolderBrowser((prev) => ({
-        ...prev,
-        error: err?.response?.data?.message || "Could not create the folder.",
-      }));
-    }
-  };
-
-  const chooseBackupFolder = () =>
+  const pickBackupFolderNative = () =>
     new Promise((resolve) => {
       if (typeof window !== "undefined" && window.electronAPI?.pickBackupFolder) {
         window.electronAPI
@@ -942,35 +926,9 @@ export default function SystemSettings() {
           .then((folder) => resolve(folder || null))
           .catch(() => resolve(null));
       } else {
-        setFolderBrowser((prev) => ({ ...prev, resolve }));
-        openFolderBrowser();
+        resolve("default");
       }
     });
-
-  const handleChooseBackupFolder = async () => {
-    const folder = await chooseBackupFolder();
-    if (folder) {
-      setSettings((prev) => ({ ...prev, backupLocalFolderPath: folder }));
-      toast.success("Backup folder selected");
-    }
-  };
-
-  const saveBackupStorageSettings = async () => {
-    setBackupBusy(true);
-    try {
-      await api.put("/settings", {
-        backupStorageMode: "local",
-        backupLocalFolderPath: settings.backupLocalFolderPath || "",
-      });
-      window.dispatchEvent(new Event("smj-settings-updated"));
-      toast.success("Backup storage settings saved");
-      await loadBackupModules({ silent: true });
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to save backup storage settings");
-    } finally {
-      setBackupBusy(false);
-    }
-  };
 
   const openRestoreDialog = () => {
     setRestoreDialog({
@@ -1020,14 +978,12 @@ export default function SystemSettings() {
     const fileName = String(entry?.fileName || "").trim();
     if (!fileName) return;
     try {
-      showBackupToast({ title: "Download started", detail: `Fetching ${fileName}...` });
       const res = await api.get(`/settings/backup/history/download/${encodeURIComponent(fileName)}`, {
         responseType: "blob",
       });
       const finalName = parseDownloadFilename(res.headers?.["content-disposition"], fileName);
       triggerBlobDownload(res.data, finalName);
       showBackupToast({ title: "Download ready", detail: "Backup file downloaded successfully.", tone: "success" });
-      toast.success("Backup downloaded");
     } catch (err) {
       showBackupToast({ title: "Download failed", detail: "Could not download backup file.", tone: "error" });
       toast.error(err?.response?.data?.message || "Failed to download backup file");
@@ -1046,14 +1002,8 @@ export default function SystemSettings() {
 
   const filteredHistory = useMemo(() => {
     const term = String(historySearch || "").trim().toLowerCase();
-    const fromDate = historyDateFrom ? new Date(`${historyDateFrom}T00:00:00`) : null;
-    const toDate = historyDateTo ? new Date(`${historyDateTo}T23:59:59.999`) : null;
     return (backupMeta.history || []).filter((entry) => {
       if (historyFilterAction !== "ALL" && String(entry.action || "") !== historyFilterAction) return false;
-      if (historyFilterScope !== "ALL" && String(entry.scope || "") !== historyFilterScope) return false;
-      const entryDate = entry.createdAt ? new Date(entry.createdAt) : null;
-      if (fromDate && entryDate && entryDate < fromDate) return false;
-      if (toDate && entryDate && entryDate > toDate) return false;
       if (!term) return true;
       const haystack = [
         entry.moduleName,
@@ -1068,14 +1018,14 @@ export default function SystemSettings() {
         .toLowerCase();
       return haystack.includes(term);
     });
-  }, [
-    backupMeta.history,
-    historyFilterAction,
-    historyFilterScope,
-    historySearch,
-    historyDateFrom,
-    historyDateTo,
-  ]);
+  }, [backupMeta.history, historyFilterAction, historySearch]);
+
+  const hasActiveHistoryFilters = historyFilterAction !== "ALL" || Boolean(String(historySearch || "").trim());
+
+  const clearHistoryFilters = () => {
+    setHistoryFilterAction("ALL");
+    setHistorySearch("");
+  };
 
   const resolveHistoryTrigger = (entry) => {
     const explicit = String(entry?.trigger || "").trim().toUpperCase();
@@ -1090,7 +1040,6 @@ export default function SystemSettings() {
   const canDownloadHistoryEntry = (entry) => {
     if (String(entry?.action || "").toUpperCase() !== "BACKUP") return false;
     if (String(entry?.status || "SUCCESS").toUpperCase() !== "SUCCESS") return false;
-    if (resolveHistoryTrigger(entry) !== "AUTO") return false;
     return !!String(entry?.fileName || "").trim();
   };
 
@@ -1507,37 +1456,68 @@ export default function SystemSettings() {
                     </span>
                     <span className="text-xs">
                       {settings.backupAutomationEnabled
-                        ? `Runs daily at ${settings.backupScheduleTime || backupMeta.scheduleTime || "02:00"}`
+                        ? (() => {
+                            const { hour, minute, ampm } = to12hParts(settings.backupScheduleTime || backupMeta.scheduleTime || "02:00");
+                            return `Runs daily at ${hour}:${String(minute).padStart(2, "0")} ${ampm}`;
+                          })()
                         : "Set a daily backup time"}
                     </span>
                   </button>
 
                   <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
                     <div className="text-xs font-medium text-emerald-800 mb-2">Daily Backup Time</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
-                      <input
-                        type="time"
-                        value={settings.backupScheduleTime || "02:00"}
-                        onChange={(e) =>
-                          setSettings((prev) => ({
-                            ...prev,
-                            backupScheduleTime: e.target.value || "02:00",
-                          }))
-                        }
-                        className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveBackupScheduleTime}
-                        disabled={backupBusy}
-                        className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-                      >
-                        Save Time
-                      </button>
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const { hour, minute, ampm } = to12hParts(settings.backupScheduleTime || "02:00");
+                        const baseClass = "rounded-lg border border-emerald-200 bg-white px-2 py-2 text-sm text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-200";
+                        return (
+                          <>
+                            <select
+                              value={hour}
+                              onChange={(e) => setScheduleTimeParts({ hour: Number(e.target.value) })}
+                              className={`${baseClass} flex-1`}
+                            >
+                              {[...Array(12)].map((_, i) => (
+                                <option key={i + 1} value={i + 1}>
+                                  {i + 1}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-lg font-semibold text-emerald-800">:</span>
+                            <select
+                              value={minute}
+                              onChange={(e) => setScheduleTimeParts({ minute: Number(e.target.value) })}
+                              className={`${baseClass} flex-1`}
+                            >
+                              {[...Array(60)].map((_, i) => (
+                                <option key={i} value={i}>
+                                  {String(i).padStart(2, "0")}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              value={ampm}
+                              onChange={(e) => setScheduleTimeParts({ ampm: e.target.value })}
+                              className={`${baseClass} flex-1`}
+                            >
+                              <option value="AM">AM</option>
+                              <option value="PM">PM</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={saveBackupScheduleTime}
+                              disabled={backupBusy}
+                              className="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap"
+                            >
+                              Save
+                            </button>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={runFullBackup}
@@ -1545,28 +1525,10 @@ export default function SystemSettings() {
                       className="rounded-lg border border-emerald-600 bg-emerald-600 text-white px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-emerald-700 disabled:opacity-60"
                     >
                       <DatabaseBackup size={15} />
-                      {activeBackupTask.running ? "Backing Up..." : "Backup Now"}
+                      {activeBackupTask.running
+                        ? `Backing Up... ${activeBackupTask.percent || 0}%`
+                        : "Backup Now"}
                     </button>
-                    {activeBackupTask.running ? (
-                      <button
-                        type="button"
-                        onClick={handlePauseResume}
-                        disabled={loading}
-                        className="rounded-lg border border-amber-400 bg-amber-50 text-amber-800 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 hover:bg-amber-100 disabled:opacity-60"
-                      >
-                        {activeBackupTask.paused ? <Play size={15} /> : <Pause size={15} />}
-                        {activeBackupTask.paused ? "Resume" : "Pause"}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {}}
-                        disabled
-                        className="rounded-lg border border-gray-200 bg-gray-50 text-gray-400 px-3 py-2.5 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-100"
-                      >
-                        <Pause size={15} /> Pause
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={openRestoreDialog}
@@ -1579,60 +1541,6 @@ export default function SystemSettings() {
                 </div>
               </div>
 
-              <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                  <HardDrive size={16} className="text-emerald-700" />
-                  Backup Storage (Local)
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-emerald-800 mb-1">
-                    Backup Folder
-                  </label>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleChooseBackupFolder}
-                        disabled={backupBusy}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        <FolderOpen size={15} /> Choose Folder
-                      </button>
-                      {settings.backupLocalFolderPath ? (
-                        <button
-                          type="button"
-                          onClick={() => setSettings((prev) => ({ ...prev, backupLocalFolderPath: "" }))}
-                          className="text-xs font-medium text-gray-500 hover:text-rose-600"
-                        >
-                          Reset to default
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900 break-all">
-                      {settings.backupLocalFolderPath ||
-                        "Default folder (inside the app's backups directory)"}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={saveBackupStorageSettings}
-                  disabled={backupBusy}
-                  className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-                >
-                  Save Storage Settings
-                </button>
-                {typeof window !== "undefined" && window.electronAPI?.openBackupFolder && (
-                  <button
-                    type="button"
-                    onClick={() => window.electronAPI.openBackupFolder()}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                  >
-                    <FolderOpen size={14} /> Open backup folder
-                  </button>
-                )}
-              </div>
-
               <div className="mt-4 rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm">
                 <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
                   <span className="font-medium">
@@ -1642,18 +1550,21 @@ export default function SystemSettings() {
                       ? "Backup Progress"
                       : "System Status"}
                   </span>
-                  <span className="flex items-center gap-2">
-                    {activeBackupTask.paused && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                        Paused
+                  <span className="flex items-center gap-3">
+                    {activeBackupTask.running && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                        <Loader2 size={13} className="animate-spin" />
+                        Working...
                       </span>
                     )}
-                    <span>{activeBackupTask.percent || 0}%</span>
+                    <span className="text-lg font-bold text-emerald-700 tabular-nums">
+                      {activeBackupTask.percent || 0}%
+                    </span>
                   </span>
                 </div>
                 <div className="h-3 rounded-full bg-emerald-50 overflow-hidden">
                   <div
-                    className={`h-full transition-all ${
+                    className={`h-full transition-all duration-500 ${
                       activeBackupTask.phase === "error"
                         ? "bg-rose-500"
                         : activeBackupTask.phase === "done"
@@ -1667,19 +1578,8 @@ export default function SystemSettings() {
                   <div className="text-gray-700">
                     {activeBackupTask.label || "Backups keep a complete snapshot of the whole application."}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {activeBackupTask.running && (
-                      <button
-                        type="button"
-                        onClick={handlePauseResume}
-                        className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-amber-800 font-medium hover:bg-amber-100 whitespace-nowrap"
-                      >
-                        {activeBackupTask.paused ? "Resume" : "Pause"}
-                      </button>
-                    )}
-                    <div className="rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-emerald-700 whitespace-nowrap">
-                      {activeBackupTask.scope === "full" ? "Full System" : activeBackupTask.scope || "idle"}
-                    </div>
+                  <div className="rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-emerald-700 whitespace-nowrap">
+                    {activeBackupTask.scope === "full" ? "Full System" : activeBackupTask.scope || "idle"}
                   </div>
                 </div>
               </div>
@@ -1692,18 +1592,20 @@ export default function SystemSettings() {
                   <div className="text-base font-semibold">Backup History</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowHistoryFilters((s) => !s)}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium flex items-center gap-2 ${
-                      showHistoryFilters
-                        ? "border-emerald-600 bg-emerald-600 text-white"
-                        : "border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50"
-                    }`}
-                  >
-                    <Filter size={15} />
-                    {showHistoryFilters ? "Hide Filters" : "Show Filters"}
-                  </button>
+                  <FilterToggleButton
+                    open={showHistoryFilters}
+                    onToggle={() => setShowHistoryFilters((s) => !s)}
+                    title="Filters"
+                  />
+                  {hasActiveHistoryFilters && (
+                    <button
+                      type="button"
+                      onClick={clearHistoryFilters}
+                      className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+                    >
+                      <X size={14} /> Clear
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() =>
@@ -1724,46 +1626,31 @@ export default function SystemSettings() {
                 </div>
               </div>
               {showHistoryFilters && (
-              <div className="mb-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3">
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <select
-                  value={historyFilterAction}
-                  onChange={(e) => setHistoryFilterAction(e.target.value)}
-                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="ALL">All Actions</option>
-                  <option value="BACKUP">Backup</option>
-                  <option value="RESTORE">Restore</option>
-                </select>
-                <select
-                  value={historyFilterScope}
-                  onChange={(e) => setHistoryFilterScope(e.target.value)}
-                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="ALL">All Scope</option>
-                  <option value="full">Full System</option>
-                  <option value="module">Module</option>
-                </select>
-                <input
-                  type="date"
-                  value={historyDateFrom}
-                  onChange={(e) => setHistoryDateFrom(e.target.value)}
-                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm"
-                />
-                <input
-                  type="date"
-                  value={historyDateTo}
-                  onChange={(e) => setHistoryDateTo(e.target.value)}
-                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm"
-                />
-                <input
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                  placeholder="Search file or action..."
-                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm"
-                />
-              </div>
-              </div>
+                <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Action</label>
+                      <select
+                        value={historyFilterAction}
+                        onChange={(e) => setHistoryFilterAction(e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 min-w-[140px]"
+                      >
+                        <option value="ALL">All Actions</option>
+                        <option value="BACKUP">Backup</option>
+                        <option value="RESTORE">Restore</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[220px]">
+                      <label className="block text-xs text-gray-500 mb-1">Search</label>
+                      <input
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Search file or action..."
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
               <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50/60">
                 {filteredHistory.length === 0 && (
@@ -1779,7 +1666,6 @@ export default function SystemSettings() {
                           <th className="text-left px-4 py-3 font-semibold">Date</th>
                           <th className="text-left px-4 py-3 font-semibold">Action</th>
                           <th className="text-left px-4 py-3 font-semibold">Mode</th>
-                          <th className="text-left px-4 py-3 font-semibold">Scope</th>
                           <th className="text-left px-4 py-3 font-semibold">File</th>
                           <th className="text-left px-4 py-3 font-semibold">Records</th>
                           <th className="text-left px-4 py-3 font-semibold">Status</th>
@@ -1818,8 +1704,7 @@ export default function SystemSettings() {
                                   {trigger === "AUTO" ? "Auto" : "Manual"}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-gray-700">{entry.scope === "full" ? "Full System" : "Module"}</td>
-                              <td className="px-4 py-3 text-gray-700 max-w-[280px] truncate">{entry.fileName || "backup.json"}</td>
+                              <td className="px-4 py-3 text-gray-700">{entry.fileName || "backup.json"}</td>
                               <td className="px-4 py-3 text-gray-700">{entry.recordCount || 0}</td>
                               <td className="px-4 py-3">
                                 <span className="rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
@@ -2042,130 +1927,6 @@ export default function SystemSettings() {
                 className="rounded-lg border border-rose-600 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
               >
                 {restoreDialog.busy ? "Restoring..." : "Restore Now"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {folderBrowser.open && (
-        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 border border-emerald-100 flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold text-gray-900">Choose Backup Folder</div>
-              <button
-                type="button"
-                onClick={closeFolderBrowser}
-                className="rounded-lg p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p className="mt-1 text-sm text-gray-600">
-              Select the folder where backup files will be saved.
-            </p>
-
-            <div className="mt-3 flex items-center gap-2">
-              <div className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 break-all min-h-[38px]">
-                {folderBrowser.path || "My Computer (select a drive)"}
-              </div>
-              {folderBrowser.parent && (
-                <button
-                  type="button"
-                  onClick={() => browseFolders(folderBrowser.parent)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <ArrowUp size={15} /> Up
-                </button>
-              )}
-            </div>
-
-            <div className="mt-3 flex-1 min-h-0 overflow-y-auto rounded-lg border border-gray-200">
-              {!folderBrowser.path && folderBrowser.quickAccess?.length > 0 && (
-                <div className="border-b border-gray-100 p-2">
-                  <div className="px-1 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
-                    Quick Access
-                  </div>
-                  <div className="space-y-0.5">
-                    {folderBrowser.quickAccess.map((q) => (
-                      <button
-                        key={q.path}
-                        type="button"
-                        onClick={() => browseFolders(q.path)}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-gray-700 hover:bg-emerald-50"
-                      >
-                        <FolderOpen size={14} className="text-amber-500" />
-                        <span className="truncate">{q.label}</span>
-                        <span className="ml-auto text-[11px] text-gray-400 truncate">{q.path}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {folderBrowser.loading ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">
-                  <Loader2 size={16} className="animate-spin" /> Loading folders...
-                </div>
-              ) : folderBrowser.dirs.length === 0 && !folderBrowser.path ? (
-                <div className="py-10 text-center text-sm text-gray-400">No drives found.</div>
-              ) : folderBrowser.dirs.length === 0 ? (
-                <div className="py-10 text-center text-sm text-gray-400">No subfolders found.</div>
-              ) : (
-                folderBrowser.dirs.map((d) => {
-                  const isRoot = d.length === 3 && d.endsWith(":\\");
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => browseFolders(d)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-emerald-50"
-                    >
-                      <HardDrive size={15} className={isRoot ? "text-emerald-600" : "text-amber-500"} />
-                      <span className="truncate">{d}</span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-
-            {folderBrowser.error && (
-              <div className="mt-2 text-xs text-rose-600">{folderBrowser.error}</div>
-            )}
-
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") createNewBackupFolder();
-                }}
-                placeholder="New folder name"
-                className="flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
-              />
-              <button
-                type="button"
-                onClick={createNewBackupFolder}
-                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50"
-              >
-                <FolderPlus size={15} /> Create
-              </button>
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeFolderBrowser}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmFolderSelection}
-                disabled={!folderBrowser.path}
-                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-              >
-                Select This Folder
               </button>
             </div>
           </div>

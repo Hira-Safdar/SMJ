@@ -924,12 +924,27 @@ exports.downloadBackupHistoryFile = async (req, res) => {
     }
 
     ensureBackupFolder();
-    const backupRoot = path.resolve(BACKUP_FOLDER);
-    const absolutePath = path.resolve(BACKUP_FOLDER, fileName);
-    if (!absolutePath.startsWith(backupRoot + path.sep)) {
-      return res.status(400).json({ success: false, message: "Invalid backup path." });
+    const searchFolders = [];
+    const settings = await getSingletonSettings().catch(() => null);
+    const custom = String(settings?.backupLocalFolderPath || "").trim();
+    if (custom && custom !== "default") {
+      try {
+        searchFolders.push(path.resolve(custom));
+      } catch (_) {
+        /* ignore invalid custom folder */
+      }
     }
-    if (!fs.existsSync(absolutePath)) {
+    searchFolders.push(path.resolve(BACKUP_FOLDER));
+
+    let absolutePath = null;
+    for (const folder of searchFolders) {
+      const candidate = path.resolve(folder, fileName);
+      if (candidate.startsWith(path.resolve(folder) + path.sep) && fs.existsSync(candidate)) {
+        absolutePath = candidate;
+        break;
+      }
+    }
+    if (!absolutePath) {
       return res.status(404).json({ success: false, message: "Backup file not found." });
     }
 
