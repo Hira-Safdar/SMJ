@@ -212,17 +212,41 @@ export default function Stock() {
     [productTypesMap],
   );
 
-  const fmtQty = useCallback(
+  const qtyValue = useCallback(
     (kg, productName) => {
       const k = Number(kg || 0);
       if (!k) return 0;
       if (viewMode === "BAGS") {
         const bw = bagWeightOf(productName);
-        return bw ? +Math.round((k / bw) * 10) / 10 : 0;
+        return bw ? k / bw : 0;
       }
-      return Math.round(k);
+      return k;
     },
     [viewMode, bagWeightOf],
+  );
+
+  const displayQty = useCallback(
+    (kg, productName) => {
+      const k = Number(kg || 0);
+      if (!k) return "0";
+      if (viewMode === "BAGS") {
+        const bw = bagWeightOf(productName);
+        if (!bw) return String(Math.round(k));
+        const bags = Math.floor(k / bw);
+        const rem = Math.round(k - bags * bw);
+        return rem > 0 ? `${bags} bag ${rem} kg` : `${bags} bag`;
+      }
+      return String(Math.round(k));
+    },
+    [viewMode, bagWeightOf],
+  );
+
+  const displayQtyWithUnit = useCallback(
+    (kg, productName) => {
+      if (viewMode === "BAGS") return displayQty(kg, productName);
+      return `${displayQty(kg, productName)} kg`;
+    },
+    [viewMode, displayQty],
   );
 
   // ------------------------------------------------------------------
@@ -265,27 +289,27 @@ export default function Stock() {
     let totalQty = 0;
     visibleTableData.forEach((r) => {
       Object.keys(r.companyMap || {}).forEach((c) => companies.add(c));
-      totalQty += fmtQty(r.totalKg, r.product);
+      totalQty += qtyValue(r.totalKg, r.product);
     });
     return {
       companies: companies.size,
       products: visibleTableData.length,
       totalKg: Math.round(totalQty),
     };
-  }, [visibleTableData, fmtQty]);
+  }, [visibleTableData, qtyValue]);
 
   const donutData = useMemo(() => {
     const map = new Map();
     visibleTableData.forEach((row) => {
       Object.entries(row.companyMap || {}).forEach(([comp, kg]) => {
-        map.set(comp, (map.get(comp) || 0) + Number(fmtQty(kg, row.product) || 0));
+        map.set(comp, (map.get(comp) || 0) + Number(qtyValue(kg, row.product) || 0));
       });
     });
     return Array.from(map.entries()).map(([name, value]) => ({
       name,
       value: Math.round(Number(value || 0)),
     }));
-  }, [visibleTableData, fmtQty]);
+  }, [visibleTableData, qtyValue]);
 
   // ------------------------------------------------------------------
   // COLUMNS — product first, then one column per company, then total
@@ -319,8 +343,8 @@ export default function Stock() {
         label: c,
         align: "right",
         render: (_v, row) => {
-          const q = fmtQty(row.companyMap?.[c], row.product);
-          return q ? q : "-";
+          const q = displayQty(row.companyMap?.[c], row.product);
+          return q !== "0" ? q : "-";
         },
       });
     });
@@ -330,12 +354,12 @@ export default function Stock() {
       align: "right",
       render: (_v, row) => (
         <span className="font-semibold text-emerald-700">
-          {fmtQty(row.totalKg, row.product)}
+          {displayQty(row.totalKg, row.product)}
         </span>
       ),
     });
     return cols;
-  }, [activeCompanies, fmtQty, displayUnit]);
+  }, [activeCompanies, displayQty, displayUnit]);
 
   const exportColumns = useMemo(() => {
     const cols = [{ key: "product", label: "Product" }];
