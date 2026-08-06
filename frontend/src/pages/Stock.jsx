@@ -250,50 +250,58 @@ export default function Stock() {
   );
 
   // ------------------------------------------------------------------
-  // TABLE DATA — product rows with per-company kg breakdown
+  // TABLE DATA — flat rows: one row per company + product combination
   // ------------------------------------------------------------------
-  const productTableData = useMemo(() => {
+  const tableRows = useMemo(() => {
     const map = new Map();
     filteredRows.forEach((r) => {
       const product = String(r.productTypeName || "").trim() || "Product";
       const comp = companyOf(r);
       const kg = Number(r.balanceKg || 0);
+      const key = `${product}\u0000${comp}`;
       const existing =
-        map.get(product) ||
-        { product, totalKg: 0, companyMap: {}, sourcesByCompany: {}, lastUpdated: null };
-      existing.totalKg += kg;
-      existing.companyMap[comp] = (existing.companyMap[comp] || 0) + kg;
-      existing.sourcesByCompany[comp] = [
-        ...(existing.sourcesByCompany[comp] || []),
-        ...(r.sources || []),
-      ];
+        map.get(key) ||
+        {
+          __rowId: key,
+          company: comp,
+          product,
+          balanceKg: 0,
+          sources: [],
+          lastUpdated: null,
+        };
+      existing.balanceKg += kg;
+      existing.sources = [...existing.sources, ...(r.sources || [])];
       const lu = r.lastUpdated ? new Date(r.lastUpdated) : null;
       if (lu && (!existing.lastUpdated || lu > new Date(existing.lastUpdated))) {
         existing.lastUpdated = lu.toISOString();
       }
-      map.set(product, existing);
+      map.set(key, existing);
     });
-    return Array.from(map.values()).map((p) => ({
-      __rowId: p.product,
-      ...p,
+    return Array.from(map.values()).map((r) => ({
+      ...r,
+      sourcesByCompany: { [r.company]: r.sources },
+      companyMap: { [r.company]: r.balanceKg },
+      totalKg: r.balanceKg,
     }));
   }, [filteredRows]);
 
-  const visibleTableData = productTableData;
+  const visibleTableData = tableRows;
 
   // ------------------------------------------------------------------
   // SUMMARY STATS
   // ------------------------------------------------------------------
   const summaryStats = useMemo(() => {
     const companies = new Set();
+    const products = new Set();
     let totalQty = 0;
     visibleTableData.forEach((r) => {
-      Object.keys(r.companyMap || {}).forEach((c) => companies.add(c));
-      totalQty += qtyValue(r.totalKg, r.product);
+      companies.add(r.company);
+      products.add(r.product);
+      totalQty += qtyValue(r.balanceKg, r.product);
     });
     return {
       companies: companies.size,
-      products: visibleTableData.length,
+      products: products.size,
       totalKg: Math.round(totalQty),
     };
   }, [visibleTableData, qtyValue]);
@@ -301,9 +309,10 @@ export default function Stock() {
   const donutData = useMemo(() => {
     const map = new Map();
     visibleTableData.forEach((row) => {
-      Object.entries(row.companyMap || {}).forEach(([comp, kg]) => {
-        map.set(comp, (map.get(comp) || 0) + Number(qtyValue(kg, row.product) || 0));
-      });
+      map.set(
+        row.company,
+        (map.get(row.company) || 0) + Number(qtyValue(row.balanceKg, row.product) || 0),
+      );
     });
     return Array.from(map.entries()).map(([name, value]) => ({
       name,
@@ -312,10 +321,10 @@ export default function Stock() {
   }, [visibleTableData, qtyValue]);
 
   // ------------------------------------------------------------------
-  // COLUMNS — product first, then one column per company, then total
+  // COLUMNS — company first, then product, then balance
   // ------------------------------------------------------------------
-  const pivotColumns = useMemo(() => {
-    const cols = [
+  const flatColumns = useMemo(
+    () => [
       {
         key: "_info",
         label: "",
@@ -335,52 +344,71 @@ export default function Stock() {
           </button>
         ),
       },
+      {
+        key: "company",
+        label: "Company",
+        render: (v) => <span className="font-medium text-gray-800">{v}</span>,
+      },
       { key: "product", label: "Product" },
-    ];
-    (activeCompanies || []).forEach((c) => {
-      cols.push({
-        key: `cmp_${c}`,
-        label: c,
+      {
+        key: "balanceKg",
+        label: `Balance (${displayUnit})`,
         align: "right",
+        render: (_v, row) => (
+          <span className="font-semibold text-emerald-700 tabular-nums">
+            {displayQtyWithUnit(row.balanceKg, row.product)}
+          </span>
+        ),
+      },
+      {
+        key: "lastUpdated",
+        label: "Last Updated",
+        render: (v) => (v ? fmtDate(v) : "-"),
+      },
+      {
+        key: "sources",
+        label: "Sources",
         render: (_v, row) => {
-          const q = displayQty(row.companyMap?.[c], row.product);
-          return q !== "0" ? q : "-";
+          const types = Array.from(
+            new Set((row.sources || []).map((s) => s.sourceType).filter(Boolean)),
+          );
+          return types.length ? (
+            <div className="flex flex-wrap gap-1">
+              {types.map((t) => (
+                <span
+                  key={t}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${sourceBadgeClass(t)}`}
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : (
+            "-"
+          );
         },
-      });
-    });
-    cols.push({
-      key: "totalKg",
-      label: `Total (${displayUnit})`,
-      align: "right",
-      render: (_v, row) => (
-        <span className="font-semibold text-emerald-700">
-          {displayQty(row.totalKg, row.product)}
-        </span>
-      ),
-    });
-    return cols;
-  }, [activeCompanies, displayQty, displayUnit]);
+      },
+    ],
+    [displayUnit, displayQtyWithUnit],
+  );
 
-  const exportColumns = useMemo(() => {
-    const cols = [{ key: "product", label: "Product" }];
-    (activeCompanies || []).forEach((c) => {
-      cols.push({ key: `cmp_${c}`, label: c });
-    });
-    cols.push({ key: "totalKg", label: `Total (${displayUnit})` });
-    return cols;
-  }, [activeCompanies, displayUnit]);
+  const exportColumns = useMemo(
+    () => [
+      { key: "company", label: "Company" },
+      { key: "product", label: "Product" },
+      { key: "balance", label: `Balance (${displayUnit})` },
+    ],
+    [displayUnit],
+  );
 
   const exportData = useCallback(
     (data) =>
-      (data || []).map((r) => {
-        const row = { product: r.product };
-        (activeCompanies || []).forEach((c) => {
-          row[`cmp_${c}`] = displayQty(r.companyMap?.[c], r.product);
-        });
-        row.totalKg = displayQty(r.totalKg, r.product);
-        return row;
-      }),
-    [activeCompanies, displayQty],
+      (data || []).map((r) => ({
+        company: r.company,
+        product: r.product,
+        balance: displayQtyWithUnit(r.balanceKg, r.product),
+      })),
+    [displayQtyWithUnit],
   );
 
   const hasActiveFilters = Boolean(filterCriteria.company || filterCriteria.product);
@@ -435,12 +463,12 @@ export default function Stock() {
            <DataTable
              data-tour="stock-table"
              title="Stock Inventory"
-            columns={pivotColumns}
+            columns={flatColumns}
             data={loading ? [] : visibleTableData}
             idKey="__rowId"
             emptyMessage={loading ? "Loading..." : "No stock records found."}
             pageSize={10}
-            showSearch={false}
+            showSearch
             showFilters={false}
             showClearFilters={false}
             toolbarActionsInHeader
@@ -513,7 +541,7 @@ export default function Stock() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">{infoRow.product}</h3>
                 <p className="text-xs text-gray-500">
-                  Stock Inventory · Total{" "}
+                  {infoRow.company} · Stock Inventory · Total{" "}
                   {displayQtyWithUnit(infoRow.totalKg, infoRow.product)}
                 </p>
               </div>

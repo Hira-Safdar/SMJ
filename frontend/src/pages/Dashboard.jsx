@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import toast from "react-hot-toast";
 import { Truck, Box, Coins, AlertTriangle, Info, DatabaseBackup, RotateCcw, Pause, Play } from "lucide-react";
@@ -19,9 +19,10 @@ const leftAccent = {
   red: "border-rose-400",
 };
 
-const DONUT_COLORS = ["#16a34a", "#2563eb", "#eab308", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
-const RAW_COLORS = ["#16a34a", "#2563eb", "#eab308", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
-const PRODUCTION_COLORS = ["#dc2626", "#2563eb", "#16a34a", "#7c3aed", "#eab308", "#ea580c", "#0891b2"];
+const donutColor = (index, offset = 0) => {
+  const hue = Math.round((offset + index * 137.508) % 360);
+  return `hsl(${hue}, 62%, 45%)`;
+};
 
 export default function Dashboard() {
   const [date, setDate] = useState(new Date());
@@ -184,61 +185,68 @@ export default function Dashboard() {
     });
   };
 
-  const productionDonut =
-    stockBreakdown.production.length > 0
-      ? stockBreakdown.production
-      : [
-          { name: "Production", value: Number(stockSummary.productionKg || 0) },
-        ];
+  const totalStockKg = Number(stockSummary.rawKg || 0) + Number(stockSummary.productionKg || 0);
 
-  const rawDonut =
-    stockBreakdown.raw.length > 0
-      ? stockBreakdown.raw
-      : [{ name: "Raw Inventory", value: Number(stockSummary.rawKg || 0) }];
+  const stockDonut = useMemo(() => {
+    const rawEntries = (stockBreakdown.raw || []).map((r) => ({
+      name: `Paddy · ${r.name || "Unknown"}`,
+      value: Number(r.value || 0),
+    }));
+    const prodEntries = (stockBreakdown.production || []).map((r) => ({
+      name: r.name || "Unknown",
+      value: Number(r.value || 0),
+    }));
+    const all = [...rawEntries, ...prodEntries].filter((e) => e.value > 0);
+    if (all.length) return all.sort((a, b) => b.value - a.value);
+    return [{ name: "Stock", value: Number(totalStockKg || 0) }];
+  }, [stockBreakdown, totalStockKg]);
 
-  const renderStockCard = (title, donut, totalKg, colors) => (
-    <div className="border rounded-lg p-3">
-      <div className="text-xs text-gray-500 mb-2">{title}</div>
-      <div className="h-28 flex items-center justify-center">
-        <PieChart width={180} height={120}>
-          <Pie
-            data={donut}
-            dataKey="value"
-            innerRadius={30}
-            outerRadius={45}
-            paddingAngle={2}
-          >
-            {donut.map((entry, index) => (
-              <Cell
-                key={`${entry.name}-${index}`}
-                fill={colors[index % colors.length]}
+  const renderStockCard = (title, donut, totalKg) => {
+    const colors = donut.map((_, index) => donutColor(index));
+    return (
+      <div className="border rounded-lg p-3">
+        <div className="text-xs text-gray-500 mb-2">{title}</div>
+        <div className="h-28 flex items-center justify-center">
+          <PieChart width={180} height={120}>
+            <Pie
+              data={donut}
+              dataKey="value"
+              innerRadius={30}
+              outerRadius={45}
+              paddingAngle={2}
+            >
+              {donut.map((entry, index) => (
+                <Cell
+                  key={`${entry.name}-${index}`}
+                  fill={colors[index % colors.length]}
+                />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => `${Math.round(Number(value || 0))} kg`} />
+          </PieChart>
+        </div>
+        <div className="text-sm font-semibold text-emerald-900 mt-2">
+          {Math.round(Number(totalKg || 0))} kg
+        </div>
+        <div className="mt-2 space-y-1 text-xs text-gray-600">
+          {donut.map((entry, index) => (
+            <div key={`${entry.name}-legend-${index}`} className="flex items-center gap-2">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded"
+                style={{
+                  backgroundColor: colors[index % colors.length],
+                }}
               />
-            ))}
-          </Pie>
-          <Tooltip formatter={(value) => `${Math.round(Number(value || 0))} kg`} />
-        </PieChart>
+              <span className="flex-1 truncate">{entry.name}</span>
+              <span className="font-medium text-gray-700">
+                {Math.round(Number(entry.value || 0))} kg
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="text-sm font-semibold text-emerald-900 mt-2">
-        {Math.round(Number(totalKg || 0))} kg
-      </div>
-      <div className="mt-2 space-y-1 text-xs text-gray-600">
-        {donut.map((entry, index) => (
-          <div key={`${entry.name}-legend-${index}`} className="flex items-center gap-2">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded"
-              style={{
-                backgroundColor: colors[index % colors.length],
-              }}
-            />
-            <span className="flex-1 truncate">{entry.name}</span>
-            <span className="font-medium text-gray-700">
-              {Math.round(Number(entry.value || 0))} kg
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -459,8 +467,7 @@ export default function Dashboard() {
         <div data-tour="dashboard-stock-summary" className="lg:col-span-1 bg-white rounded-lg shadow-sm p-4">
           <h4 className="font-semibold text-emerald-700 mb-4">Stock Summary</h4>
           <div className="grid grid-cols-1 gap-4">
-            {renderStockCard("Raw Inventory", rawDonut, stockSummary.rawKg, RAW_COLORS)}
-            {renderStockCard("Production", productionDonut, stockSummary.productionKg, PRODUCTION_COLORS)}
+            {renderStockCard("Total Stock", stockDonut, totalStockKg)}
           </div>
         </div>
       </div>
