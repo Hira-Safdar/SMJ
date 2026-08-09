@@ -260,12 +260,12 @@ const gatePassOutReportColumns = [
     render: (_v, row) => gpItemListText(row, (it) => String(it?.bagCount || "").trim()),
   },
   {
-    key: "netWeightKg",
-    label: "Net Weight",
+    key: "bagWeightEachKg",
+    label: "Weight Per Bag (kg)",
     render: (_v, row) =>
       gpItemListText(row, (it) => {
-        const net = gpFmtNum(it?.netWeightKg || it?.quantity || 0);
-        return net ? `${net} kg` : "";
+        const w = gpFmtNum(it?.bagWeightEachKg || it?.bagWeightKg || 0);
+        return w ? `${w} kg` : "";
       }),
   },
   {
@@ -278,29 +278,22 @@ const gatePassOutReportColumns = [
       }),
   },
   {
-    key: "rate",
-    label: "Price/Man",
-    render: (_v, row) => gpItemListText(row, (it) => String(Math.round(Number(it?.rate || 0)) || "").trim()),
+    key: "emptyBagWeightKg",
+    label: "Weight of Empty Bags (kg)",
+    render: (_v, row) =>
+      gpItemListText(row, (it) => {
+        const w = gpFmtNum(it?.emptyBagWeightKg || 0);
+        return w ? `${w} kg` : "";
+      }),
   },
   {
-    key: "totalAmount",
-    label: "Amount",
-    render: (v) => (v != null ? Math.round(Number(v)) : "0"),
-  },
-  {
-    key: "paymentStatus",
-    label: "Payment",
-    render: (v) => String(v || "-"),
-  },
-  {
-    key: "amountPaid",
-    label: "Paid",
-    render: (v) => Math.round(Number(v || 0)),
-  },
-  {
-    key: "remainingAmount",
-    label: "Remaining",
-    render: (v) => Math.round(Number(v || 0)),
+    key: "netWeightKg",
+    label: "Net Weight",
+    render: (_v, row) =>
+      gpItemListText(row, (it) => {
+        const net = gpFmtNum(it?.netWeightKg || it?.quantity || 0);
+        return net ? `${net} kg` : "";
+      }),
   },
 ];
 
