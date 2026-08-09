@@ -750,7 +750,7 @@ export default function Production() {
       const res = await api.post(`/production/groups/${selectedGroup._id}/done`);
       if (!res.data?.success) toast.error(res.data?.message || "Failed to finalize group.");
       else {
-        toast.success("Group finalized. Remaining raw material returned to stock.");
+        toast.success("Group finalized. Remaining raw material stays as remaining (not returned to stock).");
         await refreshAll();
       }
     } catch (e) {
@@ -1501,7 +1501,7 @@ export default function Production() {
               {selectedGroup.status === "READY" && (
                 <div className="flex items-center justify-between pt-2 border-t">
                   <p className="text-xs text-gray-500">
-                    Remaining raw material <span className="font-semibold text-amber-700">{fmtKg(selectedGroup.remainingPaddyKg)} kg</span> will be returned to stock.
+                    Remaining raw material <span className="font-semibold text-amber-700">{fmtKg(selectedGroup.remainingPaddyKg)} kg</span> will stay as remaining and will not be returned to stock.
                   </p>
                   <button
                     type="button"
@@ -1565,7 +1565,7 @@ export default function Production() {
       {confirmState?.type === "FINALIZE_GROUP" && (
         <ConfirmModal
           title="Finalize Group"
-          message={`Finalize ${confirmState.group.sourceCompanyName}? Remaining raw material (${fmtKg(confirmState.group.remainingPaddyKg)} kg) will be returned to stock.`}
+          message={`Finalize ${confirmState.group.sourceCompanyName}? Remaining raw material (${fmtKg(confirmState.group.remainingPaddyKg)} kg) will stay as remaining and will not be returned to stock.`}
           confirmLabel="Finalize"
           onCancel={() => setConfirmState(null)}
           onConfirm={() => { handleFinalizeGroup(); setConfirmState(null); }}

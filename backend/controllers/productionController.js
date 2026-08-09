@@ -1008,7 +1008,8 @@ exports.deleteOutput = async (req, res) => {
 
 /**
  * POST /api/production/groups/:id/done
- * Finalizes the group: returns remaining paddy to stock and marks DONE.
+ * Finalizes the group and marks it DONE. The remaining raw material is NOT
+ * returned to stock — it stays recorded as group.remainingPaddyKg.
  */
 exports.markGroupDone = async (req, res) => {
   try {
@@ -1028,37 +1029,6 @@ exports.markGroupDone = async (req, res) => {
     }
     if (group.batchDone) {
       return res.status(400).json({ success: false, message: "Group already finalized." });
-    }
-
-    const remaining = Number(group.remainingPaddyKg || 0);
-    if (remaining > 0) {
-      try {
-        // Return unused raw material to stock. Use the most recent batch's source product.
-        const lastBatch = await ProductionBatch.findOne({
-          groupId: group._id,
-        })
-          .sort({ createdAt: -1 })
-          .lean();
-        const retProductTypeId = lastBatch?.sourceProductTypeId ?? null;
-        const retProductTypeName =
-          String(lastBatch?.sourceProductTypeName || "").trim() ||
-          "Unprocessed Paddy";
-        await StockLedger.create({
-          date: new Date(),
-          type: "IN",
-          companyId: group.sourceCompanyId || null,
-          companyName: group.sourceCompanyName || "",
-          productTypeId: retProductTypeId,
-          productTypeName: ledgerProductName(retProductTypeId, retProductTypeName),
-          numBags: 0,
-          netWeightKg: remaining,
-          gatePassId: null,
-          gatePassNo: "",
-          remarks: `Remaining raw material returned - ${group.groupNo} (${group.sourceCompanyName}) - ${retProductTypeName}`,
-        });
-      } catch (e) {
-        console.error("StockLedger (markGroupDone) error:", e);
-      }
     }
 
     group.batchDone = true;
