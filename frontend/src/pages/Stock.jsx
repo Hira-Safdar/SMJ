@@ -38,15 +38,16 @@ const donutColor = (index) => COLORS[index % COLORS.length];
 const companyOf = (row) =>
   String(row?.companyName || row?.brandName || "").trim() || "Mill Own Stock";
 
-function StockFilter({ companies = [], products = [], criteria = {}, onChange }) {
+function StockFilter({ companies = [], products = [], sources = [], criteria = {}, onChange }) {
   const company = criteria.company || "";
   const product = criteria.product || "";
+  const source = criteria.source || "";
 
   const productOptions = products;
 
-  const hasActive = Boolean(company) || Boolean(product);
+  const hasActive = Boolean(company) || Boolean(product) || Boolean(source);
 
-  const clear = () => onChange({ company: "", product: "" });
+  const clear = () => onChange({ company: "", product: "", source: "" });
 
   const selectCls =
     "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 bg-white";
@@ -59,7 +60,7 @@ function StockFilter({ companies = [], products = [], criteria = {}, onChange })
           <label className={labelCls}>Company</label>
           <select
             value={company}
-            onChange={(e) => onChange({ company: e.target.value, product: "" })}
+            onChange={(e) => onChange({ company: e.target.value, product: "", source: "" })}
             className={`${selectCls} min-w-[180px]`}
           >
             <option value="">All Companies</option>
@@ -75,13 +76,29 @@ function StockFilter({ companies = [], products = [], criteria = {}, onChange })
           <label className={labelCls}>Product</label>
           <select
             value={product}
-            onChange={(e) => onChange({ company, product: e.target.value })}
+            onChange={(e) => onChange({ company, product: e.target.value, source: "" })}
             className={`${selectCls} min-w-[180px]`}
           >
             <option value="">All Products</option>
             {productOptions.map((p) => (
               <option key={p} value={p}>
                 {p}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelCls}>Source</label>
+          <select
+            value={source}
+            onChange={(e) => onChange({ company, product, source: e.target.value })}
+            className={`${selectCls} min-w-[180px]`}
+          >
+            <option value="">All Sources</option>
+            {sources.map((s) => (
+              <option key={s} value={s}>
+                {s}
               </option>
             ))}
           </select>
@@ -123,6 +140,64 @@ const sourceBadgeClass = (type) => {
   }
 };
 
+function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: [] }, displayUnit }) {
+  const [company, setCompany] = useState("");
+  const companies = chart.companies || [];
+  const data = company ? (chart.byCompany?.[company] || []) : (chart.all || []);
+  const total = data.reduce((s, d) => s + (Number(d.value) || 0), 0);
+  return (
+    <div className="bg-white rounded-lg shadow p-4 flex flex-col min-h-0 flex-1">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-sm font-semibold text-emerald-800">{title}</span>
+        <select
+          value={company}
+          onChange={(e) => setCompany(e.target.value)}
+          className="rounded-lg border border-gray-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+        >
+          <option value="">All Companies</option>
+          {companies.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+      {data.length > 0 ? (
+        <>
+          <div className="flex-1 min-h-[120px] min-w-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={34}
+                  outerRadius={68}
+                >
+                  {data.map((entry, index) => (
+                    <Cell key={index} fill={donutColor(index)} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`}
+                />
+                <Legend wrapperStyle={{ fontSize: "10px" }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-1 text-right text-xs text-gray-500">
+            Total {Math.round(total).toLocaleString()} {displayUnit}
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+          No data to display
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Stock() {
   const [viewMode, setViewMode] = useState("KG");
   const [rows, setRows] = useState([]);
@@ -153,7 +228,9 @@ export default function Stock() {
         m[String(p?.name || "").trim().toLowerCase()] = p;
       });
       setProductTypesMap(m);
-    } catch {}
+    } catch {
+      void 0;
+    }
   }, []);
 
   useEffect(() => {
@@ -196,13 +273,30 @@ export default function Stock() {
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [activeRows]);
 
+  const activeSources = useMemo(() => {
+    const s = new Set();
+    activeRows.forEach((r) =>
+      (r.sources || []).forEach((src) => {
+        const t = String(src?.sourceType || "").trim();
+        if (t) s.add(t);
+      }),
+    );
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [activeRows]);
+
   const filteredRows = useMemo(
     () =>
       activeRows.filter((r) => {
         const company = filterCriteria.company || "";
         const product = filterCriteria.product || "";
+        const source = filterCriteria.source || "";
         if (company && companyOf(r) !== company) return false;
         if (product && String(r.productTypeName || "").trim() !== product) return false;
+        if (
+          source &&
+          !(r.sources || []).some((src) => String(src?.sourceType || "") === source)
+        )
+          return false;
         return true;
       }),
     [activeRows, filterCriteria],
@@ -316,19 +410,52 @@ export default function Stock() {
     };
   }, [visibleTableData, qtyValue]);
 
-  const donutData = useMemo(() => {
-    const map = new Map();
-    visibleTableData.forEach((row) => {
-      map.set(
-        row.company,
-        (map.get(row.company) || 0) + Number(qtyValue(row.balanceKg, row.product) || 0),
-      );
+  const sourceCharts = useMemo(() => {
+    const gate = new Map();
+    const prod = new Map();
+    const gateAgg = new Map();
+    const prodAgg = new Map();
+    filteredRows.forEach((r) => {
+      const company = companyOf(r);
+      const product = String(r.productTypeName || "").trim() || "Product";
+      (r.sources || []).forEach((s) => {
+        const qty = Number(s.qtyKg || 0);
+        if (qty <= 0) return;
+        const t = String(s.sourceType || "");
+        const remarks = String(s.remarks || "").trim();
+        let bucket = null;
+        let agg = null;
+        if (t === "Gate Pass") {
+          bucket = gate;
+          agg = gateAgg;
+        } else if (t === "Production Group" && /^production output/i.test(remarks)) {
+          bucket = prod;
+          agg = prodAgg;
+        }
+        if (!bucket) return;
+        let cmap = bucket.get(company);
+        if (!cmap) {
+          cmap = new Map();
+          bucket.set(company, cmap);
+        }
+        cmap.set(product, (cmap.get(product) || 0) + qty);
+        agg.set(product, (agg.get(product) || 0) + qty);
+      });
     });
-    return Array.from(map.entries()).map(([name, value]) => ({
-      name,
-      value: Math.round(Number(value || 0)),
-    }));
-  }, [visibleTableData, qtyValue]);
+    const toSorted = (m) =>
+      Array.from(m.entries())
+        .map(([name, value]) => ({ name, value: Math.round(value) }))
+        .sort((a, b) => b.value - a.value);
+    const toChart = (bucket, agg) => {
+      const companies = Array.from(bucket.keys()).sort((a, b) => a.localeCompare(b));
+      const byCompany = {};
+      companies.forEach((c) => {
+        byCompany[c] = toSorted(bucket.get(c));
+      });
+      return { companies, byCompany, all: toSorted(agg) };
+    };
+    return { gatePass: toChart(gate, gateAgg), production: toChart(prod, prodAgg) };
+  }, [filteredRows]);
 
   // ------------------------------------------------------------------
   // COLUMNS — company first, then product, then balance
@@ -421,7 +548,9 @@ export default function Stock() {
     [displayQtyWithUnit],
   );
 
-  const hasActiveFilters = Boolean(filterCriteria.company || filterCriteria.product);
+  const hasActiveFilters = Boolean(
+    filterCriteria.company || filterCriteria.product || filterCriteria.source,
+  );
 
   // ------------------------------------------------------------------
   // RENDER
@@ -495,6 +624,7 @@ export default function Stock() {
                 <StockFilter
                   companies={activeCompanies}
                   products={activeProducts}
+                  sources={activeSources}
                   criteria={filterCriteria}
                   onChange={setFilterCriteria}
                 />
@@ -505,35 +635,17 @@ export default function Stock() {
           />
         </div>
 
-        <div className="lg:col-span-4 bg-white rounded-lg shadow p-4">
-          <div className="text-sm font-semibold text-emerald-800 mb-2">
-            Stock Distribution
-          </div>
-          <div className="h-64 min-h-[240px] min-w-[200px]">
-            {donutData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={256} minHeight={200}>
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={40}
-                    outerRadius={80}
-                  >
-                    {donutData.map((entry, index) => (
-                      <Cell key={index} fill={donutColor(index)} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`} />
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                No data to display
-              </div>
-            )}
-          </div>
+        <div className="lg:col-span-4 flex flex-col gap-4 min-h-0">
+          <SourceDonutChart
+            title="Gate Pass Products"
+            chart={sourceCharts.gatePass}
+            displayUnit={displayUnit}
+          />
+          <SourceDonutChart
+            title="Production Products"
+            chart={sourceCharts.production}
+            displayUnit={displayUnit}
+          />
         </div>
       </div>
 
