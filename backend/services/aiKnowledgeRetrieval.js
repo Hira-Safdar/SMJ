@@ -1,5 +1,6 @@
 const AIKnowledge = require("../models/AIKnowledge");
 const { embedText } = require("./aiEmbeddingsService");
+const { refreshNow } = require("./aiKnowledgeSync");
 
 function envFlag(name, def = false) {
   const v = String(process.env[name] || "").trim();
@@ -49,6 +50,15 @@ async function loadCacheIfNeeded() {
 async function retrieveKnowledgeContext(message) {
   const enabled = envFlag("AI_RAG", false);
   if (!enabled) return { enabled: false, method: "none", items: [] };
+
+  // Make sure the knowledge base reflects the latest DB state before searching,
+  // and drop the cached copy so the fresh docs are actually searched.
+  try {
+    await refreshNow();
+    cache = { loadedAt: 0, items: [], total: 0 };
+  } catch (e) {
+    console.warn("[AI][RAG] pre-query refresh failed:", e?.message || e);
+  }
 
   const topK = numEnv("AI_RAG_TOP_K", 6);
   const msg = String(message || "").trim();

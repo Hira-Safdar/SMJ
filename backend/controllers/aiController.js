@@ -12,6 +12,7 @@ const {
   formatKnowledgeForPrompt,
 } = require("../services/aiKnowledgeRetrieval");
 const { answerFromManual } = require("../services/aiManualHelp");
+const { computeCurrentStock } = require("./stockController");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -564,6 +565,16 @@ function detectIntent(rawMessage) {
     return { type: "managerial_removed" };
   }
 
+  // Specific company/product stock balance query ("Saith Asif ke Munji 1509 ka stock kitna hai")
+  if (
+    (has("stock") || has("inventory") || has("balance") || has("bacha") || has("remaining")) &&
+    (/(ke paas|ke pas|ke\s|at\s|@)/.test(msg) ||
+      /\b(saith asif|saith asif group|al miraaj|al miraj|talha tiab|talha|tiab|hamza|munji|rice|steam|paddy|broken|super fine|short grain)\b/.test(msg) ||
+      /\b\d{3,5}\b/.test(msg))
+  ) {
+    return { type: "stock_detail", q: String(rawMessage || "").trim() };
+  }
+
   if ((has("stock") || has("inventory")) && wantsTotal) {
     if (wantsProduction) return { type: "stock_total_production" };
     return { type: "stock_total_production" };
@@ -731,6 +742,66 @@ async function answerFromDatabase(intent) {
       .lean();
     if (!tx) return `Invoice not found: ${invoiceNo}`;
     return `Invoice ${tx.invoiceNo}: Customer is ${tx.companyName || "Unknown"}.`;
+  }
+
+  // Exact, always-current stock balance for specific company/product queries.
+  // Computed live from the same ledger math as the Stock page, so it never
+  // depends on cached knowledge or the LLM's arithmetic.
+  if (intent.type === "stock_detail") {
+    const msg = String(intent.q || "");
+    const msgLower = msg.toLowerCase();
+
+    const { rows } = await computeCurrentStock();
+    if (!Array.isArray(rows) || !rows.length) return "No stock records found.";
+
+    const companies = [...new Set(rows.map((r) => String(r.companyName || "").trim()).filter(Boolean))];
+    const products = [...new Set(rows.map((r) => String(r.productTypeName || "").trim()).filter(Boolean))];
+
+    const mentionedCompanies = companies.filter((c) => msgLower.includes(c.toLowerCase()));
+    if (!mentionedCompanies.length) {
+      // Partial matching: any bigram or significant word of a company name
+      // that appears in the message, e.g. "Al Miraj" -> "Al Miraj Traders".
+      const stop = new Set(["and", "the", "for", "with", "of", "llc", "ltd", "co", "pvt", "group"]);
+      const bigrams = (name) => {
+        const words = name.toLowerCase().split(/\s+/).filter(Boolean);
+        const out = [];
+        for (let i = 0; i < words.length - 1; i++) out.push(`${words[i]} ${words[i + 1]}`);
+        for (const w of words) if (w.length >= 4 && !stop.has(w)) out.push(w);
+        return out;
+      };
+      for (const c of companies) {
+        if (bigrams(c).some((frag) => msgLower.includes(frag)) && !mentionedCompanies.includes(c)) {
+          mentionedCompanies.push(c);
+        }
+      }
+    }
+    const mentionedProducts = products.filter((p) => msgLower.includes(p.toLowerCase()));
+    if (!mentionedProducts.length) {
+      const nums = (msg.match(/\b\d{2,5}\b/g) || []);
+      for (const n of nums) {
+        for (const p of products) {
+          if (p.replace(/[^0-9]/g, "").includes(n) && !mentionedProducts.includes(p)) {
+            mentionedProducts.push(p);
+          }
+        }
+      }
+    }
+
+    if (!mentionedCompanies.length && !mentionedProducts.length) return null;
+
+    const targets = rows.filter(
+      (r) =>
+        (mentionedCompanies.length ? mentionedCompanies.includes(r.companyName) : true) &&
+        (mentionedProducts.length ? mentionedProducts.includes(r.productTypeName) : true),
+    );
+
+    if (!targets.length) return "No stock found for the requested company/product.";
+
+    const cap = Math.max(1, targets.length);
+    const lines = targets.slice(0, cap).map(
+      (r) => `- ${r.companyName || "Unknown"} | ${r.productTypeName}: ${fmtKg(r.balanceKg)}`,
+    );
+    return `Current stock balance:\n${lines.join("\n")}`;
   }
 
   return null;
@@ -994,8 +1065,10 @@ exports.sendMessage = async (req, res) => {
     const direct = shouldForceRemote ? null : answerFromSnapshot(intent, snapshot);
     const manualDirect =
       shouldForceRemote || direct != null ? null : await answerFromManual(intent, cleanMessage);
+    // Exact stock-detail lookups are DB-computed, so run them even under HF.
+    const allowDbDirect = intent.type === "stock_detail" || !shouldForceRemote;
     const dbDirect =
-      shouldForceRemote || direct != null || manualDirect != null
+      direct != null || manualDirect != null || !allowDbDirect
         ? null
         : await answerFromDatabase(intent);
 

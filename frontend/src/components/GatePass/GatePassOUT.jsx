@@ -57,13 +57,10 @@ export default function GatePassOUT({ highlightId = "" }) {
   };
 
   const calculateItemTotals = (item = {}) => {
-    const bagCount = Number(item?.bagCount || 0);
-    const bagWeightEach = Number(item?.bagWeightEachKg || 0);
+    const totalWeightKg = +(Number(item?.totalWeightKg || 0) || 0).toFixed(2);
     const totalEmptyWeight = Number(item?.emptyBagWeightKg || 0);
-    const totalWeightKg = +(bagCount * bagWeightEach).toFixed(2);
-    const grossWeightKg = totalWeightKg;
     const netWeightKg = +Math.max(totalWeightKg - totalEmptyWeight, 0).toFixed(2);
-    return { totalWeightKg, grossWeightKg, totalEmptyWeight, netWeightKg };
+    return { totalWeightKg, grossWeightKg: totalWeightKg, totalEmptyWeight, netWeightKg };
   };
 
   const [brandOptions, setBrandOptions] = useState([]);
@@ -188,8 +185,8 @@ export default function GatePassOUT({ highlightId = "" }) {
     if (!String(item?.bagCount || "").trim() || Number(item?.bagCount || 0) <= 0) {
       rowErrors.bagCount = "Enter number of bags.";
     }
-    if (!String(item?.bagWeightEachKg || "").trim() || Number(item?.bagWeightEachKg || 0) <= 0) {
-      rowErrors.bagWeightEachKg = "Weight per bag is required.";
+    if (!String(item?.totalWeightKg || "").trim() || Number(item?.totalWeightKg || 0) <= 0) {
+      rowErrors.totalWeightKg = "Total weight is required.";
     }
     if (Number(item?.netWeightKg || 0) <= 0) rowErrors.netWeightKg = "Net weight is required.";
     return rowErrors;
@@ -542,19 +539,13 @@ export default function GatePassOUT({ highlightId = "" }) {
     return !bagsOk;
   };
   const getProductStockOptionsForBrand = (brand) => {
+    // Common product list: every product name, regardless of the selected company.
     if (!brand) return [];
     const map = new Map();
-    (stockRows || []).forEach((row) => {
-      const rowBrand = getStockBrand(row);
-      if (normalizeText(rowBrand) !== normalizeText(brand)) return;
-      const name = getStockProductName(row);
-      const available = Number(row.balanceKg || 0);
-      if (!name || available <= 0) return;
-      const key = normalizeText(name);
-      map.set(key, {
-        name,
-        available: (map.get(key)?.available || 0) + available,
-      });
+    (productCatalog || []).forEach((p) => {
+      const name = String(p.name || "").trim();
+      if (!name) return;
+      map.set(normalizeText(name), { name });
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   };
@@ -622,8 +613,10 @@ export default function GatePassOUT({ highlightId = "" }) {
     if (cleanBrand.length > 80) {
       return { brand: cleanBrand, name: cleanName };
     }
+    // Match by name only so the same product is never added twice just because
+    // it is used by different companies.
     const exists = (productCatalog || []).some(
-      (p) => normalizeText(p.brand) === normalizeText(cleanBrand) && normalizeText(p.name) === normalizeText(cleanName)
+      (p) => normalizeText(p.name) === normalizeText(cleanName)
     );
     if (exists) return { brand: cleanBrand, name: cleanName };
     const payload = {
@@ -843,6 +836,8 @@ export default function GatePassOUT({ highlightId = "" }) {
     } else if (field === "bagWeightEachKg") {
       row[field] = cleanDec(value, 6);
     } else if (field === "emptyBagWeightKg") {
+      row[field] = cleanDec(value, 8);
+    } else if (field === "totalWeightKg") {
       row[field] = cleanDec(value, 8);
     } else if (
       field === "productName" ||
@@ -1077,9 +1072,7 @@ export default function GatePassOUT({ highlightId = "" }) {
           const brand = String(it.brand || "").trim();
           let finalName = rawName;
           const exists = (productCatalog || []).some(
-            (p) =>
-              normalizeText(p.brand) === normalizeText(brand) &&
-              normalizeText(p.name) === normalizeText(rawName)
+            (p) => normalizeText(p.name) === normalizeText(rawName)
           );
           if (!exists && rawName) {
             const created = await ensureProductOption(brand, rawName);
@@ -1096,8 +1089,8 @@ export default function GatePassOUT({ highlightId = "" }) {
             bagWeightKg: Number(it.bagWeightEachKg || 0),
             bagWeightEachKg: Number(it.bagWeightEachKg || 0),
             emptyBagWeightKg: Number(it.emptyBagWeightKg || 0),
-            grossWeightKg: Number((Number(it.bagCount || 0) || 0) * (Number(it.bagWeightEachKg || 0) || 0)) || 0,
-            totalWeightKg: Number((Number(it.bagCount || 0) || 0) * (Number(it.bagWeightEachKg || 0) || 0)) || 0,
+            grossWeightKg: Number(it.totalWeightKg || 0) || 0,
+            totalWeightKg: Number(it.totalWeightKg || 0) || 0,
             weightAtSmjKg: 0,
             netWeightKg: Number(it.netWeightKg || 0),
           };
@@ -1862,10 +1855,8 @@ export default function GatePassOUT({ highlightId = "" }) {
                           <option
                             key={`${opt.name}-${nIdx}`}
                             value={opt.name}
-                            disabled={opt.available <= 0}
                           >
                             {opt.name}
-                            {opt.available <= 0 ? " (Out of stock)" : ""}
                           </option>
                         ))}
                         <option value={OTHER_OPTION}>+ Add New Product</option>
@@ -1954,6 +1945,23 @@ export default function GatePassOUT({ highlightId = "" }) {
                     {renderFieldError(errors.itemRows?.[idx]?.bagCount)}
                   </div>
                   <div>
+                    <label className="block text-xs text-gray-500 mb-1">Total Weight (kg)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={it.totalWeightKg || ""}
+                      onChange={(e) => updateItemValue(idx, "totalWeightKg", e.target.value)}
+                      placeholder="0"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                        errors.itemRows?.[idx]?.totalWeightKg
+                          ? "border-red-500 bg-red-50"
+                          : "border-gray-300"
+                      }`}
+                    />
+                    {renderFieldError(errors.itemRows?.[idx]?.totalWeightKg)}
+                  </div>
+                  <div>
                     <label className="block text-xs text-gray-500 mb-1">Weight Per Bag (kg)</label>
                     <input
                       type="number"
@@ -1969,18 +1977,6 @@ export default function GatePassOUT({ highlightId = "" }) {
                       }`}
                     />
                     {renderFieldError(errors.itemRows?.[idx]?.bagWeightEachKg)}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Total Weight (kg)</label>
-                    <input
-                      value={it.totalWeightKg || ""}
-                      readOnly
-                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none bg-gray-100 ${
-                        errors.itemRows?.[idx]?.bagWeightEachKg
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                    />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Weight of Empty Bags (kg)</label>

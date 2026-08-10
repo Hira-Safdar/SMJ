@@ -16,6 +16,13 @@ const AccountingGeneratedJournal = require("../models/accountingGeneratedJournal
 const { guessBuilder, truncate } = require("./aiKnowledgeBuilders");
 const { embedText } = require("./aiEmbeddingsService");
 
+// Shared incremental watermark so background polls and on-demand refreshes
+// (refreshNow) never rescan the same docs.
+const sinceByCollection = new Map();
+// One poll/refresh at a time: startup bootstrap, background polls and the
+// pre-query refresh must never run concurrently (they'd re-embed the same docs).
+let pollInFlight = false;
+
 const DEFAULT_COLLECTIONS = [
   { name: "Transaction", model: Transaction },
   { name: "ProductionBatch", model: ProductionBatch },
@@ -126,30 +133,37 @@ async function markKnowledgeDeleted(collectionName, docId) {
 }
 
 async function pollOnce({ sinceByCollection }) {
-  const cols = getCollections();
-  const now = new Date();
+  if (pollInFlight) return { ok: false, skipped: true };
+  pollInFlight = true;
+  try {
+    const cols = getCollections();
+    const now = new Date();
 
-  for (const { name, model } of cols) {
-    const since = sinceByCollection.get(name) || new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const marginMs = numEnv("AI_RAG_POLL_MARGIN_MS", 5000);
-    const from = new Date(since.getTime() - marginMs);
+    for (const { name, model } of cols) {
+      const since = sinceByCollection.get(name) || new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const marginMs = numEnv("AI_RAG_POLL_MARGIN_MS", 5000);
+      const from = new Date(since.getTime() - marginMs);
 
-    const docs = await model
-      .find({ updatedAt: { $gte: from } })
-      .sort({ updatedAt: -1 })
-      .limit(numEnv("AI_RAG_POLL_LIMIT", 200))
-      .lean();
+      const docs = await model
+        .find({ updatedAt: { $gte: from } })
+        .sort({ updatedAt: -1 })
+        .limit(numEnv("AI_RAG_POLL_LIMIT", 200))
+        .lean();
 
-    for (const doc of docs) {
-      // eslint-disable-next-line no-await-in-loop
-      await upsertKnowledgeFromDoc(name, doc);
+      for (const doc of docs) {
+        // eslint-disable-next-line no-await-in-loop
+        await upsertKnowledgeFromDoc(name, doc);
+      }
+
+      const lastUpdated = docs.reduce((acc, d) => {
+        const t = d?.updatedAt ? new Date(d.updatedAt).getTime() : 0;
+        return t > acc ? t : acc;
+      }, 0);
+      sinceByCollection.set(name, new Date(Math.max(now.getTime(), lastUpdated || 0)));
     }
-
-    const lastUpdated = docs.reduce((acc, d) => {
-      const t = d?.updatedAt ? new Date(d.updatedAt).getTime() : 0;
-      return t > acc ? t : acc;
-    }, 0);
-    sinceByCollection.set(name, new Date(Math.max(now.getTime(), lastUpdated || 0)));
+    return { ok: true };
+  } finally {
+    pollInFlight = false;
   }
 }
 
@@ -192,7 +206,6 @@ async function initAIKnowledgeSync() {
     return { started: false, reason: "mongo_not_connected" };
   }
 
-  const sinceByCollection = new Map();
   const bootstrapDays = numEnv("AI_RAG_BOOTSTRAP_DAYS", 30);
   const bootstrapSince = new Date(Date.now() - bootstrapDays * 24 * 60 * 60 * 1000);
   for (const { name } of getCollections()) sinceByCollection.set(name, bootstrapSince);
@@ -218,4 +231,17 @@ async function initAIKnowledgeSync() {
   return { started: true, streams: streams.length, pollMs };
 }
 
-module.exports = { initAIKnowledgeSync, upsertKnowledgeFromDoc, markKnowledgeDeleted };
+/**
+ * Bring the AI knowledge up to date right now (incremental). Used before
+ * answering a chat message so the assistant always sees the latest data
+ * even when Mongo change streams are unavailable (standalone databases).
+ */
+async function refreshNow() {
+  const enabled = envFlag("AI_RAG", false);
+  if (!enabled) return { ok: false, reason: "disabled" };
+  if (mongoose.connection.readyState !== 1) return { ok: false, reason: "mongo_not_connected" };
+  await pollOnce({ sinceByCollection });
+  return { ok: true };
+}
+
+module.exports = { initAIKnowledgeSync, upsertKnowledgeFromDoc, markKnowledgeDeleted, refreshNow };
