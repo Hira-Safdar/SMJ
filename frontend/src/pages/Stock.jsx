@@ -1,5 +1,5 @@
 // src/pages/Stock.jsx
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import api from "../services/api";
 import { Info, X } from "lucide-react";
 import toast from "react-hot-toast";
@@ -142,9 +142,24 @@ const sourceBadgeClass = (type) => {
 
 function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: [] }, displayUnit }) {
   const [company, setCompany] = useState("");
+  const boxRef = useRef(null);
+  const [boxSize, setBoxSize] = useState({ w: 0, h: 0 });
   const companies = chart.companies || [];
   const data = company ? (chart.byCompany?.[company] || []) : (chart.all || []);
   const total = data.reduce((s, d) => s + (Number(d.value) || 0), 0);
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const update = () => setBoxSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const chartReady = boxSize.w > 0 && boxSize.h > 0;
+
   return (
     <div className="bg-white rounded-lg shadow p-4 flex flex-col min-h-0 flex-1">
       <div className="flex items-center justify-between gap-2 mb-2">
@@ -164,26 +179,28 @@ function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: 
       </div>
       {data.length > 0 ? (
         <>
-          <div className="flex-1 min-h-[120px] min-w-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={data}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={34}
-                  outerRadius={68}
-                >
-                  {data.map((entry, index) => (
-                    <Cell key={index} fill={donutColor(index)} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`}
-                />
-                <Legend wrapperStyle={{ fontSize: "10px" }} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div ref={boxRef} className="flex-1 min-h-[120px] min-w-[200px]">
+            {chartReady && (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={data}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={34}
+                    outerRadius={68}
+                  >
+                    {data.map((entry, index) => (
+                      <Cell key={index} fill={donutColor(index)} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value) => `${Math.round(Number(value) || 0)} ${displayUnit}`}
+                  />
+                  <Legend wrapperStyle={{ fontSize: "10px" }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
           <div className="mt-1 text-right text-xs text-gray-500">
             Total {Math.round(total).toLocaleString()} {displayUnit}

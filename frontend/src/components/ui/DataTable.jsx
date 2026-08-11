@@ -152,7 +152,9 @@ export default function DataTable({
     setSelectedKeys((prev) => {
       if (!prev.length) return prev;
       const allowed = new Set(filteredData.map((row, idx) => getRowKey(row, idx)));
-      return prev.filter((k) => allowed.has(k));
+      const next = prev.filter((k) => allowed.has(k));
+      if (next.length === prev.length && next.every((k, i) => k === prev[i])) return prev;
+      return next;
     });
   }, [filteredData, getRowKey]);
 

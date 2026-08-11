@@ -22,7 +22,6 @@ import {
   Download,
   ChevronDown,
   RefreshCcw,
-  Tags,
 } from "lucide-react";
 import api, { toAbsoluteUrl } from "../services/api";
 import DataTable from "../components/ui/DataTable";
@@ -793,9 +792,6 @@ export default function AccountingFinance() {
   const [accountSaveError, setAccountSaveError] = useState("");
   const [accountFieldErrors, setAccountFieldErrors] = useState({ name: "", createdOn: "" });
 
-  const [selectedAccounts, setSelectedAccounts] = useState([]);
-  const [clearSelectionSignal, setClearSelectionSignal] = useState(0);
-  const [subTypeDialog, setSubTypeDialog] = useState({ open: false, subType: "", error: "", saving: false });
   const [coaFilterCriteria, setCoaFilterCriteria] = useState({});
   const [coaFilterOpen, setCoaFilterOpen] = useState(false);
 
@@ -1027,6 +1023,7 @@ export default function AccountingFinance() {
     if (!url) return "";
     try {
       const res = await fetch(url);
+      if (!res.ok) return "";
       const blob = await res.blob();
       return await new Promise((resolve) => {
         const reader = new FileReader();
@@ -1256,40 +1253,6 @@ export default function AccountingFinance() {
       toast.error(err?.response?.data?.message || "Failed to activate account.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const openSubTypeDialog = () => {
-    setSubTypeDialog({ open: true, subType: "", error: "", saving: false });
-  };
-
-  const applySubType = async () => {
-    const count = selectedAccounts.length;
-    const subType = String(subTypeDialog.subType || "").trim();
-    if (!count) {
-      setSubTypeDialog((d) => ({ ...d, error: "Select at least one account." }));
-      return;
-    }
-    if (!subType) {
-      setSubTypeDialog((d) => ({ ...d, error: "Sub-Type is required." }));
-      return;
-    }
-    try {
-      setSubTypeDialog((d) => ({ ...d, saving: true, error: "" }));
-      await api.put("/accounting/accounts/bulk-subtype", {
-        ids: selectedAccounts.map((a) => String(a._id)),
-        subType,
-      });
-      setSubTypeDialog((d) => ({ ...d, open: false, saving: false }));
-      setClearSelectionSignal((s) => s + 1);
-      toast.success(`Sub-Type applied to ${count} account(s).`);
-      await loadDropdowns();
-    } catch (err) {
-      setSubTypeDialog((d) => ({
-        ...d,
-        saving: false,
-        error: err?.response?.data?.message || err?.message || "Failed to set sub-type.",
-      }));
     }
   };
 
@@ -6525,9 +6488,6 @@ export default function AccountingFinance() {
                 },
               ]}
               data={filteredAccounts}
-              selectable
-              onSelectionChange={setSelectedAccounts}
-              selectionResetSignal={clearSelectionSignal}
               showSearch={false}
               showFilters={false}
               reportContextLines={coaReportLines}
@@ -6539,15 +6499,6 @@ export default function AccountingFinance() {
                     onToggle={() => setCoaFilterOpen((o) => !o)}
                     title="Filters"
                   />
-                  <button
-                    type="button"
-                    onClick={openSubTypeDialog}
-                    disabled={selectedAccounts.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Apply a sub-type to selected accounts"
-                  >
-                    <Tags size={16} /> Set Sub-Type ({selectedAccounts.length})
-                  </button>
                   <button
                     type="button"
                     onClick={openNewAccount}
@@ -6661,59 +6612,6 @@ export default function AccountingFinance() {
                     className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-60"
                   >
                     Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {subTypeDialog.open && (
-            <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-              <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-lg p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-gray-900">
-                    Set Sub-Type for {selectedAccounts.length} Account{selectedAccounts.length === 1 ? "" : "s"}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSubTypeDialog((d) => ({ ...d, open: false, error: "" }))}
-                    className="p-2 rounded hover:bg-gray-100"
-                    title="Close"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Sub-Type</label>
-                  <Combobox
-                    value={subTypeDialog.subType || ""}
-                    onChange={(v) => setSubTypeDialog((d) => ({ ...d, subType: v, error: "" }))}
-                    options={subTypeOptions}
-                    placeholder="e.g. Raw Material"
-                    error={!!subTypeDialog.error}
-                  />
-                  <div className="mt-1 text-xs text-gray-500">
-                    Pick an existing sub-type or type a new one. It will be available next time.
-                  </div>
-                  {subTypeDialog.error && <div className="mt-1 text-xs text-red-600">{subTypeDialog.error}</div>}
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSubTypeDialog((d) => ({ ...d, open: false, error: "" }))}
-                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applySubType}
-                    disabled={subTypeDialog.saving}
-                    className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-60"
-                  >
-                    {subTypeDialog.saving ? "Applying..." : "Apply"}
                   </button>
                 </div>
               </div>

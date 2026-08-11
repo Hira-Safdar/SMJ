@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Package,
+  PackageX,
   Factory,
   Truck,
   TrendingUp,
@@ -12,11 +13,12 @@ import {
   BookCopy,
   FileText,
   UserRound,
-  Filter,
   Download,
   X,
   Trash2,
   ChevronDown,
+  ArrowLeftRight,
+  Building2,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
 import api, { toAbsoluteUrl } from "../services/api";
@@ -57,15 +59,6 @@ const normalizeReportTabKey = (tab) => {
   return tab;
 };
 
-const RANGE_OPTIONS = [
-  { value: "day", label: "Day (Today)" },
-  { value: "particular", label: "Particular Date" },
-  { value: "week", label: "Week" },
-  { value: "month", label: "Month" },
-  { value: "year", label: "Year" },
-  { value: "custom", label: "From-To Date" },
-];
-
 const num = (v) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return 0;
@@ -98,20 +91,6 @@ const withBeing = (text) => {
   if (!t) return "";
   return t;
 };
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 const n0 = (v) => (v === "" || v == null ? 0 : Number(v || 0) || 0);
 const round2 = (n) => Number((Number(n || 0)).toFixed(2));
 const ensureAccountSuffix = (value) => {
@@ -328,16 +307,6 @@ const dedupeByName = (items = []) => {
   });
 };
 
-const buildStockProducts = (payload = {}, fallback = []) => {
-  const source = (payload?.production || [])
-    .map((row) => ({
-      _id: String(row.productTypeId || row.productTypeName || "").trim(),
-      name: String(row.productTypeName || "").trim(),
-    }))
-    .filter((row) => row._id && row.name);
-  return dedupeByName(source.length ? source : fallback);
-};
-
 function computeTotalsFromItems({ earnings, deductionsItems }) {
   const e = Array.isArray(earnings) ? earnings : [];
   const d = Array.isArray(deductionsItems) ? deductionsItems : [];
@@ -385,8 +354,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [endDate, setEndDate] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [stockRows, setStockRows] = useState([]);
-  const [stockMovementRows, setStockMovementRows] = useState([]);
 
   // Accounting filters (manual-entry reports)
   const [accCompanies, setAccCompanies] = useState([]);
@@ -421,7 +388,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   const [invProducts, setInvProducts] = useState([]); // ProductType list
   const [invCompanyIds, setInvCompanyIds] = useState([]);
   const [invProductTypeIds, setInvProductTypeIds] = useState([]);
-  const [stockFilterOpen, setStockFilterOpen] = useState(false);
 
   // Gatepass report cards + generated reports
   const [gpSenders, setGpSenders] = useState([]);
@@ -448,6 +414,26 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     company: "",
     product: "",
   });
+  const [stkSnapCriteria, setStkSnapCriteria] = useState({
+    range: "all",
+    startDate: "",
+    endDate: "",
+    company: "",
+    product: "",
+  });
+  const [stkMovCriteria, setStkMovCriteria] = useState({
+    range: "all",
+    startDate: "",
+    endDate: "",
+    company: "",
+    product: "",
+  });
+  const [prodSumCriteria, setProdSumCriteria] = useState({
+    range: "all",
+    startDate: "",
+    endDate: "",
+    company: "",
+  });
 
   // Drill-down modal
   const [drill, setDrill] = useState({ open: false, kind: "", title: "", loading: false, rows: [], columns: [] });
@@ -464,6 +450,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     if (!url) return "";
     try {
       const res = await fetch(url);
+      if (!res.ok) return "";
       const blob = await res.blob();
       return await new Promise((resolve) => {
         const reader = new FileReader();
@@ -502,18 +489,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   };
 
-  const clearStockFilters = () => {
-    setRange("month");
-    setParticularDate(todayIso);
-    setWeekDate(todayIso);
-    setMonthValue(currentMonthValue);
-    setYearValue(currentYearValue);
-    setStartDate("");
-    setEndDate("");
-    setInvCompanyIds([]);
-    setInvProductTypeIds([]);
-  };
-
   const refreshInventoryFilterOptions = async () => {
     try {
       const [companyRes, productRes] = await Promise.all([api.get("/companies"), api.get("/product-types")]);
@@ -525,83 +500,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       // ignore; existing filter options can still be used
     }
   };
-
-  const openStockFilterPopup = async () => {
-    await refreshInventoryFilterOptions();
-    setStockFilterOpen(true);
-  };
-
-  const renderMovementReference = (row) => {
-    const label = String(row?.reference || "").trim();
-    const targetPath = String(row?.referenceTarget?.path || "").trim();
-    if (!label) return "-";
-    if (!targetPath) return label;
-    return (
-      <button
-        type="button"
-        onClick={() => navigate(targetPath)}
-        className="text-emerald-700 hover:underline"
-      >
-        {label}
-      </button>
-    );
-  };
-
-  const stockAsOfDateLabel = useMemo(() => {
-    if (range === "custom" && startDate && endDate) return `${fmtDate(startDate)} to ${fmtDate(endDate)}`;
-    if (range === "particular" && particularDate) return fmtDate(particularDate);
-    if (range === "week" && weekDate) return `Week of ${fmtDate(weekDate)}`;
-    if (range === "month" && monthValue) {
-      const [y, m] = monthValue.split("-").map(Number);
-      return `${MONTHS[(m || 1) - 1]} ${y || ""}`.trim();
-    }
-    if (range === "year" && yearValue) return String(yearValue);
-    if (range === "custom" && startDate) return `From ${fmtDate(startDate)}`;
-    if (range === "custom" && endDate) return fmtDate(endDate);
-    if (range === "day") return "Today";
-    if (range === "week") return "Selected week";
-    if (range === "month") return "Selected month";
-    if (range === "year") return "Selected year";
-    return "All dates";
-  }, [endDate, monthValue, particularDate, range, startDate, weekDate, yearValue]);
-
-  const stockRangeSummary = useMemo(() => {
-    if (range === "particular" && particularDate) return `Stock as of ${fmtDate(particularDate)}`;
-    if (range === "custom" && startDate && endDate) return `Stock as of ${fmtDate(endDate)} for ${fmtDate(startDate)} to ${fmtDate(endDate)}`;
-    if (range === "custom" && endDate) return `Stock as of ${fmtDate(endDate)}`;
-    if (range === "year") return "Year-end stock snapshot";
-    if (range === "month") return "Month-end stock snapshot";
-    if (range === "week") return "Week-end stock snapshot";
-    if (range === "day") return "Today stock snapshot";
-    return "Stock snapshot";
-  }, [endDate, particularDate, range, startDate]);
-
-  const stockFilterSummary = useMemo(() => {
-    const bits = [stockRangeSummary];
-    if (invCompanyIds[0]) {
-      const company = (invCompanies || []).find((c) => String(c._id) === String(invCompanyIds[0]));
-      if (company?.name) bits.push(`Company: ${company.name}`);
-    }
-    if (invProductTypeIds[0]) {
-      const product = (invProducts || []).find((p) => String(p._id) === String(invProductTypeIds[0]));
-      if (product?.name) bits.push(`Product: ${product.name}`);
-    }
-    return bits.join(" | ");
-  }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockRangeSummary]);
-
-  const stockReportContextLines = useMemo(() => {
-    const lines = [];
-    const company = invCompanyIds[0]
-      ? (invCompanies || []).find((c) => String(c._id) === String(invCompanyIds[0]))?.name || "Selected Company"
-      : "All Companies";
-    const product = invProductTypeIds[0]
-      ? (invProducts || []).find((p) => String(p._id) === String(invProductTypeIds[0]))?.name || "Selected Product"
-      : "All Products";
-    lines.push(`Company: ${company}`);
-    lines.push(`Product: ${product}`);
-    lines.push(`Date: ${stockAsOfDateLabel}`);
-    return lines;
-  }, [invCompanies, invCompanyIds, invProducts, invProductTypeIds, stockAsOfDateLabel]);
 
   const gpStockCompanies = useMemo(() => {
     const set = new Set();
@@ -789,14 +687,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         return;
       }
       if (activeTab === "stock-reports") {
-        const [stockRes, movementRes] = await Promise.all([
-          api.get("/reports/stock", params),
-          api.get("/reports/stock-movement", params),
-        ]);
-        const stockPayload = stockRes.data?.data || {};
-        setStockRows(mapStockRows(stockPayload));
-        setStockMovementRows(mapStockMovementRows(movementRes.data?.data || []));
-        setInvProducts((prev) => buildStockProducts(stockPayload, prev));
+        // Stock reports tab is card-driven; rows are generated on demand.
         setRows([]);
         return;
       }
@@ -1022,7 +913,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== "gatepass") return;
+    if (activeTab !== "gatepass" && activeTab !== "stock-reports") return;
     let cancelled = false;
     (async () => {
       try {
@@ -1064,7 +955,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
   }, [activeTab, rows]);
 
   useEffect(() => {
-    if (activeTab !== "gatepass") return;
+    if (activeTab !== "gatepass" && activeTab !== "stock-reports") return;
     loadGatePassGeneratedList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -1338,6 +1229,21 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     `;
   };
 
+  const renderMovementReference = (row) => {
+    const label = String(row?.reference || "").trim();
+    const targetPath = String(row?.referenceTarget?.path || "").trim();
+    if (!label) return "-";
+    if (!targetPath) return label;
+    return (
+      <button
+        type="button"
+        onClick={() => navigate(targetPath)}
+        className="text-emerald-700 hover:underline"
+      >
+        {label}
+      </button>
+    );
+  };
 
   async function openStockMovementDrill({ companyId, productTypeId, title: t }) {
     try {
@@ -1369,184 +1275,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
   }
 
-  const stockColumns = [
-    { key: "entryDate", label: "Created Date", render: (v) => fmtDate(v) },
-    { key: "party", label: "Company Name" },
-    { key: "item", label: "Product" },
-    { key: "balance", label: "Weight (kg)" },
-  ];
-
-  const stockSnapshotToolbarActions = (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={openStockFilterPopup}
-        className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${
-          invCompanyIds.length || invProductTypeIds.length || range !== "month" || startDate || endDate
-            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-            : "border-gray-300 text-gray-700 hover:bg-gray-50"
-        }`}
-        title="Filter stock snapshot"
-      >
-        <Filter size={16} />
-        Filter
-      </button>
-      {stockFilterOpen && (
-        <div className="absolute right-0 mt-2 z-20 w-[320px] max-w-[90vw] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-gray-900">Stock Filters</div>
-            <button
-              type="button"
-              onClick={() => setStockFilterOpen(false)}
-              className="rounded p-1 text-gray-500 hover:bg-gray-100"
-              title="Close"
-            >
-              <X size={16} />
-            </button>
-          </div>
-          <div className="mt-3 space-y-3">
-            <div>
-              <label className={filterLabelClass}>Range</label>
-              <select value={range} onChange={(e) => setRange(e.target.value)} className={`${filterInputClass} w-full`}>
-                {RANGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {range === "particular" && (
-              <div>
-                <label className={filterLabelClass}>Date</label>
-                <input
-                  type="date"
-                  value={particularDate}
-                  onChange={(e) => setParticularDate(e.target.value)}
-                  className={`${filterInputClass} w-full`}
-                />
-              </div>
-            )}
-            {range === "week" && (
-              <div>
-                <label className={filterLabelClass}>Choose Week</label>
-                <input
-                  type="date"
-                  value={weekDate}
-                  onChange={(e) => setWeekDate(e.target.value)}
-                  className={`${filterInputClass} w-full`}
-                />
-              </div>
-            )}
-            {range === "month" && (
-              <div>
-                <label className={filterLabelClass}>Choose Month</label>
-                <input
-                  type="month"
-                  value={monthValue}
-                  onChange={(e) => setMonthValue(e.target.value)}
-                  className={`${filterInputClass} w-full`}
-                />
-              </div>
-            )}
-            {range === "year" && (
-              <div>
-                <label className={filterLabelClass}>Choose Year</label>
-                <input
-                  type="number"
-                  min="2000"
-                  max="3000"
-                  step="1"
-                  value={yearValue}
-                  onChange={(e) => setYearValue(e.target.value)}
-                  className={`${filterInputClass} w-full`}
-                  placeholder="2026"
-                />
-              </div>
-            )}
-            {range === "custom" && (
-              <>
-                <div>
-                  <label className={filterLabelClass}>Start Date</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className={`${filterInputClass} w-full`}
-                  />
-                </div>
-                <div>
-                  <label className={filterLabelClass}>End Date</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className={`${filterInputClass} w-full`}
-                  />
-                </div>
-              </>
-            )}
-            <div>
-              <label className={filterLabelClass}>Company</label>
-              <select
-                value={invCompanyIds[0] || ""}
-                onChange={(e) => setInvCompanyIds(e.target.value ? [e.target.value] : [])}
-                className={`${filterInputClass} w-full`}
-              >
-                <option value="">All Companies</option>
-                {(invCompanies || []).map((company) => (
-                  <option key={company._id} value={company._id}>
-                    {company.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={filterLabelClass}>Product</label>
-              <select
-                value={invProductTypeIds[0] || ""}
-                onChange={(e) => setInvProductTypeIds(e.target.value ? [e.target.value] : [])}
-                className={`${filterInputClass} w-full`}
-              >
-                <option value="">All Products</option>
-                {(invProducts || []).map((product) => (
-                  <option key={product._id} value={product._id}>
-                    {product.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={clearStockFilters}
-                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setStockFilterOpen(false)}
-                className="px-3 py-2 rounded-lg bg-emerald-600 text-sm text-white hover:bg-emerald-700"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const stockMovementColumns = [
-    { key: "date", label: "Date", render: (v) => fmtDate(v) },
-    { key: "companyName", label: "Company Name" },
-    { key: "productTypeName", label: "Product" },
-    { key: "stockInKg", label: "Stock In (kg)" },
-    { key: "stockOutKg", label: "Stock Out (kg)" },
-    { key: "reference", label: "Reference", render: (_v, row) => renderMovementReference(row) },
-    { key: "remarks", label: "Remarks" },
-  ];
-
   const columns = useMemo(() => {
     if (activeTab === "customers") {
       return [
@@ -1558,10 +1286,23 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       ];
     }
     if (activeTab === "stock") {
-      return stockColumns;
+      return [
+        { key: "entryDate", label: "Created Date", render: (v) => fmtDate(v) },
+        { key: "party", label: "Company Name" },
+        { key: "item", label: "Product" },
+        { key: "balance", label: "Weight (kg)" },
+      ];
     }
     if (activeTab === "stock-movement") {
-      return stockMovementColumns;
+      return [
+        { key: "date", label: "Date", render: (v) => fmtDate(v) },
+        { key: "companyName", label: "Company Name" },
+        { key: "productTypeName", label: "Product" },
+        { key: "stockInKg", label: "Stock In (kg)" },
+        { key: "stockOutKg", label: "Stock Out (kg)" },
+        { key: "reference", label: "Reference", render: (_v, row) => renderMovementReference(row) },
+        { key: "remarks", label: "Remarks" },
+      ];
     }
     if (activeTab === "production-summary") {
       return [
@@ -1903,12 +1644,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     }
     if (activeTab === "ledger" && Number(row.balance || 0) < 0) return "text-red-700";
     if (activeTab === "stock-movement" && Number(row.balanceKg || 0) < 0) return "text-red-700";
-    return "";
-  };
-
-  const stockMovementRowClass = (row) => {
-    if (!row) return "";
-    if (Number(row.balanceKg || 0) < 0) return "text-red-700";
     return "";
   };
 
@@ -2935,6 +2670,162 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
     });
   };
 
+  const STOCK_REPORT_KINDS = ["stock-snapshot", "stock-movement", "production-summary", "stock-companies", "gatepass-out-stock"];
+
+  const buildStockRangeParams = ({ range: r = "all", startDate: sd = "", endDate: ed = "" } = {}) => {
+    const p = { range: r };
+    if (r === "custom" && sd && ed) {
+      p.startDate = sd;
+      p.endDate = ed;
+    }
+    return p;
+  };
+
+  const stockReportFilterLabel = ({ range: r = "all", startDate: sd = "", endDate: ed = "", company = "", product = "" }) => {
+    const lines = [];
+    lines.push(`Date Range: ${gatePassRangeLabel({ range: r, startDate: sd, endDate: ed })}`);
+    if (company) lines.push(`Company: ${company}`);
+    if (product) lines.push(`Product: ${product}`);
+    return lines.join("\n");
+  };
+
+  const buildStockSnapshotReport = async (criteria) => {
+    try {
+      const params = buildStockRangeParams(criteria);
+      if (criteria.company) params.companyIds = criteria.company;
+      if (criteria.product) params.productTypeIds = criteria.product;
+      const res = await api.get("/reports/stock", { params });
+      const payload = res.data?.data || {};
+      const rows = mapStockRows(payload);
+      const cols = [
+        { key: "entryDate", label: "Created Date" },
+        { key: "party", label: "Company Name" },
+        { key: "item", label: "Product" },
+        { key: "balance", label: "Weight (kg)" },
+        { key: "valuePKR", label: "Value (PKR)" },
+      ];
+      const filterLabel = `${stockReportFilterLabel(criteria)}\nRecords: ${rows.length}`;
+      return saveGatePassGeneratedReport({
+        title: "Stock Snapshot Report",
+        reportKind: "stock-snapshot",
+        filterLabel,
+        criteria: { ...criteria },
+        columns: cols.map((c) => c.label),
+        rows: rows.map((r) => cols.map((c) => String(r[c.key] ?? ""))),
+      });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to generate stock snapshot report.");
+      return false;
+    }
+  };
+
+  const buildStockMovementReport = async (criteria) => {
+    try {
+      const params = buildStockRangeParams(criteria);
+      if (criteria.company) params.companyIds = criteria.company;
+      if (criteria.product) params.productTypeIds = criteria.product;
+      const res = await api.get("/reports/stock-movement", { params });
+      const rows = (res.data?.data || []).map((r) => ({
+        date: r.date,
+        company: r.companyName || "",
+        product: r.productTypeName || "",
+        stockIn: r.stockInKg,
+        stockOut: r.stockOutKg,
+        balance: r.balanceKg,
+        reference: r.reference || "",
+      }));
+      const cols = [
+        { key: "date", label: "Date" },
+        { key: "company", label: "Company Name" },
+        { key: "product", label: "Product" },
+        { key: "stockIn", label: "Stock In (kg)" },
+        { key: "stockOut", label: "Stock Out (kg)" },
+        { key: "balance", label: "Balance (kg)" },
+        { key: "reference", label: "Reference" },
+      ];
+      const filterLabel = `${stockReportFilterLabel(criteria)}\nRecords: ${rows.length}`;
+      return saveGatePassGeneratedReport({
+        title: "Stock Movement Report",
+        reportKind: "stock-movement",
+        filterLabel,
+        criteria: { ...criteria },
+        columns: cols.map((c) => c.label),
+        rows: rows.map((r) => cols.map((c) => String(r[c.key] ?? ""))),
+      });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to generate stock movement report.");
+      return false;
+    }
+  };
+
+  const buildProductionSummaryReport = async (criteria) => {
+    try {
+      const params = buildStockRangeParams(criteria);
+      const res = await api.get("/reports/production-summary", { params });
+      let rows = (res.data?.data || []).map((r) => ({
+        date: r.date,
+        company: r.companyName || "",
+        batchNo: r.batchNo || "",
+        paddyIn: r.paddyInputKg,
+        riceOut: r.riceOutputKg,
+        brokenOut: r.brokenOutputKg,
+        huskOut: r.huskOutputKg,
+        branOut: r.branOutputKg,
+        totalOut: r.totalOutputKg,
+      }));
+      if (criteria.company) {
+        const needle = String(criteria.company).toLowerCase();
+        rows = rows.filter((r) => String(r.company).toLowerCase().includes(needle));
+      }
+      const cols = [
+        { key: "date", label: "Date" },
+        { key: "company", label: "Company Name" },
+        { key: "batchNo", label: "Batch No" },
+        { key: "paddyIn", label: "Paddy In (kg)" },
+        { key: "riceOut", label: "Rice Out (kg)" },
+        { key: "brokenOut", label: "Broken Out (kg)" },
+        { key: "huskOut", label: "Husk Out (kg)" },
+        { key: "branOut", label: "Bran Out (kg)" },
+        { key: "totalOut", label: "Total Output (kg)" },
+      ];
+      const filterLabel = `${stockReportFilterLabel(criteria)}\nRecords: ${rows.length}`;
+      return saveGatePassGeneratedReport({
+        title: "Production Summary Report",
+        reportKind: "production-summary",
+        filterLabel,
+        criteria: { ...criteria },
+        columns: cols.map((c) => c.label),
+        rows: rows.map((r) => cols.map((c) => String(r[c.key] ?? ""))),
+      });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to generate production summary report.");
+      return false;
+    }
+  };
+
+  const buildCompanyStockListReport = async () => {
+    const rows = (gpStockCompanies || []).map((c, i) => ({
+      sr: i + 1,
+      company: c,
+      products: gpProductsForCompany(c).join(", "),
+    }));
+    return saveGatePassGeneratedReport({
+      title: "Companies & In-Stock Products",
+      reportKind: "stock-companies",
+      filterLabel: `Total Records: ${rows.length}`,
+      criteria: { kind: "stock-companies" },
+      columns: ["Sr. No", "Company", "Products (In Stock)"],
+      rows: rows.map((r) => [String(r.sr), r.company, r.products]),
+    });
+  };
+
+  const stockGeneratedRows = (gpGeneratedList || []).filter((j) =>
+    STOCK_REPORT_KINDS.includes(String(j.reportKind || ""))
+  );
+  const gpGeneratedRows = (gpGeneratedList || []).filter((j) =>
+    String(j.reportKind || "gatepass").startsWith("gatepass")
+  );
+
   const downloadGatePassGenerated = (j, format) => {
     if (!j) return;
     const headers = Array.isArray(j.columns) ? j.columns : [];
@@ -3382,81 +3273,237 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
             {activeTab !== "ledger" && (
               <>
                 {activeTab === "stock-reports" ? (
-                  loading ? (
-                    <div className="text-sm text-gray-500">Loading stock reports...</div>
-                  ) : (
-                    <div className="space-y-6" data-tour="stock-reports">
-                      <DataTable
-                        title="Stock Snapshot"
-                        columns={stockColumns}
-                        data={stockRows}
-                        idKey="id"
-                        emptyMessage="No stock snapshot found."
-                        rowClassName={reportRowClass}
-                        showSearch={false}
-                        showFilters={false}
-                        showClearFilters={false}
-                        showExport
-                        showPrint
-                        toolbarActions={stockSnapshotToolbarActions}
-                        reportContextLines={stockReportContextLines}
-                        showRecordCount={!(embedded && activeTab === "ledger")}
-                      />
-                      <DataTable
-                        title="Stock Movement"
-                        columns={stockMovementColumns}
-                        data={stockMovementRows}
-                        idKey="id"
-                        searchPlaceholder="Search stock movement..."
-                        emptyMessage="No stock movement found."
-                        rowClassName={stockMovementRowClass}
-                        showFilters={false}
-                        showClearFilters={false}
-                        showExport
-                        showPrint
-                        showRecordCount={!(embedded && activeTab === "ledger")}
-                      />
-                    </div>
-                  )
-                ) : activeTab === "gatepass" ? (
-                  <div className="space-y-4" data-tour="gatepass-reports">
+                  <div className="space-y-4" data-tour="stock-reports">
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                            <Truck size={16} />
+                            <Package size={16} />
                           </div>
-                          <div className="text-sm font-semibold text-gray-900">Sender List</div>
+                          <div className="text-sm font-semibold text-gray-900">Stock Snapshot</div>
                         </div>
-                        <p className="mt-1 text-[11px] text-gray-500">All senders recorded in the system</p>
-                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
-                          {gpSenders.length === 0 ? (
-                            <div className="text-xs text-gray-400">No senders found.</div>
-                          ) : (
-                            gpSenders.map((s) => (
-                              <div key={s} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
-                                {s}
+                        <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
+                        <div className="mt-3 flex-1 space-y-2">
+                          <div>
+                            <label className={filterLabelClass}>Date Range</label>
+                            <select
+                              value={stkSnapCriteria.range}
+                              onChange={(e) => setStkSnapCriteria((p) => ({ ...p, range: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="all">All Dates</option>
+                              <option value="custom">From-To Date</option>
+                            </select>
+                          </div>
+                          {stkSnapCriteria.range === "custom" && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={filterLabelClass}>From</label>
+                                <input
+                                  type="date"
+                                  value={stkSnapCriteria.startDate}
+                                  onChange={(e) => setStkSnapCriteria((p) => ({ ...p, startDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
                               </div>
-                            ))
+                              <div>
+                                <label className={filterLabelClass}>To</label>
+                                <input
+                                  type="date"
+                                  value={stkSnapCriteria.endDate}
+                                  onChange={(e) => setStkSnapCriteria((p) => ({ ...p, endDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                            </div>
                           )}
+                          <div>
+                            <label className={filterLabelClass}>Company</label>
+                            <select
+                              value={stkSnapCriteria.company}
+                              onChange={(e) => setStkSnapCriteria((p) => ({ ...p, company: e.target.value, product: "" }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpStockCompanies.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Product</label>
+                            <select
+                              value={stkSnapCriteria.product}
+                              onChange={(e) => setStkSnapCriteria((p) => ({ ...p, product: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Products</option>
+                              {gpProductsForCompany(stkSnapCriteria.company).map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => generateGpListReport("senders")}
+                          onClick={() => buildStockSnapshotReport(stkSnapCriteria)}
                           className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
-                          <FileText size={14} /> Generate Senders List
+                          <FileText size={14} /> Generate Snapshot
                         </button>
                       </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <ArrowLeftRight size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Stock Movement</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
+                        <div className="mt-3 flex-1 space-y-2">
+                          <div>
+                            <label className={filterLabelClass}>Date Range</label>
+                            <select
+                              value={stkMovCriteria.range}
+                              onChange={(e) => setStkMovCriteria((p) => ({ ...p, range: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="all">All Dates</option>
+                              <option value="custom">From-To Date</option>
+                            </select>
+                          </div>
+                          {stkMovCriteria.range === "custom" && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={filterLabelClass}>From</label>
+                                <input
+                                  type="date"
+                                  value={stkMovCriteria.startDate}
+                                  onChange={(e) => setStkMovCriteria((p) => ({ ...p, startDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                              <div>
+                                <label className={filterLabelClass}>To</label>
+                                <input
+                                  type="date"
+                                  value={stkMovCriteria.endDate}
+                                  onChange={(e) => setStkMovCriteria((p) => ({ ...p, endDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <label className={filterLabelClass}>Company</label>
+                            <select
+                              value={stkMovCriteria.company}
+                              onChange={(e) => setStkMovCriteria((p) => ({ ...p, company: e.target.value, product: "" }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpStockCompanies.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className={filterLabelClass}>Product</label>
+                            <select
+                              value={stkMovCriteria.product}
+                              onChange={(e) => setStkMovCriteria((p) => ({ ...p, product: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Products</option>
+                              {gpProductsForCompany(stkMovCriteria.company).map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => buildStockMovementReport(stkMovCriteria)}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Movement
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <Factory size={16} />
                           </div>
-                          <div className="text-sm font-semibold text-gray-900">Companies (Product Owner)</div>
+                          <div className="text-sm font-semibold text-gray-900">Production Summary</div>
                         </div>
-                        <p className="mt-1 text-[11px] text-gray-500">Companies with in-stock products</p>
+                        <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
+                        <div className="mt-3 flex-1 space-y-2">
+                          <div>
+                            <label className={filterLabelClass}>Date Range</label>
+                            <select
+                              value={prodSumCriteria.range}
+                              onChange={(e) => setProdSumCriteria((p) => ({ ...p, range: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="all">All Dates</option>
+                              <option value="custom">From-To Date</option>
+                            </select>
+                          </div>
+                          {prodSumCriteria.range === "custom" && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className={filterLabelClass}>From</label>
+                                <input
+                                  type="date"
+                                  value={prodSumCriteria.startDate}
+                                  onChange={(e) => setProdSumCriteria((p) => ({ ...p, startDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                              <div>
+                                <label className={filterLabelClass}>To</label>
+                                <input
+                                  type="date"
+                                  value={prodSumCriteria.endDate}
+                                  onChange={(e) => setProdSumCriteria((p) => ({ ...p, endDate: e.target.value }))}
+                                  className={`${filterInputClass} w-full`}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <label className={filterLabelClass}>Company</label>
+                            <select
+                              value={prodSumCriteria.company}
+                              onChange={(e) => setProdSumCriteria((p) => ({ ...p, company: e.target.value }))}
+                              className={`${filterInputClass} w-full`}
+                            >
+                              <option value="">All Companies</option>
+                              {gpStockCompanies.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => buildProductionSummaryReport(prodSumCriteria)}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Summary
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Building2 size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Company Stock List</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Companies with their in-stock products</p>
                         <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
                           {gpStockCompanies.length === 0 ? (
                             <div className="text-xs text-gray-400">No companies found.</div>
@@ -3493,7 +3540,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         </div>
                         <button
                           type="button"
-                          onClick={() => generateGpListReport("companies")}
+                          onClick={() => buildCompanyStockListReport()}
                           className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Companies Report
@@ -3503,7 +3550,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                       <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                            <Factory size={16} />
+                            <PackageX size={16} />
                           </div>
                           <div className="text-sm font-semibold text-gray-900">Out of Stock Companies</div>
                         </div>
@@ -3550,35 +3597,81 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <FileText size={14} /> Generate Out Of Stock Report
                         </button>
                       </div>
+                    </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                            <UserRound size={16} />
-                          </div>
-                          <div className="text-sm font-semibold text-gray-900">Send To Companies</div>
-                        </div>
-                        <p className="mt-1 text-[11px] text-gray-500">All companies goods are sent to</p>
-                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
-                          {gpCustomers.length === 0 ? (
-                            <div className="text-xs text-gray-400">No customers found.</div>
-                          ) : (
-                            gpCustomers.map((c) => (
-                              <div key={c} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
-                                {c}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => generateGpListReport("send-to")}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
-                        >
-                          <FileText size={14} /> Generate Send To List
-                        </button>
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold text-gray-900">Generated Stock Reports</div>
+                      <div className="overflow-x-auto rounded-xl border border-gray-200">
+                        <table className="min-w-[640px] w-full text-sm">
+                          <thead className="bg-emerald-50 text-emerald-900">
+                            <tr>
+                              <th className="w-[60px] px-3 py-2 text-left font-semibold">Sr. No</th>
+                              <th className="px-3 py-2 text-left font-semibold">Report Name</th>
+                              <th className="w-[190px] px-3 py-2 text-left font-semibold">Generated At</th>
+                              <th className="w-[170px] px-3 py-2 text-left font-semibold">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {gpGeneratedLoading && (
+                              <tr>
+                                <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
+                                  Loading generated reports...
+                                </td>
+                              </tr>
+                            )}
+                            {!gpGeneratedLoading && stockGeneratedRows.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
+                                  No generated stock reports yet.
+                                </td>
+                              </tr>
+                            )}
+                            {stockGeneratedRows.map((j, idx) => (
+                              <tr key={j._id}>
+                                <td className="px-3 py-2">{idx + 1}</td>
+                                <td className="px-3 py-2">{j.name}</td>
+                                <td className="px-3 py-2">
+                                  {fmtDate(j.createdAt)}{" "}
+                                  <span className="text-gray-400">{new Date(j.createdAt).toLocaleTimeString()}</span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadGatePassGenerated(j, "pdf")}
+                                      className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                                      title="Download PDF"
+                                    >
+                                      <FileText size={13} /> PDF
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadGatePassGenerated(j, "excel")}
+                                      className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                                      title="Download Excel"
+                                    >
+                                      <Download size={13} /> Excel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openDeleteConfirm("gatepass-generated", j, j.name)}
+                                      className="rounded border border-red-200 p-1.5 text-red-700 hover:bg-red-50"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-
+                    </div>
+                  </div>
+                ) : activeTab === "gatepass" ? (
+                  <div className="space-y-4" data-tour="gatepass-reports">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                       <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
@@ -3760,6 +3853,114 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <FileText size={14} /> Generate OUT Report
                         </button>
                       </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Truck size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Sender List</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">All senders recorded in the system</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpSenders.length === 0 ? (
+                            <div className="text-xs text-gray-400">No senders found.</div>
+                          ) : (
+                            gpSenders.map((s) => (
+                              <div key={s} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
+                                {s}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("senders")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Senders List
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <Factory size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Companies (Product Owner)</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">Companies with in-stock products</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpStockCompanies.length === 0 ? (
+                            <div className="text-xs text-gray-400">No companies found.</div>
+                          ) : (
+                            gpStockCompanies.map((c) => (
+                              <div key={c} className="overflow-hidden rounded-lg border border-gray-200">
+                                <button
+                                  type="button"
+                                  onClick={() => setGpExpandedCompany(gpExpandedCompany === c ? "" : c)}
+                                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                                >
+                                  <span className="truncate">{c}</span>
+                                  <ChevronDown
+                                    size={14}
+                                    className={`shrink-0 text-gray-400 transition-transform ${gpExpandedCompany === c ? "rotate-180" : ""}`}
+                                  />
+                                </button>
+                                {gpExpandedCompany === c && (
+                                  <div className="space-y-1 border-t border-gray-100 bg-gray-50/60 px-2 py-2">
+                                    {gpProductsForCompany(c).length === 0 ? (
+                                      <div className="px-1 text-[11px] text-gray-400">No in-stock products.</div>
+                                    ) : (
+                                      gpProductsForCompany(c).map((p) => (
+                                        <div key={p} className="rounded-md px-2 py-1.5 text-[11px] text-gray-600">
+                                          {p}
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("companies")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Companies Report
+                        </button>
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                            <UserRound size={16} />
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900">Send To Companies</div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">All companies goods are sent to</p>
+                        <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+                          {gpCustomers.length === 0 ? (
+                            <div className="text-xs text-gray-400">No customers found.</div>
+                          ) : (
+                            gpCustomers.map((c) => (
+                              <div key={c} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">
+                                {c}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => generateGpListReport("send-to")}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                        >
+                          <FileText size={14} /> Generate Send To List
+                        </button>
+                      </div>
+
                     </div>
 
                     <div className="space-y-2">
@@ -3782,14 +3983,14 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                                 </td>
                               </tr>
                             )}
-                            {!gpGeneratedLoading && gpGeneratedList.length === 0 && (
+                            {!gpGeneratedLoading && gpGeneratedRows.length === 0 && (
                               <tr>
                                 <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
                                   No generated reports yet.
                                 </td>
                               </tr>
                             )}
-                            {gpGeneratedList.map((j, idx) => (
+                            {gpGeneratedRows.map((j, idx) => (
                               <tr key={j._id}>
                                 <td className="px-3 py-2">{idx + 1}</td>
                                 <td className="px-3 py-2">{j.name}</td>
