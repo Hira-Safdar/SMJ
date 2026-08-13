@@ -6438,7 +6438,7 @@ export default function AccountingFinance() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <DataTable
-              data-tour="coa-table"
+              dataTour="coa-table"
               title="Chart of Accounts"
               columns={[
                 { key: "name", label: "Account Name" },

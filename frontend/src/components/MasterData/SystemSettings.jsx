@@ -1,5 +1,6 @@
 // src/components/MasterData/SystemSettings.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import api, { toAbsoluteUrl } from "../../services/api";
 import {
   UploadCloud,
@@ -106,6 +107,7 @@ export default function SystemSettings() {
   });
 
   const [activeTab, setActiveTab] = useState("general");
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [logoFile, setLogoFile] = useState(null);
   const [pinInfoDismissed, setPinInfoDismissed] = useState(false);
@@ -205,6 +207,13 @@ export default function SystemSettings() {
     window.history.replaceState({}, "", nextUrl);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const sub = searchParams.get("sub");
+    if (sub === "general" || sub === "admin" || sub === "backup" || sub === "about") {
+      setActiveTab(sub);
+    }
+  }, [searchParams]);
 
   const updateModuleProgress = (key, patch) => {
     setModuleProgress((prev) => ({
@@ -1077,9 +1086,9 @@ export default function SystemSettings() {
           General
         </button>
         <button
-          onClick={() => setActiveTab("stock")}
+          onClick={() => setActiveTab("admin")}
           className={`flex items-center gap-2 px-4 py-2 text-sm rounded-t-lg border-b-2 transition ${
-            activeTab === "stock"
+            activeTab === "admin"
               ? "bg-emerald-50 text-emerald-700 font-semibold border-emerald-600"
               : "text-gray-500 border-transparent hover:text-emerald-600 hover:bg-emerald-50"
           }`}
@@ -1314,8 +1323,8 @@ export default function SystemSettings() {
           </div>
         )}
 
-        {/* STOCK & ADMIN TAB */}
-        {activeTab === "stock" && (
+        {/* ADMIN TAB */}
+        {activeTab === "admin" && (
           <div className="space-y-4 w-full max-w-none" data-tour="settings-admin">
             <div className="grid grid-cols-1 gap-4">
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
@@ -1782,10 +1791,10 @@ export default function SystemSettings() {
                  <div className="text-xs text-gray-500 uppercase tracking-wide">Version</div>
                  <div className="font-semibold text-gray-900 mt-1">1.0.0</div>
                </div>
-               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                 <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
-                 <div className="font-semibold text-gray-900 mt-1">7 Active</div>
-               </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
+                  <div className="font-semibold text-gray-900 mt-1">7 Modules</div>
+                </div>
              </div>
            </div>
 
@@ -1793,14 +1802,15 @@ export default function SystemSettings() {
              <div className="text-sm font-semibold text-gray-900 mb-1">Modules & Features</div>
              <p className="text-xs text-gray-500 mb-4">An overview of what each module can do.</p>
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-               {[
-                 { name: "Dashboard", icon: <Home size={16} />, features: ["Real-time KPIs", "Quick navigation", "Activity summary"] },
-                 { name: "Gate Pass", icon: <Truck size={16} />, features: ["Inward / Outward entries", "Truck & driver info", "Product weight tracking", "Freight charges"] },
-                 { name: "Stock", icon: <Warehouse size={16} />, features: ["Raw & production inventory", "Column sorting", "Filters & search", "Excel / PDF export"] },
-                 { name: "Production", icon: <Factory size={16} />, features: ["Batch creation", "Input / output tracking", "Yield calculation", "Date-wise history"] },
-                 { name: "Accounting", icon: <Calculator size={16} />, features: ["Chart of Accounts", "Daybook entries", "Journal, Ledger, Trial Balance", "Profit & Loss, Balance Sheet"] },
-                 { name: "Reports", icon: <ReceiptText size={16} />, features: ["Gate Pass reports", "Stock reports", "Production summary", "Accounting reports"] },
-               ].map((mod) => (
+                {[
+                  { name: "Dashboard", icon: <Home size={16} />, features: ["Real-time KPI cards", "Recent activities feed", "Stock summary donuts"] },
+                  { name: "Gate Pass", icon: <Truck size={16} />, features: ["Inward / Outward entries", "Sender & customer management", "Product weight & bag tracking", "Excel / PDF export"] },
+                  { name: "Stock", icon: <Warehouse size={16} />, features: ["Raw & production inventory", "Per kg / No. of Bags views", "Filters & search", "Source-wise donut charts"] },
+                  { name: "Production", icon: <Factory size={16} />, features: ["Batch creation", "Input / output tracking", "Yield calculation", "Status flow (In-Process → Done)"] },
+                  { name: "Accounting", icon: <Calculator size={16} />, features: ["Chart of Accounts with Sub-Types", "Daybook entries", "Journal, Ledger, Trial Balance", "Profit & Loss, Balance Sheet"] },
+                  { name: "Reports", icon: <ReceiptText size={16} />, features: ["Gate Pass reports", "Stock reports", "Production summary", "Accounting reports"] },
+                  { name: "System Settings", icon: <Settings2 size={16} />, features: ["Company info & logo", "Security PIN & SMTP email", "Backup & restore", "Interactive tutorial"] },
+                ].map((mod) => (
                  <div key={mod.name} className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
                    <div className="flex items-center gap-2 mb-2">
                      <div className="w-6 h-6 rounded bg-emerald-200 flex items-center justify-center text-emerald-800">{mod.icon}</div>
@@ -1822,8 +1832,8 @@ export default function SystemSettings() {
            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-sky-50 shadow-sm p-6">
              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                <div>
-                 <div className="text-sm font-semibold text-gray-900">Interactive Tutorial</div>
-                 <p className="text-xs text-gray-500 mt-1">Take a guided tour through every module. Learn key features like table sorting, filters, exports, and more.</p>
+                  <div className="text-sm font-semibold text-gray-900">Interactive Tutorial</div>
+                  <p className="text-xs text-gray-500 mt-1">A step-by-step guided tour through every module — dashboard, gate passes, stock, production, accounting, reports and settings. Use the arrow keys or Next/Prev to move between steps.</p>
                </div>
                <button
                  type="button"

@@ -1309,12 +1309,14 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "date", label: "Date", render: (v) => fmtDate(v) },
         { key: "batchNo", label: "Batch #" },
         { key: "companyName", label: "Company Name" },
-        { key: "paddyInputKg", label: "Paddy In (kg)" },
+        { key: "sourceProductTypeName", label: "Raw Material" },
+        { key: "paddyInputKg", label: "Raw Material In (kg)" },
         { key: "riceOutputKg", label: "Rice (kg)" },
         { key: "brokenOutputKg", label: "Broken (kg)" },
         { key: "huskOutputKg", label: "Husk (kg)" },
         { key: "branOutputKg", label: "Bran (kg)" },
         { key: "totalOutputKg", label: "Total Out (kg)" },
+        { key: "totalBags", label: "Bags" },
         { key: "status", label: "Status" },
       ];
     }
@@ -2766,12 +2768,15 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         date: r.date,
         company: r.companyName || "",
         batchNo: r.batchNo || "",
-        paddyIn: r.paddyInputKg,
+        rawMaterial: r.sourceProductTypeName || "",
+        sourceIn: r.paddyInputKg,
         riceOut: r.riceOutputKg,
         brokenOut: r.brokenOutputKg,
         huskOut: r.huskOutputKg,
         branOut: r.branOutputKg,
+        bags: r.totalBags,
         totalOut: r.totalOutputKg,
+        status: r.status || "-",
       }));
       if (criteria.company) {
         const needle = String(criteria.company).toLowerCase();
@@ -2781,12 +2786,15 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "date", label: "Date" },
         { key: "company", label: "Company Name" },
         { key: "batchNo", label: "Batch No" },
-        { key: "paddyIn", label: "Paddy In (kg)" },
+        { key: "rawMaterial", label: "Raw Material" },
+        { key: "sourceIn", label: "Raw Material In (kg)" },
         { key: "riceOut", label: "Rice Out (kg)" },
         { key: "brokenOut", label: "Broken Out (kg)" },
         { key: "huskOut", label: "Husk Out (kg)" },
         { key: "branOut", label: "Bran Out (kg)" },
+        { key: "bags", label: "Bags" },
         { key: "totalOut", label: "Total Output (kg)" },
+        { key: "status", label: "Status" },
       ];
       const filterLabel = `${stockReportFilterLabel(criteria)}\nRecords: ${rows.length}`;
       return saveGatePassGeneratedReport({
@@ -3275,7 +3283,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                 {activeTab === "stock-reports" ? (
                   <div className="space-y-4" data-tour="stock-reports">
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[360px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <Package size={16} />
@@ -3283,7 +3291,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="text-sm font-semibold text-gray-900">Stock Snapshot</div>
                         </div>
                         <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
-                        <div className="mt-3 flex-1 space-y-2">
+                        <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
                           <div>
                             <label className={filterLabelClass}>Date Range</label>
                             <select
@@ -3347,13 +3355,13 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <button
                           type="button"
                           onClick={() => buildStockSnapshotReport(stkSnapCriteria)}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                          className="mt-3 shrink-0 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Snapshot
                         </button>
                       </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[360px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <ArrowLeftRight size={16} />
@@ -3361,7 +3369,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="text-sm font-semibold text-gray-900">Stock Movement</div>
                         </div>
                         <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
-                        <div className="mt-3 flex-1 space-y-2">
+                        <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
                           <div>
                             <label className={filterLabelClass}>Date Range</label>
                             <select
@@ -3425,13 +3433,13 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <button
                           type="button"
                           onClick={() => buildStockMovementReport(stkMovCriteria)}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                          className="mt-3 shrink-0 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Movement
                         </button>
                       </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[360px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <Factory size={16} />
@@ -3439,7 +3447,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                           <div className="text-sm font-semibold text-gray-900">Production Summary</div>
                         </div>
                         <p className="mt-1 text-[11px] text-gray-500">Apply filters then generate</p>
-                        <div className="mt-3 flex-1 space-y-2">
+                        <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
                           <div>
                             <label className={filterLabelClass}>Date Range</label>
                             <select
@@ -3490,13 +3498,13 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <button
                           type="button"
                           onClick={() => buildProductionSummaryReport(prodSumCriteria)}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                          className="mt-3 shrink-0 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Summary
                         </button>
                       </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col min-h-[280px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[360px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <Building2 size={16} />
@@ -3541,13 +3549,13 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <button
                           type="button"
                           onClick={() => buildCompanyStockListReport()}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                          className="mt-3 shrink-0 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Companies Report
                         </button>
                       </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[380px]">
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 flex flex-col h-[360px]">
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                             <PackageX size={16} />
@@ -3592,7 +3600,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                         <button
                           type="button"
                           onClick={() => generateGpListReport("out-stock")}
-                          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
+                          className="mt-3 shrink-0 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"
                         >
                           <FileText size={14} /> Generate Out Of Stock Report
                         </button>
@@ -4038,7 +4046,7 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                 ) : (
                   <DataTable
                     title={title}
-                    data-tour="report-data-table"
+                    dataTour="report-data-table"
                     columns={columns}
                     data={rows}
                     idKey="id"

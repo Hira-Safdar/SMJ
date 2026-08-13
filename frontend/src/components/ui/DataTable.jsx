@@ -50,6 +50,7 @@ export default function DataTable({
   highlightId = "",
   highlightKey = "id",
   reportContextLines = [],
+  dataTour,
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -359,7 +360,7 @@ export default function DataTable({
   const showToolbar = showSearch || showFilters || (toolbarActions && !toolbarActionsInHeader) || hasBulkDelete;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-tour={dataTour}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="text-lg font-semibold text-gray-900">{title}</div>

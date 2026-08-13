@@ -115,13 +115,6 @@ const STEPS = [
   },
   {
     route: "/gatepass?tab=OUT",
-    target: "[data-tour='gatepass-out-payment']",
-    title: "Payment Status",
-    desc: "Mark the sale as Paid, Unpaid, or Partial. Enter the amount paid; the remaining balance is tracked here and shows on the Dashboard's Pending Payments.",
-    placement: "bottom",
-  },
-  {
-    route: "/gatepass?tab=OUT",
     target: "[data-tour='gatepass-out-submit']",
     title: "Generate Gate Pass",
     desc: "Click 'Generate Gate Pass' to save the outward entry. It appears in the records table below.",
@@ -138,9 +131,9 @@ const STEPS = [
   // ===== STOCK =====
   {
     route: "/stock",
-    target: "[data-tour='stock-tabs']",
-    title: "Stock Module Tabs",
-    desc: "Two stock views: Raw Inventory (grains/paddy in) and Production Inventory (finished rice products).",
+    target: "[data-tour='stock-view-toggle']",
+    title: "Stock View Toggle",
+    desc: "Switch between 'Per kg' and 'No. of Bags'. The summary totals and the table update to show either kilograms or bag counts.",
     placement: "bottom",
   },
   {
@@ -207,14 +200,14 @@ const STEPS = [
     route: "/accounting-finance?tab=coa",
     target: "[data-tour='coa-table']",
     title: "Chart of Accounts",
-    desc: "Your account list (Expense, Income, Accounts Payable). Tick the checkboxes to select rows, then Edit, Activate, or Deactivate accounts.",
+    desc: "Your account list (Expense, Income, Accounts Payable). Use each row's Edit, Activate, or Deactivate action to manage accounts.",
     placement: "bottom",
   },
   {
     route: "/accounting-finance?tab=coa",
     target: "[data-tour='coa-toolbar']",
     title: "Account Tools",
-    desc: "Use Filters to narrow accounts. 'Set Sub-Type' labels selected accounts in one go. 'New Account' opens the create form.",
+    desc: "Use Filters to narrow accounts by type and sub-type. 'New Account' opens the create form, and you can export or print the account list anytime.",
     placement: "bottom",
   },
   {
@@ -320,21 +313,21 @@ const STEPS = [
     placement: "bottom",
   },
   {
-    route: "/masterdata?tab=system",
+    route: "/masterdata?tab=system&sub=general",
     target: "[data-tour='settings-general']",
     title: "General Settings",
     desc: "Company name, address, phone, email, logo, and SMTP email configuration (for password/OTP emails). Save your changes at the bottom.",
     placement: "bottom",
   },
   {
-    route: "/masterdata?tab=system",
+    route: "/masterdata?tab=system&sub=admin",
     target: "[data-tour='settings-admin']",
     title: "Admin Settings",
     desc: "Set your Master PIN (4 digits). This same PIN protects login, deletions, and every protected action in the system.",
     placement: "bottom",
   },
   {
-    route: "/masterdata?tab=system",
+    route: "/masterdata?tab=system&sub=about",
     target: "[data-tour='settings-about']",
     title: "About & Help",
     desc: "System info, module overview, and the button to restart this tour anytime.",

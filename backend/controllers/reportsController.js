@@ -328,8 +328,17 @@ exports.getProductionSummaryReport = async (req, res) => {
         .filter((o) => normName(o.productTypeName).includes(needle))
         .reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0);
 
+    const pickBags = (out, needle) =>
+      (out || [])
+        .filter((o) => normName(o.productTypeName).includes(needle))
+        .reduce((s, o) => s + (Number(o.numBags) || 0), 0);
+
     const data = Array.from(byGroup.entries()).map(([key, bs]) => {
       const group = groupMap.get(key) || null;
+      const latest = [...bs].sort(
+        (a, b) =>
+          new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0)
+      )[0] || null;
       const out = (group?.outputs || []).filter((o) => {
         const d = o.outputDate ? new Date(o.outputDate) : null;
         return d && d >= start && d <= end;
@@ -340,6 +349,11 @@ exports.getProductionSummaryReport = async (req, res) => {
         batchNo: group?.groupNo || bs[0].batchNo,
         companyId: bs[0].sourceCompanyId ? String(bs[0].sourceCompanyId) : "",
         companyName: bs[0].sourceCompanyName || "",
+        sourceProductTypeName:
+          String(latest?.sourceProductTypeName || "").trim() || "Unprocessed Paddy",
+        sourceBags: Number(
+          bs.reduce((s, b) => s + (Number(b.sourceBags) || 0), 0).toFixed(0)
+        ),
         paddyInputKg: Number(
           bs.reduce((s, b) => s + (Number(b.paddyWeightKg) || 0), 0).toFixed(3)
         ),
@@ -349,6 +363,13 @@ exports.getProductionSummaryReport = async (req, res) => {
         branOutputKg: Number(pick(out, "bran").toFixed(3)),
         totalOutputKg: Number(
           (out || []).reduce((s, o) => s + (Number(o.netWeightKg) || 0), 0).toFixed(3)
+        ),
+        riceBags: Number(pickBags(out, "rice").toFixed(0)),
+        brokenBags: Number(pickBags(out, "broken").toFixed(0)),
+        huskBags: Number(pickBags(out, "husk").toFixed(0)),
+        branBags: Number(pickBags(out, "bran").toFixed(0)),
+        totalBags: Number(
+          (out || []).reduce((s, o) => s + (Number(o.numBags) || 0), 0).toFixed(0)
         ),
         status: group?.status || bs[0].status || "-",
       };

@@ -161,8 +161,8 @@ function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: 
   const chartReady = boxSize.w > 0 && boxSize.h > 0;
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 flex flex-col min-h-0 flex-1">
-      <div className="flex items-center justify-between gap-2 mb-2">
+    <div className="bg-white rounded-lg shadow p-4 flex flex-col min-h-0 h-[360px]">
+      <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
         <span className="text-sm font-semibold text-emerald-800">{title}</span>
         <select
           value={company}
@@ -179,7 +179,7 @@ function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: 
       </div>
       {data.length > 0 ? (
         <>
-          <div ref={boxRef} className="flex-1 min-h-[120px] min-w-[200px]">
+          <div ref={boxRef} className="flex-1 min-h-0 min-w-[200px] overflow-y-auto">
             {chartReady && (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -202,7 +202,7 @@ function SourceDonutChart({ title, chart = { companies: [], byCompany: {}, all: 
               </ResponsiveContainer>
             )}
           </div>
-          <div className="mt-1 text-right text-xs text-gray-500">
+          <div className="mt-1 text-right text-xs text-gray-500 shrink-0">
             Total {Math.round(total).toLocaleString()} {displayUnit}
           </div>
         </>
@@ -617,7 +617,7 @@ export default function Stock() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-8 bg-white rounded-lg shadow p-4">
            <DataTable
-             data-tour="stock-table"
+             dataTour="stock-table"
              title="Stock Inventory"
             columns={flatColumns}
             data={loading ? [] : visibleTableData}
