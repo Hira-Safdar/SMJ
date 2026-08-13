@@ -31,6 +31,9 @@ import {
   Home,
   Sprout,
   Loader2,
+  KeyRound,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Pin4Input from "../Pin4Input";
@@ -110,7 +113,6 @@ export default function SystemSettings() {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [logoFile, setLogoFile] = useState(null);
-  const [pinInfoDismissed, setPinInfoDismissed] = useState(false);
   const [showSmtpSection, setShowSmtpSection] = useState(false);
   const [backupMeta, setBackupMeta] = useState({
     automationEnabled: false,
@@ -196,7 +198,7 @@ export default function SystemSettings() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search || "");
     if (params.get("focus") !== "set-pin") return;
-    setActiveTab("general");
+    setActiveTab("admin");
     const timer = window.setTimeout(() => {
       pinSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       newPinInputRef.current?.focus();
@@ -479,72 +481,70 @@ export default function SystemSettings() {
     }
   };
 
-  const handleSaveStock = async () => {
+  const pinExists = useMemo(() => {
+    const raw = settings?.adminPin;
+    return typeof raw === "string" && raw.trim().length > 0;
+  }, [settings.adminPin]);
+
+  const handleSavePin = async (mode) => {
     setPinError("");
-    if (newPin || confirmPin || currentPin) {
-      if (!currentPin || currentPin.length < 4) {
-        setDialog({
-          open: true,
-          title: "Current PIN required",
-          message: "Enter your current admin PIN to set a new one.",
-          variant: "warning",
-          confirmLabel: "OK",
-          onConfirm: null,
-        });
-        return;
-      }
-      if (!newPin || newPin.length < 4) {
-        setDialog({
-          open: true,
-          title: "New PIN required",
-          message: "Enter a 4-digit new PIN.",
-          variant: "warning",
-          confirmLabel: "OK",
-          onConfirm: null,
-        });
-        return;
-      }
-      if (newPin !== confirmPin) {
-        setDialog({
-          open: true,
-          title: "PINs do not match",
-          message: "New PIN and Confirm PIN must be the same.",
-          variant: "warning",
-          confirmLabel: "OK",
-          onConfirm: null,
-        });
-        return;
-      }
+    const isSet = mode === "set";
+    const cur = String(currentPin || "").replace(/\D/g, "").slice(0, 4);
+    const nw = String(newPin || "").replace(/\D/g, "").slice(0, 4);
+    const cf = String(confirmPin || "").replace(/\D/g, "").slice(0, 4);
+
+    if (!isSet && cur.length !== 4) {
+      setDialog({
+        open: true,
+        title: "Current PIN required",
+        message: "Enter your current PIN to verify your identity before resetting it.",
+        variant: "warning",
+        confirmLabel: "OK",
+        onConfirm: null,
+      });
+      return;
     }
-    const payload = { ...settings };
-    delete payload.adminPin;
-    delete payload.loginPassword;
-    if (currentPin) payload.adminPin = currentPin;
-    if (newPin) {
-      payload.newAdminPin = newPin;
-      payload.loginPassword = newPin;
+    if (nw.length !== 4) {
+      setDialog({
+        open: true,
+        title: "New PIN required",
+        message: "Enter a new 4-digit PIN.",
+        variant: "warning",
+        confirmLabel: "OK",
+        onConfirm: null,
+      });
+      return;
     }
+    if (nw !== cf) {
+      setDialog({
+        open: true,
+        title: "PINs do not match",
+        message: "New PIN and Confirm PIN must be the same.",
+        variant: "warning",
+        confirmLabel: "OK",
+        onConfirm: null,
+      });
+      return;
+    }
+    const payload = {};
+    if (!isSet) payload.adminPin = cur;
+    payload.newAdminPin = nw;
+    payload.loginPassword = nw;
     setLoading(true);
     try {
       await api.put("/settings", payload);
-      toast.success("Settings saved");
+      toast.success(isSet ? "PIN set successfully" : "PIN reset successfully");
       window.dispatchEvent(new Event("smj-settings-updated"));
-      if (newPin) {
-        setSettings((prev) => ({
-          ...prev,
-          adminPin: newPin,
-          loginPassword: newPin,
-        }));
-      }
+      setSettings((prev) => ({ ...prev, adminPin: nw, loginPassword: nw }));
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
     } catch (err) {
       if (err.response?.status === 403) {
-        setPinError("PIN is incorrect");
-        toast.error("PIN is incorrect");
+        setPinError("Current PIN is incorrect");
+        toast.error("Current PIN is incorrect");
       } else {
-        toast.error("Error saving settings");
+        toast.error("Error saving PIN");
       }
     } finally {
       setLoading(false);
@@ -1094,7 +1094,7 @@ export default function SystemSettings() {
           }`}
         >
           <Shield size={16} />
-          Admin Settings
+          PIN Setup
         </button>
         <button
           onClick={() => setActiveTab("backup")}
@@ -1323,46 +1323,48 @@ export default function SystemSettings() {
           </div>
         )}
 
-        {/* ADMIN TAB */}
+        {/* PIN SETUP TAB */}
         {activeTab === "admin" && (
           <div className="space-y-4 w-full max-w-none" data-tour="settings-admin">
-            <div className="grid grid-cols-1 gap-4">
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
-                <label className="block text-xs font-medium uppercase tracking-wide text-emerald-700">Master PIN (4 digits)</label>
-                {!pinInfoDismissed && (
-                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
-                    <span className="text-xs text-emerald-800 leading-relaxed">
-                      This PIN is used for login, delete confirmations, and all protected actions.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setPinInfoDismissed(true)}
-                      className="shrink-0 p-0.5 rounded text-emerald-600 hover:text-red-600 hover:bg-red-50"
-                      title="Dismiss"
-                    >
-                      <X size={12} />
-                    </button>
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                    <Shield size={18} />
                   </div>
+                  <div>
+                    <div className="text-base font-semibold text-gray-900">PIN Setup</div>
+                    <div className="text-xs text-gray-500">Master 4-digit PIN — used for login and protected actions.</div>
+                  </div>
+                </div>
+                {pinExists ? (
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                    <CheckCircle2 size={12} /> PIN set
+                  </span>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    <AlertTriangle size={12} /> PIN not set
+                  </span>
                 )}
-                <div className="mt-4 grid grid-cols-1 gap-3">
-                <Pin4Input
-                  value={currentPin}
-                  onChange={(v) => {
-                    setCurrentPin(v.slice(0, 4));
-                    if (pinError) setPinError("");
-                  }}
-                  error={!!pinError}
-                />
-                {pinError && (
-                    <div className="text-sm text-rose-600">{pinError}</div>
-                )}
+              </div>
+            </div>
+
+            {/* STEP 1 — Set PIN (first time) */}
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">1</span>
+                <div className="text-sm font-semibold text-gray-900">Set PIN</div>
+                <span className="text-xs text-gray-400">First time only — no current PIN needed.</span>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="relative">
                   <input
                     ref={newPinInputRef}
                     type={showNewPin ? "text" : "password"}
                     inputMode="numeric"
                     maxLength="4"
-                    className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    disabled={pinExists || loading}
+                    className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-gray-100 disabled:opacity-60"
                     placeholder="New PIN (4 digits)"
                     value={newPin}
                     onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -1370,7 +1372,8 @@ export default function SystemSettings() {
                   <button
                     type="button"
                     onClick={() => setShowNewPin((s) => !s)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500"
+                    disabled={pinExists}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 disabled:opacity-50"
                   >
                     {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
@@ -1380,7 +1383,94 @@ export default function SystemSettings() {
                     type={showConfirmPin ? "text" : "password"}
                     inputMode="numeric"
                     maxLength="4"
-                    className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    disabled={pinExists || loading}
+                    className={`w-full rounded-xl border bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-gray-100 disabled:opacity-60 ${
+                      newPin && confirmPin && newPin !== confirmPin ? "border-rose-400" : "border-emerald-200"
+                    }`}
+                    placeholder="Confirm PIN"
+                    value={confirmPin}
+                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPin((s) => !s)}
+                    disabled={pinExists}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 disabled:opacity-50"
+                  >
+                    {showConfirmPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              {newPin && confirmPin && newPin !== confirmPin && (
+                <div className="mt-1 text-xs text-rose-600">PINs do not match.</div>
+              )}
+              {pinExists && (
+                <div className="mt-1 text-xs text-gray-400">A PIN is already set — use Reset PIN below to change it.</div>
+              )}
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleSavePin("set")}
+                  disabled={pinExists || loading}
+                  className="flex items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  <KeyRound size={16} /> {loading ? "Saving..." : "Set PIN"}
+                </button>
+              </div>
+            </div>
+
+            {/* STEP 2 — Reset PIN */}
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">2</span>
+                <div className="text-sm font-semibold text-gray-900">Reset PIN</div>
+                <span className="text-xs text-gray-400">Current PIN + new PIN + confirm.</span>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">Current PIN</label>
+                  <Pin4Input
+                    value={currentPin}
+                    onChange={(v) => {
+                      setCurrentPin(v.slice(0, 4));
+                      if (pinError) setPinError("");
+                    }}
+                    error={!!pinError}
+                    disabled={!pinExists || loading}
+                  />
+                  {pinError && <div className="mt-1 text-sm text-rose-600">{pinError}</div>}
+                </div>
+                <div className="relative">
+                  <label className="mb-1 block text-xs font-medium text-gray-600">New PIN</label>
+                  <input
+                    type={showNewPin ? "text" : "password"}
+                    inputMode="numeric"
+                    maxLength="4"
+                    disabled={!pinExists || loading}
+                    className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-gray-100 disabled:opacity-60"
+                    placeholder="New PIN (4 digits)"
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPin((s) => !s)}
+                    disabled={!pinExists}
+                    className="absolute right-2 top-[38px] -translate-y-1/2 text-gray-500 disabled:opacity-50"
+                  >
+                    {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <div className="relative">
+                  <label className="mb-1 block text-xs font-medium text-gray-600">Confirm PIN</label>
+                  <input
+                    type={showConfirmPin ? "text" : "password"}
+                    inputMode="numeric"
+                    maxLength="4"
+                    disabled={!pinExists || loading}
+                    className={`w-full rounded-xl border bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-gray-100 disabled:opacity-60 ${
+                      newPin && confirmPin && newPin !== confirmPin ? "border-rose-400" : "border-emerald-200"
+                    }`}
                     placeholder="Confirm New PIN"
                     value={confirmPin}
                     onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -1388,31 +1478,52 @@ export default function SystemSettings() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPin((s) => !s)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500"
+                    disabled={!pinExists}
+                    className="absolute right-2 top-[38px] -translate-y-1/2 text-gray-500 disabled:opacity-50"
                   >
                     {showConfirmPin ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOtpDialog({ open: true, sent: false, verified: false, verifying: false, channel: "email", otp: "", newPin: "", confirmPin: "", expiresIn: 0, sending: false, resetting: false, error: "" })
-                    }
-                    className="text-sm text-emerald-700 hover:underline text-left"
-                  >
-                    Forgot PIN?
+              </div>
+              {newPin && confirmPin && newPin !== confirmPin && (
+                <div className="mt-1 text-xs text-rose-600">PINs do not match.</div>
+              )}
+              {!pinExists && (
+                <div className="mt-1 text-xs text-gray-400">No PIN set yet — use Set PIN above.</div>
+              )}
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleSavePin("reset")}
+                  disabled={!pinExists || loading}
+                  className="flex items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  <RefreshCw size={16} /> {loading ? "Saving..." : "Reset PIN"}
                 </button>
-                </div>
               </div>
             </div>
-            <div className="pt-2 w-full flex justify-end">
-              <button
-                onClick={handleSaveStock}
-                disabled={loading}
-                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white flex items-center gap-2 hover:bg-emerald-700 disabled:opacity-60"
-              >
-                <Save size={16} /> {loading ? "Saving..." : "Save Admin Settings"}
-              </button>
+
+            {/* STEP 3 — Forgot PIN */}
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">3</span>
+                <div className="text-sm font-semibold text-gray-900">Forgot PIN</div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                {settings.email ? `An OTP is sent to ${maskEmail(settings.email)}.` : "No email configured — add one in General Settings first."}
+              </p>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOtpDialog({ open: true, sent: false, verified: false, verifying: false, channel: "email", otp: "", newPin: "", confirmPin: "", expiresIn: 0, sending: false, resetting: false, error: "" })
+                  }
+                  disabled={!settings.email}
+                  className="flex items-center gap-2 rounded-lg border border-amber-500 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+                >
+                  <Mail size={16} /> Reset via Email OTP
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1809,7 +1920,7 @@ export default function SystemSettings() {
                   { name: "Production", icon: <Factory size={16} />, features: ["Batch creation", "Input / output tracking", "Yield calculation", "Status flow (In-Process → Done)"] },
                   { name: "Accounting", icon: <Calculator size={16} />, features: ["Chart of Accounts with Sub-Types", "Daybook entries", "Journal, Ledger, Trial Balance", "Profit & Loss, Balance Sheet"] },
                   { name: "Reports", icon: <ReceiptText size={16} />, features: ["Gate Pass reports", "Stock reports", "Production summary", "Accounting reports"] },
-                  { name: "System Settings", icon: <Settings2 size={16} />, features: ["Company info & logo", "Security PIN & SMTP email", "Backup & restore", "Interactive tutorial"] },
+                  { name: "System Settings", icon: <Settings2 size={16} />, features: ["Company info & logo", "PIN setup (set / change / forgot)", "Backup & restore", "Interactive tutorial"] },
                 ].map((mod) => (
                  <div key={mod.name} className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
                    <div className="flex items-center gap-2 mb-2">

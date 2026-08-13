@@ -21,6 +21,7 @@ import {
   Building2,
 } from "lucide-react";
 import DataTable from "../components/ui/DataTable";
+import ProductionSummaryReport from "../components/reports/ProductionSummaryReport";
 import api, { toAbsoluteUrl } from "../services/api";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -646,7 +647,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
       "stock-reports",
       "stock",
       "stock-movement",
-      "production-summary",
     ].includes(activeTab);
     if (isInventoryReport) {
       if (invCompanyIds.length) p.companyIds = invCompanyIds.join(",");
@@ -702,13 +702,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         return;
       }
       if (activeTab === "production-summary") {
-        const res = await api.get("/reports/production-summary", params);
-        setRows(
-          (res.data?.data || []).map((r) => ({
-            id: r._id,
-            ...r,
-          }))
-        );
+        // Production Summary tab is rendered by the dedicated report component.
+        setRows([]);
         return;
       }
       if (activeTab === "gatepass") {
@@ -1302,22 +1297,6 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
         { key: "stockOutKg", label: "Stock Out (kg)" },
         { key: "reference", label: "Reference", render: (_v, row) => renderMovementReference(row) },
         { key: "remarks", label: "Remarks" },
-      ];
-    }
-    if (activeTab === "production-summary") {
-      return [
-        { key: "date", label: "Date", render: (v) => fmtDate(v) },
-        { key: "batchNo", label: "Batch #" },
-        { key: "companyName", label: "Company Name" },
-        { key: "sourceProductTypeName", label: "Raw Material" },
-        { key: "paddyInputKg", label: "Raw Material In (kg)" },
-        { key: "riceOutputKg", label: "Rice (kg)" },
-        { key: "brokenOutputKg", label: "Broken (kg)" },
-        { key: "huskOutputKg", label: "Husk (kg)" },
-        { key: "branOutputKg", label: "Bran (kg)" },
-        { key: "totalOutputKg", label: "Total Out (kg)" },
-        { key: "totalBags", label: "Bags" },
-        { key: "status", label: "Status" },
       ];
     }
     if (activeTab === "gatepass") {
@@ -4041,6 +4020,8 @@ export default function Reports({ embedded = false, initialTab = "", allowedTabs
                       </div>
                     </div>
                   </div>
+                ) : activeTab === "production-summary" ? (
+                  <ProductionSummaryReport api={api} companies={invCompanies} />
                 ) : loading ? (
                   <div className="text-sm text-gray-500">Loading {title.toLowerCase()}...</div>
                 ) : (

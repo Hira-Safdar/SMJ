@@ -293,7 +293,7 @@ const STEPS = [
     route: "/reports?tab=production-summary",
     target: "[data-tour='report-data-table']",
     title: "Production Summary Report",
-    desc: "Batch-wise production summary — paddy in, rice/broken/husk/bran output, totals and status. Export and print available.",
+    desc: "Full production report — one section per batch with its sub-batches, raw material in, products produced with yield %, leftover raw material and a movements timeline. Filter by company and date, then Print.",
     placement: "bottom",
   },
   {
@@ -322,8 +322,8 @@ const STEPS = [
   {
     route: "/masterdata?tab=system&sub=admin",
     target: "[data-tour='settings-admin']",
-    title: "Admin Settings",
-    desc: "Set your Master PIN (4 digits). This same PIN protects login, deletions, and every protected action in the system.",
+    title: "PIN Setup",
+    desc: "Three cards: 1) Set PIN — first time only, just enter and confirm. 2) Reset PIN — verify your current PIN, then enter the new one. 3) Forgot PIN — reset through an email OTP. The PIN protects login, deletions, and protected actions.",
     placement: "bottom",
   },
   {

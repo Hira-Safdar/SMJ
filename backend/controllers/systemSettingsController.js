@@ -656,12 +656,16 @@ exports.saveSettings = async (req, res) => {
       newAdminPin !== null;
     if (needsPin) {
       const settings = await SystemSettings.findOne({}).select("adminPin").lean();
-      const expectedPin = (settings && settings.adminPin) || "0000";
-      if (!adminPin || adminPin !== String(expectedPin).trim()) {
-        return res.status(403).json({
-          success: false,
-          message: "Invalid or missing admin PIN. Required to change these settings.",
-        });
+      const hasPin = !!(settings && String(settings.adminPin || "").trim());
+      // First-time setup: when no PIN is configured yet, the initial PIN can be
+      // chosen freely. Otherwise the current PIN must match the stored one.
+      if (hasPin) {
+        if (!adminPin || adminPin !== String(settings.adminPin).trim()) {
+          return res.status(403).json({
+            success: false,
+            message: "Invalid or missing admin PIN. Required to change these settings.",
+          });
+        }
       }
     }
 
@@ -1518,3 +1522,4 @@ exports.resetPinWithOtp = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
