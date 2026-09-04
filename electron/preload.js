@@ -15,4 +15,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // System
   getSystemInfo: () => ipcRenderer.invoke("get-system-info"),
+
+  // ─── App Update Support ────────────────────────────────────────────
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  downloadUpdate: () => ipcRenderer.invoke("download-update"),
+  quitAndInstall: () => ipcRenderer.invoke("quit-and-install"),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("update-status", listener);
+    return () => ipcRenderer.removeListener("update-status", listener);
+  },
 });

@@ -1067,6 +1067,13 @@ exports.restoreBackup = async (req, res) => {
       },
     });
   } catch (err) {
+    const errLog = `[${new Date().toISOString()}] RESTORE FAILED: ${err.message}\n${err.stack || ""}\n`;
+    try {
+      const logDir = path.join(os.homedir(), "AppData", "Roaming", "smj");
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(path.join(logDir, "restore-error.log"), errLog);
+    } catch (_) {}
+    console.error("RESTORE ERROR:", err);
     backupService.endRestore({ success: false, message: err.message });
     cleanupFile(filePath);
     res.status(500).json({ success: false, message: err.message });

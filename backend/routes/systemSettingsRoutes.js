@@ -26,15 +26,20 @@ const {
   testSmtp,
 } = require("../controllers/systemSettingsController");
 
+const os = require("os");
+const _fs = require("fs");
 const uploadsDir = path.join(__dirname, "../uploads");
-if (!require("fs").existsSync(uploadsDir)) {
-  require("fs").mkdirSync(uploadsDir, { recursive: true });
+const writableUploadsDir = uploadsDir.includes("app.asar")
+  ? path.join(os.homedir(), "AppData", "Roaming", "smj", "uploads")
+  : uploadsDir;
+if (!_fs.existsSync(writableUploadsDir)) {
+  _fs.mkdirSync(writableUploadsDir, { recursive: true });
 }
 
 // Multer storage config for logo uploads
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, writableUploadsDir);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -46,7 +51,7 @@ const logoStorage = multer.diskStorage({
 // Multer storage config for restore files
 const restoreStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, writableUploadsDir);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || ".json";

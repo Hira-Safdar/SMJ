@@ -111,6 +111,8 @@ export default function SystemSettings() {
 
   const [activeTab, setActiveTab] = useState("general");
   const [searchParams] = useSearchParams();
+  const isElectronDesktop =
+    typeof window !== "undefined" && !!window.electronAPI?.getSystemInfo;
   const [loading, setLoading] = useState(false);
   const [logoFile, setLogoFile] = useState(null);
   const [showSmtpSection, setShowSmtpSection] = useState(false);
@@ -143,6 +145,9 @@ export default function SystemSettings() {
     busy: false,
     error: "",
   });
+  const [systemInfo, setSystemInfo] = useState(null);
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -209,6 +214,45 @@ export default function SystemSettings() {
     window.history.replaceState({}, "", nextUrl);
     return () => window.clearTimeout(timer);
   }, []);
+
+  // Load app version + subscribe to updater events (desktop only)
+  useEffect(() => {
+    if (!isElectronDesktop) return undefined;
+    window.electronAPI
+      .getSystemInfo()
+      .then((info) => setSystemInfo(info || {}))
+      .catch(() => setSystemInfo({}));
+    const cleanup = window.electronAPI.onUpdateStatus((s) => {
+      setUpdateStatus(s);
+      setUpdateBusy(false);
+      if (s.type === "error") toast.error(s.message || "Update check failed");
+    });
+    return cleanup;
+  }, [isElectronDesktop]);
+
+  const handleUpdateClick = async () => {
+    if (!isElectronDesktop || updateBusy) return;
+    setUpdateBusy(true);
+    try {
+      if (updateStatus?.type === "downloaded") {
+        await window.electronAPI.quitAndInstall();
+        return;
+      }
+      if (updateStatus?.type === "available") {
+        await window.electronAPI.downloadUpdate();
+        return;
+      }
+      setUpdateStatus({ type: "checking" });
+      const res = await window.electronAPI.checkForUpdates();
+      if (res && res.ok === false) {
+        setUpdateStatus({ type: "error", message: res.error });
+        setUpdateBusy(false);
+      }
+    } catch (err) {
+      setUpdateStatus({ type: "error", message: String(err) });
+      setUpdateBusy(false);
+    }
+  };
 
   useEffect(() => {
     const sub = searchParams.get("sub");
@@ -1897,17 +1941,64 @@ export default function SystemSettings() {
                  <div className="text-xs text-gray-500">Production & Business Management System</div>
                </div>
              </div>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                 <div className="text-xs text-gray-500 uppercase tracking-wide">Version</div>
-                 <div className="font-semibold text-gray-900 mt-1">1.0.0</div>
-               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
-                  <div className="font-semibold text-gray-900 mt-1">7 Modules</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Version</div>
+                  <div className="font-semibold text-gray-900 mt-1">
+                    {systemInfo?.appVersion || "1.0.0"}
+                  </div>
                 </div>
-             </div>
-           </div>
+                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                   <div className="text-xs text-gray-500 uppercase tracking-wide">Modules</div>
+                   <div className="font-semibold text-gray-900 mt-1">7 Modules</div>
+                 </div>
+              </div>
+
+              {/* UPDATE SECTION */}
+              <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-emerald-900 flex items-center gap-2">
+                      {updateStatus?.type === "available" && <Download size={16} />}
+                      {updateStatus?.type === "downloaded" && <CheckCircle2 size={16} />}
+                      {updateStatus?.type === "downloading" && <Loader2 size={16} className="animate-spin" />}
+                      {(updateStatus?.type === "not-available" || updateStatus?.type === "error") && <RefreshCw size={16} />}
+                      {!updateStatus && <RefreshCw size={16} />}
+                      App Update
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      {updateStatus?.type === "checking" && "Checking for updates..."}
+                      {updateStatus?.type === "available" && `New version v${updateStatus.version} is available`}
+                      {updateStatus?.type === "not-available" && "You are on the latest version"}
+                      {updateStatus?.type === "downloading" && `Downloading update... ${updateStatus.percent || 0}%`}
+                      {updateStatus?.type === "downloaded" && `Update v${updateStatus.version} ready to install`}
+                      {updateStatus?.type === "error" && "Could not check for updates. Make sure you are online."}
+                      {!updateStatus && "Check GitHub Releases for a newer version."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={updateBusy || updateStatus?.type === "downloading"}
+                    onClick={handleUpdateClick}
+                    className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {updateBusy || updateStatus?.type === "downloading" ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : updateStatus?.type === "downloaded" ? (
+                      <RotateCcw size={16} />
+                    ) : updateStatus?.type === "available" ? (
+                      <Download size={16} />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
+                    {updateStatus?.type === "downloaded" ? "Restart & Update" : updateStatus?.type === "available" ? "Download Update" : "Check for Update"}
+                  </button>
+                </div>
+                {!isElectronDesktop && (
+                  <p className="mt-2 text-xs text-amber-600">Updating is only available in the installed desktop app.</p>
+                )}
+              </div>
+            </div>
 
            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
              <div className="text-sm font-semibold text-gray-900 mb-1">Modules & Features</div>

@@ -4,8 +4,12 @@
 // decoupled from the collection definitions.
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
-const DEFAULT_BACKUP_FOLDER = path.join(__dirname, "../backups");
+const _defaultBackup = path.join(__dirname, "../backups");
+const DEFAULT_BACKUP_FOLDER = _defaultBackup.includes("app.asar")
+  ? path.join(os.homedir(), "AppData", "Roaming", "smj", "backups")
+  : _defaultBackup;
 
 const progressState = {
   running: false,

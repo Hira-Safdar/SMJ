@@ -4,8 +4,13 @@ const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
 const http = require("http");
+const { autoUpdater } = require("electron-updater");
 
 const appVersion = require("../package.json").version;
+
+// Don't run autoUpdater when running from source / dev mode
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
 
 // ─── FULL DIAGNOSTIC LOGGING ────────────────────────────────────────
 const logFile = path.join(app.getPath("userData"), "smj-debug.log");
@@ -42,24 +47,77 @@ function isMongoDBRunning() {
   }
 }
 
+// Windows service names that have been used by MongoDB installers.
+const MONGO_SERVICE_NAMES = [
+  "MongoDB",
+  "MongoDB Server",
+  "MongoDB Community Server",
+  "mongodb",
+];
+
+function runCmd(cmd) {
+  try {
+    return execSync(cmd, { stdio: "ignore", timeout: 12000 }).toString().trim();
+  } catch (_err) {
+    return "";
+  }
+}
+
+// Find the name of the installed MongoDB service (if any).
+function findMongoServiceName() {
+  for (const name of MONGO_SERVICE_NAMES) {
+    const out = runCmd(`sc query "${name}"`);
+    if (out && /SERVICE_NAME/.test(out)) return name;
+  }
+  return null;
+}
+
 async function ensureMongoDB() {
   fullLog("[MongoDB] Checking if MongoDB is running...");
   const running = await isMongoDBRunning();
   fullLog(`[MongoDB] Running: ${running}`);
-  if (running) return true;
+  if (running) return { ok: true, serviceName: null };
 
-  fullLog("[MongoDB] Attempting to start MongoDB service...");
-  try {
-    execSync("net start MongoDB", { stdio: "ignore", timeout: 10000 });
+  // MongoDB is not reachable. Look for its Windows service and try to start it.
+  const serviceName = findMongoServiceName();
+  fullLog(`[MongoDB] Installed service found: ${serviceName || "none"}`);
+
+  if (serviceName) {
+    fullLog(`[MongoDB] Attempting to start service "${serviceName}"...`);
+    // net start first (works when the app has admin rights).
+    runCmd(`net start "${serviceName}"`);
     await new Promise((r) => setTimeout(r, 3000));
-    const ok = await isMongoDBRunning();
-    fullLog(`[MongoDB] After service start, running: ${ok}`);
-    if (ok) return true;
-  } catch (err) {
-    fullLog(`[MongoDB] Service start failed: ${err.message}`);
+    if (await isMongoDBRunning()) {
+      fullLog("[MongoDB] Service started via net start, MongoDB is up.");
+      return { ok: true, serviceName };
+    }
+    // Fallback: try PowerShell Start-Service (handles localized systems better).
+    fullLog("[MongoDB] Trying Start-Service fallback...");
+    try {
+      execSync(
+        `powershell -NoProfile -Command "Start-Service -Name '${serviceName}'"`,
+        { stdio: "ignore", timeout: 15000 }
+      );
+    } catch (_e) {}
+    await new Promise((r) => setTimeout(r, 3000));
+    if (await isMongoDBRunning()) {
+      fullLog("[MongoDB] Service started via Start-Service, MongoDB is up.");
+      return { ok: true, serviceName };
+    }
+    return {
+      ok: false,
+      serviceName,
+      installed: true,
+      reason: "MongoDB is installed but its service could not be started (usually needs Administrator rights).",
+    };
   }
 
-  return false;
+  return {
+    ok: false,
+    serviceName: null,
+    installed: false,
+    reason: "MongoDB is not running and no MongoDB service was found.",
+  };
 }
 
 // ─── Server Health Check ─────────────────────────────────────────────
@@ -234,6 +292,70 @@ ipcMain.handle("pick-backup-folder", async () => {
   return result.filePaths[0];
 });
 
+// ─── App Updater (GitHub Releases) ───────────────────────────────────
+function sendUpdateStatus(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-status", status);
+  }
+}
+
+autoUpdater.on("checking-for-update", () => {
+  fullLog("[Updater] Checking for update...");
+  sendUpdateStatus({ type: "checking" });
+});
+autoUpdater.on("update-available", (info) => {
+  fullLog(`[Updater] Update available: v${info.version}`);
+  sendUpdateStatus({ type: "available", version: info.version });
+});
+autoUpdater.on("update-not-available", (info) => {
+  fullLog("[Updater] No update available (already latest).");
+  sendUpdateStatus({ type: "not-available", version: info.version });
+});
+autoUpdater.on("download-progress", (progress) => {
+  sendUpdateStatus({
+    type: "downloading",
+    percent: Math.round(progress.percent),
+    transferred: progress.transferred,
+    total: progress.total,
+  });
+});
+autoUpdater.on("update-downloaded", (info) => {
+  fullLog(`[Updater] Update downloaded: v${info.version}`);
+  sendUpdateStatus({ type: "downloaded", version: info.version });
+});
+autoUpdater.on("error", (err) => {
+  const msg = (err && err.message ? err.message : String(err)) || "";
+  fullLog(`[Updater] Error: ${msg}`);
+  // 404 generally means no release published yet -> tell user app is up to date
+  if (/404/.test(msg) || /not found/i.test(msg)) {
+    sendUpdateStatus({ type: "not-available", version: appVersion, reason: "no-release" });
+  } else {
+    sendUpdateStatus({ type: "error", message: msg });
+  }
+});
+
+ipcMain.handle("check-for-updates", async () => {
+  try {
+    // Only works in a packaged app, harmless in dev
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+ipcMain.handle("download-update", async () => {
+  try {
+    autoUpdater.downloadUpdate();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+ipcMain.handle("quit-and-install", () => {
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});
+
 // ─── App Lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {
   fullLog("[Lifecycle] app.whenReady triggered");
@@ -246,15 +368,13 @@ app.whenReady().then(async () => {
   fullLog(`[Env] envPath: ${envPath} (exists: ${fs.existsSync(envPath)})`);
   fullLog(`[Env] envPathUnpacked: ${envPathUnpacked} (exists: ${fs.existsSync(envPathUnpacked)})`);
 
-  const mongoOk = await ensureMongoDB();
-  fullLog(`[Lifecycle] MongoDB OK: ${mongoOk}`);
-  if (!mongoOk) {
-    dialog.showErrorBox(
-      "MongoDB Required",
-      "MongoDB is not running. Please install MongoDB Community Server from:\n\n" +
-        "https://www.mongodb.com/try/download/community\n\n" +
-        "After installing, restart this application."
-    );
+  const mongo = await ensureMongoDB();
+  fullLog(`[Lifecycle] MongoDB OK: ${mongo.ok}`);
+  if (!mongo.ok) {
+    const detail = mongo.installed
+      ? `MongoDB is installed, but its service (${mongo.serviceName}) is not running.\n\nFix it: open Services (Win+R → services.msc), find "${mongo.serviceName}", right-click → Start.\n\nTip: if starting fails with "Access is denied", close this app and run it as Administrator.`
+      : "MongoDB is not running on this PC.\n\nIf MongoDB is already installed:\n  • Open Services (Win+R → services.msc) and start the \"MongoDB\" service.\n  • Or run this app as Administrator so it can start the service for you.\n\nIf it is not installed, install MongoDB Community Server from:\nhttps://www.mongodb.com/try/download/community\n\nThen relaunch this app.";
+    dialog.showErrorBox("MongoDB Required", detail);
     app.quit();
     return;
   }

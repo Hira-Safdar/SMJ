@@ -31,6 +31,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
+    "electron-updater": "^6.8.9",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.0.0",
@@ -44,13 +45,20 @@
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "electron-updater": "^6.8.9"
   },
   "build": {
     "appId": "com.smj.ricemill",
     "productName": "SMJ Rice Mill",
     "directories": {
       "output": "C:\\smj-electron-build"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Hira-Safdar",
+      "repo": "SMJ",
+      "private": false
     },
     "files": [
       "backend/**/*",
@@ -68,7 +76,12 @@
       ".env"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "frontend/public/logo-256.png"
     },
     "nsis": {
@@ -79,9 +92,5 @@
       "uninstallerIcon": "frontend/public/logo.ico",
       "installerHeaderIcon": "frontend/public/logo.ico"
     }
-  },
-  "allowScripts": {
-    "electron@33.4.11": true,
-    "core-js@3.48.0": true
   }
 }
