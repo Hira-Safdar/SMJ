@@ -7,6 +7,7 @@ import Sidebar from "../components/Sidebar";
 import GuidedTour from "../components/GuidedTour";
 import api, { toAbsoluteUrl } from "../services/api";
 import Pin4Input from "../components/Pin4Input";
+import WhatsNewModal from "../components/WhatsNewModal";
 
 export default function MainLayout({ children }) {
   const OTP_RESEND_SECONDS = 45;
@@ -470,6 +471,7 @@ export default function MainLayout({ children }) {
     <div className="min-h-screen bg-gray-50 overflow-hidden">
       <Toaster position="top-center" />
       <GuidedTour />
+      <WhatsNewModal />
       {!authLocked && (
         <>
       {/* Sidebar */}

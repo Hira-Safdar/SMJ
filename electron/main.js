@@ -321,6 +321,15 @@ autoUpdater.on("download-progress", (progress) => {
 });
 autoUpdater.on("update-downloaded", (info) => {
   fullLog(`[Updater] Update downloaded: v${info.version}`);
+  // Remember release notes so we can show a "What's New" popup after install
+  try {
+    const notes = info.releaseNotes;
+    const notesFile = path.join(app.getPath("userData"), "pending-update-notes.json");
+    fs.writeFileSync(notesFile, JSON.stringify({ version: info.version, notes: notes || "" }));
+    fullLog(`[Updater] Saved release notes to ${notesFile}`);
+  } catch (err) {
+    fullLog(`[Updater] Could not save release notes: ${err.message}`);
+  }
   sendUpdateStatus({ type: "downloaded", version: info.version });
 });
 autoUpdater.on("error", (err) => {
@@ -354,6 +363,21 @@ ipcMain.handle("download-update", async () => {
 ipcMain.handle("quit-and-install", () => {
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };
+});
+
+// Return release notes saved for the freshly-installed update, then clear them.
+ipcMain.handle("get-pending-update-notes", () => {
+  const notesFile = path.join(app.getPath("userData"), "pending-update-notes.json");
+  try {
+    if (!fs.existsSync(notesFile)) return null;
+    const data = JSON.parse(fs.readFileSync(notesFile, "utf8"));
+    fs.unlinkSync(notesFile);
+    return { version: data.version, notes: data.notes || "" };
+  } catch (err) {
+    fullLog(`[Updater] Read pending notes error: ${err.message}`);
+    try { fs.unlinkSync(notesFile); } catch (_) {}
+    return null;
+  }
 });
 
 // ─── App Lifecycle ───────────────────────────────────────────────────
